@@ -124,7 +124,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true }
+local SIGNALS = { Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
@@ -207,6 +207,8 @@ UIS._sig.InputBegan = Signal.new()
 SIGNALS.InputBegan = true
 function Inst.IsKeyDown(_, k) return held[k.Name] == true end
 function Inst.GetFocusedTextBox() return nil end
+function Inst.IsFocused() return false end
+function Inst.SetActive(o, on) o._p.ActiveState = on end
 
 local RunService = svc("RunService")
 SIGNALS.Heartbeat = true
@@ -300,7 +302,7 @@ local mouse = newInst("PluginMouse")
 mouse.X, mouse.Y = 600, 400
 MOCK.mouse = mouse
 function Inst.CreateToolbar() return newInst("Toolbar") end
-function Inst.CreateButton() return newInst("ToolbarButton") end
+function Inst.CreateButton() local b = newInst("ToolbarButton") MOCK.toolbarButton = b return b end
 function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") end
 function Inst.GetMouse() return mouse end
 function Inst.Activate(o) o._p.Active = true end

@@ -22,9 +22,14 @@ Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow M
 
 ## Use
 
-1. Open the panel from the ROBLENDER toolbar button and add a shape (Cube, Plane, Grid, Cylinder, Sphere, Circle).
-2. With the part selected, press **Tab** (or click **Edit**) to start editing it.
-3. Press **Tab** again when you're done.
+1. Click the **ROBLENDER** button in the Plugins tab. The 3D view turns into a Blender-style screen with:
+   - a header: mode dropdown, View / Select / Add / Mesh menus, vertex / edge / face buttons, X-Ray
+   - a tool strip down the left
+   - the N sidebar, where you can type locations and sizes
+   - stats in the top-left
+   - a hint bar along the bottom
+2. Press **Shift A** to add a mesh. Select it and press **Tab** for Edit Mode.
+3. Click the button again to close the screen.
 
 | Key | What it does |
 |---|---|
@@ -40,6 +45,8 @@ Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow M
 | M | Merge at the centre |
 | F | Fill |
 | Alt+Z | X-ray |
+| Shift A | Add menu. In Edit Mode it adds into the mesh. |
+| N / T | Sidebar / tool strip |
 | Ctrl+Z | Undo. Every edit is one Studio undo step. |
 
 Studio's own camera keys (W A S D Q E) still move the camera, so tap those keys quickly. The panel buttons do the same jobs.
@@ -58,7 +65,8 @@ Roblox doesn't yet save meshes that a plugin makes into the place file. To keep 
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
-| `src/Main.server.lua` | The plugin: panel, picking, the selection cage, and the modal tools. |
+| `src/UI.lua` | The Blender-style screen: header, menus, tool strip, sidebar, status bar. |
+| `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
 
 ## Licence

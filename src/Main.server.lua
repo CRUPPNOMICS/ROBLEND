@@ -15,11 +15,12 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.1.0"
+local VERSION = "0.2.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
 local Display = require(script.Display)
+local UI = require(script.UI)
 
 local Selection = game:GetService("Selection")
 local UIS = game:GetService("UserInputService")
@@ -47,13 +48,14 @@ local lastWritten = nil
 local dirtyMesh, dirtyCage, lastBuild = false, false, 0
 local worldTris = nil    -- cache for picking
 local dataConn = nil
+local ui = nil            -- the Blender-style screen (UI.lua)
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
-local btnMain = toolbar:CreateButton(NAME, "Open the " .. NAME .. " panel (free, open source)", "rbxassetid://0", NAME)
+local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - Blender-style mesh editing (free, open source)", "rbxassetid://0", NAME)
+btnMain.ClickableWhenViewportHidden = true
 local widget = plugin:CreateDockWidgetPluginGui(NAME .. "_Panel", DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 270, 520, 230, 300))
 widget.Title = NAME .. " " .. VERSION
-btnMain.Click:Connect(function() widget.Enabled = not widget.Enabled end)
 
 local scroll = Instance.new("ScrollingFrame")
 scroll.Size = UDim2.fromScale(1, 1)
@@ -114,7 +116,8 @@ end
 label(NAME .. " " .. VERSION, 16, Color3.fromRGB(255, 170, 80))
 label("Free + open source mesh editor (GPL). Mesh engine converted from Blender. Not made by the Blender Foundation.", 10, Color3.fromRGB(150, 155, 170))
 local status = label("Add a shape, or click a " .. NAME .. " part and press Tab.", 12, Color3.fromRGB(140, 220, 255))
-local function setStatus(t) status.Text = t end
+local lastStatus = ""
+local function setStatus(t) status.Text = t lastStatus = t if ui then ui:setReport(t) end end
 
 -- ===== saving on the part =====
 local function isRB(p) return p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") ~= nil end
@@ -460,15 +463,39 @@ local function spawnPoint()
 	local p = res and res.Position or (cam.CFrame.Position + cam.CFrame.LookVector * 20)
 	return V3(math.floor(p.X + 0.5), math.floor(p.Y + 0.5), math.floor(p.Z + 0.5))
 end
-local function addShape(kind)
-	if editing then exitEdit() end
-	local m = BMesh.new()
+local function primitive(m, kind)
 	if kind == "Cube" then Ops.cube(m, 4)
 	elseif kind == "Plane" then Ops.plane(m, 4)
 	elseif kind == "Grid" then Ops.grid(m, 6, 6, 6)
 	elseif kind == "Circle" then Ops.circle(m, 32, 2)
 	elseif kind == "Cylinder" then Ops.cylinder(m, 24, 2, 4)
 	elseif kind == "Sphere" then Ops.uvSphere(m, 24, 12, 2) end
+end
+local function addShape(kind)
+	if editing and bm and not modal then
+		-- edit mode: add into this mesh, at its middle, and select just the new part (like Blender)
+		local old = {}
+		for v in pairs(bm.verts) do old[v] = true end
+		local c = (bm.nv > 0) and Display.bounds(bm) or V3()
+		primitive(bm, kind)
+		clearSel()
+		for v in pairs(bm.verts) do if not old[v] then v.co += c v.sel = true end end
+		for e in pairs(bm.edges) do e.sel = e.v1.sel and e.v2.sel end
+		for f in pairs(bm.faces) do
+			local all = true
+			for _, v in ipairs(BMesh.faceVerts(f)) do if not v.sel then all = false break end end
+			f.sel = all
+		end
+		bm:normalsUpdate()
+		flush()
+		worldTris = nil
+		commit("Add " .. kind)
+		setStatus("Added a " .. kind .. " to the mesh (it's selected - G to move it).")
+		return
+	end
+	if editing then exitEdit() end
+	local m = BMesh.new()
+	primitive(m, kind)
 	local mp, c, err = Display.build(m)
 	if not mp then
 		setStatus("Couldn't make the mesh: " .. tostring(err) .. "  (Game Settings > Security > allow Mesh / Image APIs, then try again)")
@@ -836,7 +863,10 @@ function Tools.subdivide()
 	if n == 0 then setStatus("Pick faces to subdivide.") return end
 	local nf = Ops.subdivideFaces(bm, fs)
 	clearSel()
-	for f in pairs(nf) do f.sel = true end
+	for f in pairs(nf) do
+		f.sel = true
+		for _, l in ipairs(BMesh.faceLoops(f)) do l.v.sel = true l.e.sel = true end
+	end
 	flush()
 	worldTris = nil
 	commit("Subdivide")
@@ -926,10 +956,111 @@ button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
 label("SAVING: the mesh is kept on the part and comes back when you edit it. Roblox doesn't save plugin-made meshes into the place yet - use Bake to parts (normal parts) or Export .obj (3D Importer) to keep it for good.", 10, Color3.fromRGB(255, 200, 120))
 
+-- ===== the Blender-style screen (UI.lua) =====
+local function toggleXray() xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off")) end
+local function toggleEdit()
+	if editing then exitEdit() else enterEdit(Selection:Get()[1]) end
+end
+local function needEdit(fn)
+	return function()
+		if not editing then setStatus("Tab into Edit Mode on a " .. NAME .. " part first.") return end
+		if modal then return end
+		fn()
+	end
+end
+local TOOL = {
+	G = needEdit(function() startTransform("G") end),
+	R = needEdit(function() startTransform("R") end),
+	S = needEdit(function() startTransform("S") end),
+	Extrude = needEdit(Tools.extrude), Inset = needEdit(Tools.inset), LoopCut = needEdit(Tools.loopCut),
+	Subdivide = needEdit(Tools.subdivide), Merge = needEdit(Tools.merge), MergeDist = needEdit(Tools.mergeDist),
+	Fill = needEdit(Tools.fill), Delete = needEdit(Tools.delete), Flip = needEdit(Tools.flip),
+	SelectAll = needEdit(function() clearSel() for v in pairs(bm.verts) do v.sel = true end for e in pairs(bm.edges) do e.sel = true end for f in pairs(bm.faces) do f.sel = true end flush() dirtyCage, dirtyMesh = true, true end),
+	SelectNone = needEdit(function() clearSel() flush() dirtyCage, dirtyMesh = true, true end),
+	Invert = needEdit(Tools.invert),
+	Bake = Tools.bake, Export = Tools.exportOBJ,
+}
+TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
+local function selectedPart()
+	local p = (editing and obj) or Selection:Get()[1]
+	if p and p:IsA("BasePart") then return p end
+	return nil
+end
+local api = {}
+function api.state()
+	local st = { editing = editing, mode = mode, xray = xray, modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus }
+	local p = selectedPart()
+	if p then st.objName = p.Name st.isRB = isRB(p) end
+	if editing and bm then
+		local s = { v = bm.nv, e = bm.ne, f = bm.nf, vs = 0, es = 0, fs = 0, t = 0 }
+		local sum, n = V3(), 0
+		for v in pairs(bm.verts) do if v.sel then s.vs += 1 sum += v.co n += 1 end end
+		for e in pairs(bm.edges) do if e.sel then s.es += 1 end end
+		for f in pairs(bm.faces) do s.t += f.len - 2 if f.sel then s.fs += 1 end end
+		st.stats = s
+		if n > 0 then st.loc = W(sum / n) end
+	elseif p then
+		st.loc, st.dim = p.Position, p.Size
+	end
+	return st
+end
+api.toggleEdit = toggleEdit
+api.toggleXray = toggleXray
+api.togglePanel = function() widget.Enabled = not widget.Enabled end
+api.setMode = function(m) if editing and not modal then setMode(m) end end
+api.add = function(kind) addShape(kind) end
+api.tool = function(name) local f = TOOL[name] if f then f() end end
+function api.setField(key, axis, value)
+	if editing and bm then
+		if key ~= "loc" or modal then return end
+		local vs = selectedVertsList()
+		if #vs == 0 then return end
+		local cw = W(centerOf(vs))
+		local target = V3(axis == "X" and value or cw.X, axis == "Y" and value or cw.Y, axis == "Z" and value or cw.Z)
+		local dL = origin:VectorToObjectSpace(target - cw)
+		for _, v in ipairs(vs) do v.co += dL end
+		bm:normalsUpdate()
+		worldTris = nil
+		commit("Move")
+		setStatus(("Moved the selection to %s = %g"):format(axis, value))
+	else
+		local p = selectedPart()
+		if not p then return end
+		local rec
+		pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. key) end)
+		if key == "loc" then
+			local q = p.Position
+			p.CFrame = p.CFrame + (V3(axis == "X" and value or q.X, axis == "Y" and value or q.Y, axis == "Z" and value or q.Z) - q)
+		elseif value > 0 then
+			local q = p.Size
+			p.Size = V3(axis == "X" and value or q.X, axis == "Y" and value or q.Y, axis == "Z" and value or q.Z)
+		end
+		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. key) end
+	end
+end
+ui = UI.new(api, CoreGui)
+local uiOn = false
+local function setUIOn(on)
+	uiOn = on
+	ui:setOn(on)
+	pcall(function() btnMain:SetActive(on) end)
+	if not on and editing then exitEdit() end
+	if on then setStatus("Welcome to " .. NAME .. ". Shift A = add a mesh, select one and press Tab to edit it.") end
+end
+btnMain.Click:Connect(function() setUIOn(not uiOn) end)
+plugin.Unloading:Connect(function()
+	pcall(function() if editing then exitEdit() end end)
+	ui:destroy()
+	cageFolder.Parent = nil
+end)
+
 -- ===== mouse =====
 local boxGui = Instance.new("ScreenGui")
 boxGui.Name = NAME .. "_Box"
+boxGui.IgnoreGuiInset = true
+boxGui.DisplayOrder = 40
 boxGui.Parent = CoreGui
+plugin.Unloading:Connect(function() boxGui.Parent = nil end)
 local boxFrame = Instance.new("Frame")
 boxFrame.BackgroundColor3 = Color3.fromRGB(255, 150, 40)
 boxFrame.BackgroundTransparency = 0.85
@@ -969,6 +1100,7 @@ end
 
 mouse.Button1Down:Connect(function()
 	if not editing then return end
+	if ui:overUI(mousePos()) then return end
 	if modal then
 		if modal.kind == "loopcut" then updateLoopCut() end
 		local ok, err = pcall(finishModal, false)
@@ -1021,6 +1153,10 @@ mouse.Move:Connect(function()
 			elseif modal.kind == "loopcut" then updateLoopCut() end
 			return
 		end
+		if not down and ui:overUI(mousePos()) then
+			if hover then hover = nil dirtyCage = true end
+			return
+		end
 		if down then
 			local a, b = down, mousePos()
 			if (b - a).Magnitude > 6 then
@@ -1043,9 +1179,26 @@ UIS.InputBegan:Connect(function(input, gp)
 	local k = input.KeyCode
 	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
 	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
-	if k == Enum.KeyCode.Tab and not ctrl and not alt then
-		if editing then exitEdit() elseif isRB(Selection:Get()[1]) then enterEdit(Selection:Get()[1]) end
+	local shift = UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift)
+	if uiOn and ui.menuOpen then
+		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return
+	end
+	if k == Enum.KeyCode.Tab and not ctrl and not alt then
+		if modal then return end
+		if editing then exitEdit() elseif isRB(Selection:Get()[1]) then enterEdit(Selection:Get()[1])
+		elseif uiOn then setStatus("Select a " .. NAME .. " mesh first (Shift A adds one).") end
+		return
+	end
+	if uiOn and not modal and not ctrl and not alt then
+		local ok, used = pcall(function()
+			if k == Enum.KeyCode.A and shift then ui:openAddMenu(mousePos()) return true end
+			if k == Enum.KeyCode.N and not shift then ui:toggleSidebar() return true end
+			if k == Enum.KeyCode.T and not shift then ui:toggleToolbar() return true end
+			return false
+		end)
+		if not ok then warn(NAME .. ": " .. tostring(used)) return end
+		if used then return end
 	end
 	if not editing then return end
 	local ok, err = pcall(function()
@@ -1098,7 +1251,13 @@ end)
 
 -- ===== keep the look up to date (mesh rebuilt at most ~20 times a second while dragging) =====
 local lastCam = nil
+local lastUI = 0
 RunService.Heartbeat:Connect(function()
+	if uiOn and os.clock() - lastUI > 0.1 then
+		lastUI = os.clock()
+		local ok, err = pcall(function() ui:refresh() end)
+		if not ok then warn(NAME .. " UI: " .. tostring(err)) end
+	end
 	if not editing or not obj then return end
 	if not obj.Parent then exitEdit() return end
 	local now = os.clock()
