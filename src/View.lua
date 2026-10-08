@@ -48,7 +48,7 @@ function View.new(parent)
 	vf.CurrentCamera = cam
 	local function folder(n) local f = Instance.new("Folder") f.Name = n f.Parent = vf return f end
 	local self = setmetatable({
-		frame = vf, cam = cam, FieldOfView = 40,
+		frame = vf, cam = cam, FieldOfView = 40, baseFov = 40, ortho = false,
 		focus = V3(0, 2, 0), dist = 30, yaw = math.rad(35), pitch = math.rad(26),
 		gridFolder = folder("Grid"), sceneFolder = folder("Scene"), cageFolder = folder("Cage"),
 		objects = {}, pools = {}, grid = { lines = {}, spacing = 0, cx = nil, cz = nil, thick = 0 },
@@ -100,7 +100,12 @@ end
 function View:update()
 	local cp = math.cos(self.pitch)
 	local dir = V3(cp * math.sin(self.yaw), math.sin(self.pitch), cp * math.cos(self.yaw))
-	local pos = self.focus + dir * self.dist
+	-- orthographic (Numpad 5): Roblox cameras are always perspective, so look from far away through a narrow lens;
+	-- the same part of the scene fills the view
+	local fov = self.ortho and 1 or self.baseFov
+	self.FieldOfView = fov
+	local eye = self.dist * math.tan(math.rad(self.baseFov) / 2) / math.tan(math.rad(fov) / 2)
+	local pos = self.focus + dir * eye
 	local up = V3(0, 1, 0)
 	if math.abs(self.pitch) > math.rad(89) then
 		-- looking straight down / up: keep "up" on screen pointing along the yaw
@@ -115,12 +120,14 @@ function View:update()
 	self:updateGrid()
 end
 function View:orbit(dx, dy)
+	-- Blender's Auto Perspective: orbiting away from a numpad view goes back to perspective
+	if self.autoOrtho then self.ortho, self.autoOrtho = false, false end
 	self.yaw -= dx * 0.008
 	self.pitch = math.clamp(self.pitch + dy * 0.008, math.rad(-89.9), math.rad(89.9))
 	self:update()
 end
 function View:pan(dx, dy)
-	local u = 2 * self.dist * math.tan(math.rad(self.FieldOfView) / 2) / self:size().Y
+	local u = 2 * self.dist * math.tan(math.rad(self.baseFov) / 2) / self:size().Y
 	local cf = self.CFrame
 	self.focus = self.focus - cf.RightVector * (dx * u) + cf.UpVector * (dy * u)
 	self:update()
@@ -137,12 +144,22 @@ function View:viewAxis(name)
 	local v = VIEWS[name]
 	if not v then return end
 	self.yaw, self.pitch = v[1], v[2]
+	if not self.ortho then self.ortho, self.autoOrtho = true, true end
+	self:update()
+end
+-- Numpad 5
+function View:toggleOrtho() self.ortho, self.autoOrtho = not self.ortho, false self:update() end
+-- Numpad 2 4 6 8 (15 degree steps), Numpad 9 (the other side)
+function View:step(dyaw, dpitch)
+	if self.autoOrtho then self.ortho, self.autoOrtho = false, false end
+	self.yaw += dyaw
+	self.pitch = math.clamp(self.pitch + dpitch, math.rad(-89.95), math.rad(89.95))
 	self:update()
 end
 function View:frameBox(lo, hi)
 	local r = math.max((hi - lo).Magnitude / 2, 0.5)
 	self.focus = (lo + hi) / 2
-	self.dist = r / math.sin(math.rad(self.FieldOfView) / 2) * 1.15
+	self.dist = r / math.sin(math.rad(self.baseFov) / 2) * 1.15
 	self:update()
 end
 

@@ -1002,6 +1002,7 @@ end
 
 -- ===== menus (Blender: back #181818, outline #242424, hover #4772b3) =====
 function UI:closeMenu()
+	if self.searchFrame then self.searchFrame.Parent = nil self.searchFrame = nil end
 	if self.subOpen then self.subOpen.Parent = nil self.subOpen = nil end
 	if self.menuOpen then self.menuOpen.Parent = nil self.menuOpen = nil end
 	self.catcher.Visible = false
@@ -1101,6 +1102,8 @@ function UI:viewMenu()
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
 		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
 		{ "Frame All", "Home", function() api.frameAll() end },
+		{ "Local View", "Numpad /", function() api.tool("LocalView") end },
+		{ "Perspective/Orthographic", "Numpad 5", function() api.toggleOrtho() end, check = api.state().viewName ~= nil and api.state().viewName:find("Ortho") ~= nil },
 		"-",
 		{ "Viewpoint", "", nil, sub = function() return {
 			{ "Top", "Numpad 7", function() api.viewAxis("top") end },
@@ -1134,6 +1137,8 @@ function UI:selectMenuEdit()
 		{ "All", "A", t("SelectAll") }, { "None", "Alt A", t("SelectNone") }, { "Invert", "Ctrl I", t("Invert") },
 		"-",
 		{ "Box Select", "Drag", nil }, { "Circle Select", "C", t("CircleSelect") },
+		{ "Select Mirror", "Shift Ctrl M", t("SelectMirror") },
+		{ "Edge Rings", "Ctrl Alt Click", t("SelectRing") },
 		"-",
 		{ "Select Similar", "Shift G", nil, sub = function() return self:similarItems() end },
 		"-",
@@ -1169,6 +1174,16 @@ function UI:objectMenu()
 		} end },
 		{ "Apply", "Ctrl A", nil, sub = function() return { { "Rotation", "", function() api.tool("ApplyRotation") end } } end },
 		"-",
+		{ "Show/Hide", "", nil, sub = function() return {
+			{ "Show Hidden Objects", "Alt H", function() api.tool("RevealObj") end },
+			{ "Hide Selected", "H", function() api.tool("HideSelected") end },
+			{ "Hide Unselected", "Shift H", function() api.tool("HideUnselectedObj") end },
+		} end },
+		{ "Clear", "", nil, sub = function() return {
+			{ "Location", "Alt G", function() api.tool("ClearLocation") end },
+			{ "Rotation", "Alt R", function() api.tool("ClearRotation") end },
+		} end },
+		"-",
 		{ "Shade Smooth", "", function() api.tool("ObjShadeSmooth") end },
 		{ "Shade Flat", "", function() api.tool("ObjShadeFlat") end },
 		"-",
@@ -1183,6 +1198,104 @@ function UI:objectMenu()
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
+end
+function UI:shadingItems()
+	local api = self.api
+	local s = api.state()
+	return {
+		{ "Wireframe", "Shift Z", function() api.setShading("wire") end, check = s.shading == "wire" },
+		{ "Solid", "", function() api.setShading("solid") end, check = (s.shading or "solid") == "solid" },
+		"-",
+		{ "Toggle X-Ray", "Alt Z", function() api.toggleXray() end, check = s.xray },
+	}
+end
+function UI:applyItems()
+	return { { "Rotation", "", function() self.api.tool("ApplyRotation") end } }
+end
+function UI:originItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return { { "Geometry to Origin", "", t("GeometryToOrigin") }, { "Origin to Geometry", "", t("OriginToGeometry") }, { "Origin to 3D Cursor", "", t("OriginToCursor") } }
+end
+function UI:normalsItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return { { "Flip", "", t("Flip") }, { "Recalculate Outside", "Shift N", t("RecalcOutside") }, { "Recalculate Inside", "Shift Ctrl N", t("RecalcInside") } }
+end
+-- F3 (Blender's Menu Search): every menu item, filtered as you type; Enter runs the top one
+function UI:searchItems()
+	local s = self.api.state()
+	local roots
+	if s.editing then
+		roots = { { "Mesh", self:meshMenu() }, { "Vertex", self:vertexMenu() }, { "Edge", self:edgeMenu() }, { "Face", self:faceMenu() },
+			{ "Select", self:selectMenuEdit() }, { "Add", self:addMeshItems() }, { "View", self:viewMenu() } }
+	else
+		roots = { { "Object", self:objectMenu() }, { "Select", self:selectMenu() }, { "Add", self:addMeshItems() }, { "View", self:viewMenu() } }
+	end
+	local out, seen = {}, {}
+	local function walk(prefix, items, depth)
+		for _, it in ipairs(items or {}) do
+			if type(it) == "table" and not it.header and it[1] then
+				local lbl = prefix .. " > " .. it[1]
+				if it.sub and depth < 3 then
+					local ok, sub = pcall(it.sub)
+					if ok then walk(lbl, sub, depth + 1) end
+				elseif it[3] and not seen[lbl] then
+					seen[lbl] = true
+					out[#out + 1] = { label = lbl, key = it[2] or "", fn = it[3] }
+				end
+			end
+		end
+	end
+	for _, r in ipairs(roots) do walk(r[1], r[2], 0) end
+	return out
+end
+function UI:openSearch()
+	self:closeMenu()
+	local all = self:searchItems()
+	local mp = self.api.mousePos()
+	local W = 380
+	local fr = make("Frame", { ZIndex = 40, BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Position = UDim2.fromOffset(math.max(4, mp.X - W / 2), math.max(4, mp.Y - 14)), Size = UDim2.fromOffset(W, 0), AutomaticSize = Enum.AutomaticSize.Y }, self.gui)
+	corner(stroke(fr, T.menuOutline), 5)
+	vlist(fr, 0)
+	make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, fr)
+	local box = make("TextBox", { Name = "RB_Search", LayoutOrder = 0, ZIndex = 41, Size = UDim2.new(1, 0, 0, 24), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12,
+		TextColor3 = T.text, Text = "", PlaceholderText = "Search menus...  (Enter runs the top one)", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, fr)
+	corner(box, 4)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, box)
+	local rows, matches = {}, {}
+	local function close() fr.Parent = nil if self.searchFrame == fr then self.searchFrame = nil end self.catcher.Visible = false end
+	local function run(it) close() self:safe(it.fn) end
+	local function refresh()
+		for _, r in ipairs(rows) do r.Parent = nil end
+		rows, matches = {}, {}
+		local q = (box.Text or ""):lower()
+		for _, it in ipairs(all) do
+			local ok = true
+			for word in q:gmatch("%S+") do if not it.label:lower():find(word, 1, true) then ok = false break end end
+			if ok then matches[#matches + 1] = it end
+			if #matches >= 14 then break end
+		end
+		for i, it in ipairs(matches) do
+			local b = make("TextButton", { LayoutOrder = i, ZIndex = 41, Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = T.blue, BackgroundTransparency = i == 1 and 0.5 or 1, BorderSizePixel = 0, AutoButtonColor = false, Text = "" }, fr)
+			corner(b, 3)
+			label(b, { ZIndex = 42, Position = UDim2.fromOffset(8, 0), Size = UDim2.new(1, -96, 1, 0), Text = it.label, TextColor3 = T.textMenu, TextTruncate = Enum.TextTruncate.AtEnd })
+			label(b, { ZIndex = 42, Position = UDim2.new(1, -88, 0, 0), Size = UDim2.fromOffset(82, 22), Text = it.key, TextColor3 = T.textDim, TextXAlignment = Enum.TextXAlignment.Right, TextSize = 11 })
+			b.MouseEnter:Connect(function() b.BackgroundTransparency = 0 end)
+			b.MouseLeave:Connect(function() b.BackgroundTransparency = i == 1 and 0.5 or 1 end)
+			b.Activated:Connect(function() run(it) end)
+			rows[#rows + 1] = b
+		end
+	end
+	box:GetPropertyChangedSignal("Text"):Connect(refresh)
+	box.FocusLost:Connect(function(enter)
+		if not enter then return end
+		refresh()
+		if matches[1] then run(matches[1]) else close() end
+	end)
+	self.searchFrame = fr
+	self.catcher.Visible = true
+	refresh()
+	pcall(function() box:CaptureFocus() end)
+	return fr
 end
 function UI:similarItems()
 	local items = {}
@@ -1303,6 +1416,8 @@ function UI:edgeMenu()
 		{ "Mark Seam", "", t("MarkSeam") }, { "Clear Seam", "", t("ClearSeam") },
 		"-",
 		{ "Mark Sharp", "", t("MarkSharp") }, { "Clear Sharp", "", t("ClearSharp") },
+		"-",
+		{ "Edge Crease (toggle)", "Shift E", t("Crease") },
 	}
 end
 -- VIEW3D_MT_edit_mesh_faces
@@ -1336,6 +1451,11 @@ function UI:openNamedMenu(name, at)
 		snap = function() return self:snapItems(), "Snap" end,
 		separate = function() return self:separateItems(), "Separate" end,
 		similar = function() return self:similarItems(), "Select Similar" end,
+		shading = function() return self:shadingItems(), "Shading" end,
+		apply = function() return self:applyItems(), "Apply" end,
+		origin = function() return self:originItems(), "Set Origin" end,
+		split = function() return { { "Selection", "Y", function() self.api.tool("Split") end } }, "Split" end,
+		normals = function() return self:normalsItems(), "Normals" end,
 		extrude = function() return self:extrudeItems(), "Extrude" end,
 		vertex = function() return self:vertexMenu(), "Vertex" end,
 		edge = function() return self:edgeMenu(), "Edge" end,
@@ -1431,6 +1551,9 @@ function UI:helpItems()
 		{ "Axis / Snap / Value", "X Y Z  Ctrl  0-9" }, { "Extrude / Inset", "E  I" }, { "Loop Cut", "Ctrl R" },
 		{ "Extrude to Mouse", "Ctrl RMB" }, { "Repeat Last", "Shift R" }, { "Circle Select", "C" },
 		{ "Inset: individual / depth", "I then I / Ctrl" }, { "Subdivision level", "Ctrl 0-4" }, { "Join / Separate", "Ctrl J  /  P" },
+		{ "Search every menu", "F3" }, { "Loop / Ring select", "Double click / Ctrl Alt click" }, { "Edge Crease", "Shift E" },
+		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
+		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },

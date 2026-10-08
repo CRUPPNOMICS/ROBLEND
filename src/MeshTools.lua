@@ -83,9 +83,9 @@ function MT.toSpec(bm)
 	for e in pairs(bm.edges) do
 		local a, b = spec.vi[e.v1], spec.vi[e.v2]
 		if not e.l then spec.edges[#spec.edges + 1] = { a, b, sel = e.sel } end
-		if e.sharp or e.seam then
+		if e.sharp or e.seam or e.crease then
 			local k = math.min(a, b) .. ":" .. math.max(a, b)
-			spec.eflags[k] = { sharp = e.sharp, seam = e.seam }
+			spec.eflags[k] = { sharp = e.sharp, seam = e.seam, crease = e.crease }
 		end
 	end
 	return spec
@@ -138,7 +138,7 @@ function MT.fromSpec(spec)
 		local a, b = k:match("(%d+):(%d+)")
 		a, b = vs[tonumber(a)], vs[tonumber(b)]
 		local e = a and b and BMesh.edgeExists(a, b)
-		if e then e.sharp, e.seam = fl2.sharp, fl2.seam end
+		if e then e.sharp, e.seam, e.crease = fl2.sharp, fl2.seam, fl2.crease end
 	end
 	for e in pairs(nb.edges) do if e.v1.sel and e.v2.sel then e.sel = true end end
 	nb:normalsUpdate()
@@ -1461,6 +1461,26 @@ function MT.selectSimilar(bm, mode, kind, threshold)
 			end
 		end
 	end
+	return n
+end
+
+-- Shift Ctrl M (Blender's Select Mirror): the selection jumps to the other side of the mesh's own axis
+function MT.selectMirror(bm, axis, extend)
+	axis = axis or "X"
+	local flip = axis == "X" and Vector3.new(-1, 1, 1) or axis == "Y" and Vector3.new(1, -1, 1) or Vector3.new(1, 1, -1)
+	local cell = {}
+	local function key(co) return math.floor(co.X * 1000 + 0.5) .. "," .. math.floor(co.Y * 1000 + 0.5) .. "," .. math.floor(co.Z * 1000 + 0.5) end
+	for v in pairs(bm.verts) do cell[key(v.co)] = v end
+	local want = {}
+	local n = 0
+	for v in pairs(bm.verts) do
+		if v.sel then
+			local m = cell[key(v.co * flip)]
+			if m then want[m] = true n += 1 end
+		end
+	end
+	if not extend then for v in pairs(bm.verts) do v.sel = false end for e in pairs(bm.edges) do e.sel = false end for f in pairs(bm.faces) do f.sel = false end end
+	for v in pairs(want) do v.sel = true end
 	return n
 end
 

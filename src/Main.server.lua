@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.9.0"
+local VERSION = "0.10.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -496,6 +496,7 @@ end
 
 local drawObjects -- object-mode outlines (set below)
 local drawExtras  -- 3D cursor, knife, measure, annotations, tool previews (set below)
+local SEAM_COL, SHARP_COL, CREASE_COL = Color3.fromRGB(219, 37, 18), Color3.fromRGB(0, 255, 255), Color3.fromRGB(204, 0, 153)
 local function drawCage()
 	pBegin()
 	if view then view:beginCage() end
@@ -504,7 +505,8 @@ local function drawCage()
 		for e in pairs(bm.edges) do
 			local on = e.sel
 			if (on or not many) and not e.hide then
-				local col = (hover == e) and ACT_COL or (on and SEL_COL or WIRE_COL)
+				-- Blender's theme: seam red, sharp cyan, crease magenta
+				local col = (hover == e) and ACT_COL or (on and SEL_COL or (e.seam and SEAM_COL or e.sharp and SHARP_COL or e.crease and CREASE_COL or WIRE_COL))
 				line(W(e.v1.co), W(e.v2.co), col, (mode == "edge" and (on or hover == e)) and 2.2 or 1)
 			end
 		end
@@ -1361,7 +1363,7 @@ local function syncScene()
 		elseif not (editing and p == obj) then
 			local data, ms = p.RB_Data.Value, modsStr(p)
 			local look = lookOf(p)
-			if r.hidden then
+			if r.hidden or r.localOut then
 				if r.shown then view:removeObject(p) r.shown = false changed = true end
 			elseif data ~= r.data or ms ~= r.mods or p.Size ~= r.size or not r.shown then
 				local ok, m = pcall(function() return evaluated(p, (loadFrom(p))) end)
@@ -1629,6 +1631,56 @@ local function shadeObjects(smooth)
 		if editing and p == obj then commit("Shade") else reshapePart(p, m, originOf(p), "Shade") end
 	end
 	setStatus(smooth and "Shade Smooth." or "Shade Flat.")
+end
+
+-- H / Shift H / Alt H in Object Mode (the Outliner eye)
+local function hideObjects(which)
+	local sel = {}
+	for _, p in ipairs(Selection:Get()) do sel[p] = true end
+	local n = 0
+	for p, r in pairs(scene) do
+		if which == "reveal" then
+			if r.hidden then r.hidden = false n += 1 end
+		elseif (which == "selected") == (sel[p] == true) and not r.hidden then
+			r.hidden = true
+			n += 1
+		end
+	end
+	if which ~= "reveal" then Selection:Set({}) end
+	dirtyCage = true
+	setStatus(which == "reveal" and ("Revealed %d."):format(n) or ("Hid %d."):format(n))
+end
+-- Alt G / Alt R: put the origin back at the world centre / clear the rotation (the part moves, the mesh doesn't change)
+local function clearTransform(what)
+	local ps = rbSelected()
+	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
+	record(what == "loc" and "Clear Location" or "Clear Rotation", function()
+		for _, p in ipairs(ps) do
+			local o = originOf(p)
+			local newO = (what == "loc") and o.Rotation or CFrame.new(o.Position)
+			p.CFrame = newO * CFrame.new(p:GetAttribute("RB_Center") or V3())
+		end
+	end)
+	dirtyCage = true
+	setStatus(what == "loc" and "Location cleared (origin at 0, 0, 0)." or "Rotation cleared.")
+end
+-- Numpad / (Local View): show only the selected meshes; again to bring the rest back
+local localView = nil
+local function toggleLocalView()
+	if localView then
+		for _, r in pairs(scene) do r.localOut = nil end
+		localView = nil
+		setStatus("Local view off.")
+	else
+		local set = {}
+		for _, p in ipairs(Selection:Get()) do set[p] = true end
+		if editing and obj then set[obj] = true end
+		if not next(set) then setStatus("Select something for Local View.") return end
+		for p, r in pairs(scene) do r.localOut = not set[p] or nil end
+		localView = set
+		setStatus("Local view: only the selection is shown (Numpad / again to leave).")
+	end
+	dirtyCage = true
 end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
@@ -2644,6 +2696,52 @@ local function modelingTools()
 		for f in pairs(next(fs) and fs or bm.faces) do f.smooth = nil end
 		changed("Shade Flat")
 	end
+	-- Shift E (edge crease): toggles a full crease on the selected edges; Subdivision Surface keeps them sharp
+	O.Crease = function()
+		local es = MT.selEdges(bm)
+		if not need(next(es), "Pick edges to crease.") then return end
+		local all = true
+		for e in pairs(es) do if not e.crease then all = false end end
+		for e in pairs(es) do e.crease = (not all) or nil end
+		changed(all and "Clear Crease" or "Crease")
+		setStatus(all and "Crease cleared." or "Creased: Subdivision Surface keeps these edges sharp.")
+	end
+	O.SelectMirror = function()
+		local n = MT.selectMirror(bm, "X", false)
+		flush()
+		changed()
+		setStatus(n > 0 and ("Selected the mirror (X) of %d verts."):format(n) or "No mirrored verts found (the mesh isn't symmetrical on X).")
+	end
+	O.DeselectLinked = function()
+		local x = pickAny()
+		if not x then return end
+		local seed = {}
+		if x.co then seed[x] = true elseif x.v1 then seed[x.v1] = true else for _, v in ipairs(BMesh.faceVerts(x)) do seed[v] = true end end
+		-- select linked from the seed on a scratch copy of the flags, then turn those off
+		local was = {}
+		for v in pairs(bm.verts) do was[v] = v.sel v.sel = false end
+		MT.selectLinked(bm, seed)
+		local hit = {}
+		for v in pairs(bm.verts) do if v.sel then hit[v] = true end end
+		for v in pairs(bm.verts) do v.sel = was[v] and not hit[v] end
+		for e in pairs(bm.edges) do e.sel = e.v1.sel and e.v2.sel end
+		for f in pairs(bm.faces) do
+			local all = true
+			for _, v in ipairs(BMesh.faceVerts(f)) do if not v.sel then all = false break end end
+			f.sel = all
+		end
+		flush()
+		changed()
+	end
+	-- Alt F (Blender's mesh.fill): fill the selected edge loop with triangles
+	O.FillTris = function()
+		local before = {}
+		for f in pairs(bm.faces) do before[f] = true end
+		Tools.fill()
+		local new = {}
+		for f in pairs(bm.faces) do if not before[f] then new[f] = true end end
+		if next(new) then MT.triangulate(bm, new, Display.triangulate) changed("Fill") end
+	end
 	for _, k in ipairs({ "sharp", "seam" }) do
 		local K = k:sub(1, 1):upper() .. k:sub(2)
 		O["Mark" .. K] = function() for e in pairs(MT.selEdges(bm)) do e[k] = true end changed("Mark " .. K) end
@@ -2871,6 +2969,17 @@ local function modelingTools()
 		if k == K.R and shift and not alt then MOD.repeatLast() return true end
 		if k == K.C and not ctrl and not shift and not alt then T.circleSelect() return true end
 		if k == K.G and shift and not ctrl and not alt then return menu("similar") end
+		if k == K.M and shift and ctrl then O.SelectMirror() return true end
+		if k == K.M and alt then return menu("split") end
+		if k == K.N and alt then return menu("normals") end
+		if k == K.N and shift and ctrl then O.RecalcInside() return true end
+		if k == K.L and shift and not ctrl then O.DeselectLinked() return true end
+		if k == K.E and shift and not ctrl and not alt then O.Crease() return true end
+		if k == K.F and shift and alt then O.BeautyFill() return true end
+		if k == K.P and alt then O.Poke() return true end
+		if k == K.V and shift and not ctrl and not alt then O.VertexSlide() return true end
+		if k == K.Delete and ctrl then O.Dissolve() return true end
+		if k == K.Z and not ctrl and not shift and not alt then return menu("shading") end
 		if k == K.P and not ctrl then return menu("separate") end
 		local LEVEL = { [K.Zero] = 0, [K.One] = 1, [K.Two] = 2, [K.Three] = 3, [K.Four] = 4, [K.Five] = 5 }
 		if ctrl and LEVEL[k] then MOD.subdivSet(LEVEL[k]) return true end
@@ -2901,7 +3010,7 @@ local function modelingTools()
 		if k == K.E and alt then return menu("extrude") end
 		if k == K.E and ctrl then return menu("edge") end
 		if k == K.F and ctrl then return menu("face") end
-		if k == K.F and alt then O.BeautyFill() return true end
+		if k == K.F and alt then O.FillTris() return true end
 		if k == K.O and not ctrl then EDIT.prop = not EDIT.prop setStatus("Proportional editing " .. (EDIT.prop and "on (wheel = size while moving)" or "off")) return true end
 		if (k == K.KeypadPlus or k == K.Equals) and ctrl then O.SelectMore() return true end
 		if (k == K.KeypadMinus or k == K.Minus) and ctrl then O.SelectLess() return true end
@@ -3039,6 +3148,12 @@ TOOL.OriginToGeometry = function() setOrigin("geometry") end
 TOOL.OriginToCursor = function() setOrigin("cursor") end
 TOOL.GeometryToOrigin = function() setOrigin("origin") end
 TOOL.ApplyRotation = applyRotation
+TOOL.HideSelected = function() if not editing then hideObjects("selected") end end
+TOOL.HideUnselectedObj = function() if not editing then hideObjects("unselected") end end
+TOOL.RevealObj = function() if not editing then hideObjects("reveal") end end
+TOOL.ClearLocation = function() if not editing then clearTransform("loc") end end
+TOOL.ClearRotation = function() if not editing then clearTransform("rot") end end
+TOOL.LocalView = toggleLocalView
 TOOL.ObjShadeSmooth = function() if not editing then shadeObjects(true) end end
 TOOL.ObjShadeFlat = function() if not editing then shadeObjects(false) end end
 TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
@@ -3058,7 +3173,8 @@ local setUIOn, setStudioView
 function api.state()
 	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
-		camCF = camera().CFrame, viewName = view and view.viewName or nil,
+		camCF = camera().CFrame,
+		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
 		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
@@ -3176,6 +3292,7 @@ api.setFalloff = function(name)
 	if FALLOFF[name] then EDIT.propFalloff = name EDIT.prop = true setStatus("Proportional falloff: " .. name .. " (proportional editing on).") end
 end
 api.setBoxMode = function(m) EDIT.boxMode = m end
+api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
 api.join = joinObjects
 local function modEdit(what, fn)
 	local p = modTarget()
@@ -3270,7 +3387,7 @@ end
 api.viewAxis = function(name)
 	if not view then return end
 	view:viewAxis(name)
-	view.viewName = name:sub(1, 1):upper() .. name:sub(2) .. " Perspective"
+	view.viewName = name:sub(1, 1):upper() .. name:sub(2)
 	dirtyCage = true
 end
 api.frameAll = frameAll
@@ -3543,7 +3660,21 @@ mouse.Button1Up:Connect(function()
 			selectObject(pickObject(b), shift)
 			return
 		end
-		if alt then
+		-- double click = loop select (Blender 4), like Alt click
+		local now = os.clock()
+		if not alt and not ctrl and MOD.lastClick and now - MOD.lastClick.t < 0.3 and (b - MOD.lastClick.at).Magnitude < 5 then alt = true end
+		MOD.lastClick = { t = now, at = b }
+		if alt and ctrl then
+			-- Ctrl Alt click: edge ring select
+			local e = pickEdge(b)
+			if e then
+				if not shift then clearSel() end
+				local ring, quads = Ops.edgeRing(bm, e)
+				if mode == "face" then for _, f in ipairs(quads or {}) do f.sel = true end
+				else for _, re in ipairs(ring) do re.sel = true re.v1.sel = true re.v2.sel = true end end
+				flush()
+			end
+		elseif alt then
 			-- loop select (edge loop through the edge under the mouse)
 			local e = pickEdge(b)
 			if e then
@@ -3698,12 +3829,28 @@ local function navKey(k, ctrl)
 	elseif n == "Home" then frameAll()
 	elseif n == "KeypadPlus" then view:zoom(1) dirtyCage = true
 	elseif n == "KeypadMinus" then view:zoom(-1) dirtyCage = true
+	elseif n == "KeypadFive" then view:toggleOrtho() dirtyCage = true
+	elseif n == "KeypadFour" then if ctrl then view:pan(-40, 0) else view:step(math.rad(15), 0) view.viewName = nil end dirtyCage = true
+	elseif n == "KeypadSix" then if ctrl then view:pan(40, 0) else view:step(math.rad(-15), 0) view.viewName = nil end dirtyCage = true
+	elseif n == "KeypadEight" then if ctrl then view:pan(0, -40) else view:step(0, math.rad(15)) view.viewName = nil end dirtyCage = true
+	elseif n == "KeypadTwo" then if ctrl then view:pan(0, 40) else view:step(0, math.rad(-15)) view.viewName = nil end dirtyCage = true
+	elseif n == "KeypadNine" then view:step(math.pi, -2 * view.pitch) view.viewName = nil dirtyCage = true
+	elseif n == "KeypadDivide" then toggleLocalView() frameSelected()
 	else return false end
 	return true
 end
 local function objectKey(k, shift, ctrl, alt)
 	if not ownView() then return end
 	if k == Enum.KeyCode.S and shift and not ctrl and not alt then ui:openNamedMenu("snap", mousePos()) return end
+	if k == Enum.KeyCode.C and shift and ctrl and alt then ui:openNamedMenu("origin", mousePos()) return end
+	if k == Enum.KeyCode.A and ctrl and not shift and not alt then ui:openNamedMenu("apply", mousePos()) return end
+	if k == Enum.KeyCode.Z and not ctrl and not shift and not alt then ui:openNamedMenu("shading", mousePos()) return end
+	if k == Enum.KeyCode.C and shift and not ctrl and not alt then CURSOR = V3() frameAll() setStatus("3D cursor to the world origin, view all.") return end
+	if k == Enum.KeyCode.H and alt then hideObjects("reveal") return end
+	if k == Enum.KeyCode.H and shift then hideObjects("unselected") return end
+	if k == Enum.KeyCode.H then hideObjects("selected") return end
+	if k == Enum.KeyCode.G and alt then clearTransform("loc") return end
+	if k == Enum.KeyCode.R and alt then clearTransform("rot") return end
 	if k == Enum.KeyCode.G and not ctrl then startObjTransform("G")
 	elseif k == Enum.KeyCode.R and not ctrl then startObjTransform("R")
 	elseif k == Enum.KeyCode.S and not ctrl then startObjTransform("S")
@@ -3734,6 +3881,7 @@ UIS.InputBegan:Connect(function(input, gp)
 		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return
 	end
+	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
 	if k == Enum.KeyCode.Tab and not ctrl and not alt then
 		if modal then return end
 		if editing then exitEdit()

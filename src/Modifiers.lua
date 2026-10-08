@@ -111,19 +111,24 @@ local function catmullClark(bm)
 	for e in pairs(bm.edges) do
 		local fs = BMesh.edgeFaces(e)
 		local co
-		if #fs == 2 then co = (e.v1.co + e.v2.co + spec.verts[fp[fs[1]]].co + spec.verts[fp[fs[2]]].co) / 4
+		if #fs == 2 and not e.crease then co = (e.v1.co + e.v2.co + spec.verts[fp[fs[1]]].co + spec.verts[fp[fs[2]]].co) / 4
 		else co = (e.v1.co + e.v2.co) / 2 end
 		ep[e] = add(co, e.sel)
 	end
 	for v in pairs(bm.verts) do
 		local edges = BMesh.vertEdges(v)
-		local border = {}
-		for _, e in ipairs(edges) do if BMesh.edgeFaceCount(e) < 2 then border[#border + 1] = e end end
+		-- open edges and creased edges (Shift E) both use the sharp rules
+		local border, open = {}, 0
+		for _, e in ipairs(edges) do
+			local fc = BMesh.edgeFaceCount(e)
+			if fc < 2 then open += 1 end
+			if fc < 2 or e.crease then border[#border + 1] = e end
+		end
 		local co
-		if #border >= 2 then
+		if #border == 2 then
 			local b1, b2 = BMesh.otherVert(border[1], v).co, BMesh.otherVert(border[2], v).co
 			co = (b1 + b2 + v.co * 6) / 8
-		elseif #border == 1 or #edges < 3 then
+		elseif #border >= 3 or open == 1 or #edges < 3 then
 			co = v.co
 		else
 			local faces = BMesh.vertFaces(v)
@@ -136,6 +141,15 @@ local function catmullClark(bm)
 			co = (F + R * 2 + v.co * (n - 3)) / n
 		end
 		vp[v] = add(co, v.sel)
+	end
+	-- a creased edge's two halves stay creased for the next level
+	for e in pairs(bm.edges) do
+		if e.crease or e.sharp or e.seam then
+			for _, v in ipairs({ e.v1, e.v2 }) do
+				local a, b = vp[v], ep[e]
+				spec.eflags[math.min(a, b) .. ":" .. math.max(a, b)] = { crease = e.crease, sharp = e.sharp, seam = e.seam }
+			end
+		end
 	end
 	for f in pairs(bm.faces) do
 		for _, l in ipairs(BMesh.faceLoops(f)) do

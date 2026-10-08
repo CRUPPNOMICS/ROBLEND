@@ -517,5 +517,30 @@ check2("select similar: face area, edge length, vert edge count", function()
 	local top = topFace(bm) top.sel = true
 	eq(MT.selectSimilar(bm, "face", "normal"), 0, "no other face points up")
 end)
+check2("creased edges keep subdivision sharp; crease saves and loads", function()
+	local bm = cube()
+	for e in pairs(bm.edges) do e.crease = true end
+	local out = Mods.evaluate(bm, { Mods.new("subsurf") })
+	for v in pairs(out.verts) do
+		assert(math.abs(math.abs(v.co.X) - 1) < 1e-4 or math.abs(math.abs(v.co.Y) - 1) < 1e-4 or math.abs(math.abs(v.co.Z) - 1) < 1e-4, "every vert stays on the cube's surface")
+	end
+	local m2 = Mods.new("subsurf") m2.levels = 2
+	local out2 = Mods.evaluate(bm, { m2 })
+	local corners = 0
+	for v in pairs(out2.verts) do if math.abs(math.abs(v.co.X) - 1) + math.abs(math.abs(v.co.Y) - 1) + math.abs(math.abs(v.co.Z) - 1) < 1e-4 then corners += 1 end end
+	eq(corners, 8, "level 2 keeps the corners")
+	local back = BMesh.fromData(bm:toData())
+	local n = 0 for e in pairs(back.edges) do if e.crease then n += 1 end end
+	eq(n, 12, "creases saved")
+end)
+check2("select mirror (X)", function()
+	local bm = cube()
+	local v0
+	for v in pairs(bm.verts) do if v.co.X > 0 and v.co.Y > 0 and v.co.Z > 0 then v0 = v end end
+	v0.sel = true
+	eq(MT.selectMirror(bm, "X", false), 1, "found")
+	assert(not v0.sel, "moved off")
+	for v in pairs(bm.verts) do if v.sel then assert(v.co.X < 0 and v.co.Y > 0, "the -X twin") end end
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

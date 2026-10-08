@@ -186,7 +186,20 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - The small arrow next to Proportional Editing picks the falloff: Smooth, Sphere, Root, Inverse Square, Sharp, Linear, Constant, Random.
 - Face > Wireframe turns the selected faces into a frame of beams (drag for the thickness).
 
+- F3 searches every menu: type a few letters, Enter runs the top match.
+- Double click = loop select; Ctrl Alt click = edge ring.
+- Shift E toggles an edge crease: Subdivision Surface keeps creased edges sharp. Creases show magenta, seams red, sharp edges cyan.
+- Shift Ctrl M: Select Mirror (X). Shift L: deselect linked. Alt F: fill with triangles. Shift Alt F: beautify. Alt P: poke. Shift V: vertex slide. Ctrl Delete: dissolve.
+- Alt M: Split menu. Alt N: Normals menu. Shift Ctrl N: recalculate inside. Z: shading menu.
+
+**View**
+- Numpad 5 switches perspective / orthographic. Numpad 1 / 3 / 7 go orthographic and orbiting goes back to perspective (Blender's Auto Perspective).
+- Numpad 2 4 6 8 orbit in 15 degree steps (Ctrl pans), Numpad 9 flips to the other side.
+- Numpad / is Local View: only the selection is shown.
+
 **Object Mode**
+- H hides, Shift H hides the rest, Alt H shows everything. Alt G clears the location, Alt R the rotation.
+- Ctrl A opens Apply, Shift Ctrl Alt C opens Set Origin, Shift C puts the 3D cursor at the world origin and frames everything.
 - Add > Mesh now also has Ico Sphere, Cone and Torus.
 - Ctrl J joins the selected meshes into the active one (Object > Join).
 - Object > Set Origin: Geometry to Origin, Origin to Geometry, Origin to 3D Cursor. Mirror, Screw and Simple Deform work round the origin, so this moves where they mirror or spin.
