@@ -15,13 +15,14 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.4.0"
+local VERSION = "0.5.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
 local Display = require(script.Display)
 local UI = require(script.UI)
 local View = require(script.View)
+local MT = require(script.MeshTools)
 
 local Selection = game:GetService("Selection")
 local UIS = game:GetService("UserInputService")
@@ -59,6 +60,7 @@ local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
+local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false } -- header toggles: proportional, X mirror, snapping
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
@@ -162,7 +164,7 @@ end
 -- put the mesh on the part (new look). Keeps the part where its origin is.
 local applyBuilt
 local function applyMesh(p, b, tint)
-	local mp, c, err = Display.build(b, tint and SEL_COL or nil)
+	local mp, c, err = Display.build(b, tint and SEL_COL or nil, tint)
 	if not mp then return false, err end
 	return applyBuilt(p, mp, c)
 end
@@ -274,7 +276,7 @@ local function getRay() if ownView() then return view:ray(mousePos()) end return
 
 local function buildWorldTris()
 	worldTris = {}
-	for _, t in ipairs(Display.triangles(bm)) do
+	for _, t in ipairs(Display.triangles(bm, true)) do
 		worldTris[#worldTris + 1] = { W(t[1]), W(t[2]), W(t[3]), t[4] }
 	end
 end
@@ -432,6 +434,7 @@ local function dot(p, col, s)
 end
 
 local drawObjects -- object-mode outlines (set below)
+local drawExtras  -- 3D cursor, knife, measure, annotations, tool previews (set below)
 local function drawCage()
 	pBegin()
 	if view then view:beginCage() end
@@ -439,18 +442,18 @@ local function drawCage()
 		local many = bm.ne > 6000
 		for e in pairs(bm.edges) do
 			local on = e.sel
-			if on or not many then
+			if (on or not many) and not e.hide then
 				local col = (hover == e) and ACT_COL or (on and SEL_COL or WIRE_COL)
 				line(W(e.v1.co), W(e.v2.co), col, (mode == "edge" and (on or hover == e)) and 2.2 or 1)
 			end
 		end
 		if mode == "vert" and bm.nv < 6000 then
 			for v in pairs(bm.verts) do
-				dot(W(v.co), (hover == v) and ACT_COL or (v.sel and SEL_COL or WIRE_COL), (v.sel or hover == v) and 1.2 or 0.8)
+				if not v.hide then dot(W(v.co), (hover == v) and ACT_COL or (v.sel and SEL_COL or WIRE_COL), (v.sel or hover == v) and 1.2 or 0.8) end
 			end
 		elseif mode == "face" and bm.nf < 6000 then
 			for f in pairs(bm.faces) do
-				dot(W(BMesh.faceCenter(f)), (hover == f) and ACT_COL or (f.sel and SEL_COL or WIRE_COL), 0.7)
+				if not f.hide then dot(W(BMesh.faceCenter(f)), (hover == f) and ACT_COL or (f.sel and SEL_COL or WIRE_COL), 0.7) end
 			end
 		end
 		-- loop cut preview
@@ -459,6 +462,7 @@ local function drawCage()
 		end
 	end
 	if ownView() and drawObjects then drawObjects() end
+	if ownView() and drawExtras then drawExtras() end
 	pEnd()
 	if view then view:endCage() end
 end
@@ -472,7 +476,7 @@ local function lookOf(p)
 end
 local function showEdit()
 	if not (ownView() and obj and bm) then return false end
-	local mp, c, err = Display.build(bm, SEL_COL)
+	local mp, c, err = Display.build(bm, SEL_COL, true)
 	if not mp then
 		view:removeObject(obj)
 		return true, err
@@ -649,6 +653,7 @@ local PICK_PX = 14
 local function pickVert(mp)
 	local best, bd, bz = nil, PICK_PX, math.huge
 	for v in pairs(bm.verts) do
+		if v.hide then continue end
 		local wp = W(v.co)
 		local sp, vis, z = toScreen(wp)
 		if vis then
@@ -669,6 +674,7 @@ end
 local function pickEdge(mp)
 	local best, bd = nil, 10
 	for e in pairs(bm.edges) do
+		if e.hide then continue end
 		local a, b = W(e.v1.co), W(e.v2.co)
 		local sa, va = toScreen(a)
 		local sb, vb = toScreen(b)
@@ -690,6 +696,7 @@ local function pickFace()
 	local mp = mousePos()
 	local best, bd = nil, PICK_PX
 	for g in pairs(bm.faces) do
+		if g.hide then continue end
 		local sp, vis = toScreen(W(BMesh.faceCenter(g)))
 		if vis and (sp - mp).Magnitude < bd then best, bd = g, (sp - mp).Magnitude end
 	end
@@ -747,6 +754,43 @@ local function startTransform(kind, opts)
 	}
 	local sc = toScreen(modal.cw)
 	modal.cs = sc
+	modal.releaseConfirm = opts and opts.releaseConfirm or nil
+	if EDIT.prop then
+		-- proportional editing: unselected verts near the selection follow, smooth falloff (Blender's default)
+		local sel = {}
+		for _, v in ipairs(vs) do sel[v] = true end
+		modal.propWeights = function()
+			modal.prop = {}
+			for v in pairs(bm.verts) do
+				if not sel[v] and not v.hide then
+					local best = math.huge
+					local co = orig[v] or v.co
+					for _, s in ipairs(vs) do local d = (co - orig[s]).Magnitude if d < best then best = d end end
+					if best < EDIT.propR then
+						local t = 1 - best / EDIT.propR
+						modal.prop[v] = t * t * (3 - 2 * t)
+						orig[v] = co
+					end
+				end
+			end
+		end
+		modal.propWeights()
+	end
+	if EDIT.mirrorX then
+		-- X mirror: the vert on the other side of X = 0 follows (the mesh's own X)
+		modal.mirror, modal.center = {}, {}
+		local sel = {}
+		for _, v in ipairs(vs) do sel[v] = true end
+		for _, v in ipairs(vs) do
+			if math.abs(v.co.X) < 1e-4 then modal.center[v] = true
+			else
+				local target = V3(-v.co.X, v.co.Y, v.co.Z)
+				for u in pairs(bm.verts) do
+					if not sel[u] and (u.co - target).Magnitude < 1e-3 then modal.mirror[v] = u orig[u] = u.co break end
+				end
+			end
+		end
+	end
 	setStatus(({ G = "MOVE", S = "SCALE", R = "ROTATE" })[kind] .. ": move the mouse. X / Y / Z = lock to an axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
 end
 
@@ -840,7 +884,7 @@ local function applyTransform()
 	if M.obj then applyObjTransform() return end
 	local mp = mousePos()
 	local num = tonumber(M.num)
-	local snap = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	local snap = (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) ~= EDIT.snap
 	local axisW = M.axisWorld or (M.axis and AXES[M.axis])
 	local axisL = axisW and origin:VectorToObjectSpace(axisW).Unit
 	if M.kind == "G" then
@@ -862,6 +906,7 @@ local function applyTransform()
 			dL = origin:VectorToObjectSpace(dW)
 		end
 		for _, v in ipairs(M.verts) do v.co = M.orig[v] + dL end
+		for v, w in pairs(M.prop or {}) do v.co = M.orig[v] + dL * w end
 		M.info = ("Move %.2f"):format(dL.Magnitude)
 	elseif M.kind == "S" then
 		local d0 = (M.m0 - M.cs).Magnitude
@@ -876,6 +921,16 @@ local function applyTransform()
 				v.co = M.c + r * f
 			end
 		end
+		for v, w in pairs(M.prop or {}) do
+			local r = M.orig[v] - M.c
+			local fw = 1 + (f - 1) * w
+			if axisL then
+				local along = axisL * r:Dot(axisL)
+				v.co = M.c + (r - along) + along * fw
+			else
+				v.co = M.c + r * fw
+			end
+		end
 		M.info = ("Scale %.3f"):format(f)
 	elseif M.kind == "R" then
 		local a0 = math.atan2(M.m0.Y - M.cs.Y, M.m0.X - M.cs.X)
@@ -885,8 +940,14 @@ local function applyTransform()
 		local axL = axisL or origin:VectorToObjectSpace(-camera().CFrame.LookVector).Unit
 		local rot = CFrame.fromAxisAngle(axL, ang)
 		for _, v in ipairs(M.verts) do v.co = M.c + rot * (M.orig[v] - M.c) end
+		for v, w in pairs(M.prop or {}) do v.co = M.c + CFrame.fromAxisAngle(axL, ang * w) * (M.orig[v] - M.c) end
 		M.info = ("Rotate %.1f deg"):format(math.deg(ang))
 	end
+	if M.mirror then
+		for v, u in pairs(M.mirror) do u.co = V3(-v.co.X, v.co.Y, v.co.Z) end
+		for v in pairs(M.center) do v.co = V3(0, v.co.Y, v.co.Z) end
+	end
+	if M.prop then M.info ..= ("   Proportional size %.2f (wheel)"):format(EDIT.propR) end
 	bm:normalsUpdate()
 	worldTris = nil
 	dirtyMesh, dirtyCage = true, true
@@ -898,6 +959,7 @@ local function finishModal(cancel)
 	if not M then return end
 	modal = nil
 	if M.obj then finishObjModal(M, cancel) return end
+	if M.finish then M.finish(cancel) dirtyCage = true return end
 	if M.kind == "G" or M.kind == "S" or M.kind == "R" then
 		if cancel then
 			for v, co in pairs(M.orig) do v.co = co end
@@ -1086,9 +1148,9 @@ function Tools.selectAll()
 	for v in pairs(bm.verts) do if v.sel then any = true break end end
 	clearSel()
 	if not any then
-		for v in pairs(bm.verts) do v.sel = true end
-		for e in pairs(bm.edges) do e.sel = true end
-		for f in pairs(bm.faces) do f.sel = true end
+		for v in pairs(bm.verts) do v.sel = not v.hide end
+		for e in pairs(bm.edges) do e.sel = not e.hide end
+		for f in pairs(bm.faces) do f.sel = not f.hide end
 	end
 	flush()
 	dirtyCage, dirtyMesh = true, true
@@ -1379,6 +1441,1037 @@ local function duplicateObjects()
 	startObjTransform("G")
 end
 
+-- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
+local function modelingTools()
+	local MOD = { tool = "select", strokes = {}, measure = nil, preview = nil }
+	local THEME = View.THEME
+
+	-- ----- snapshots: undo a live tool back to where it started (selection carried by index) -----
+	local function snapshot()
+		local data, vi, fOrder = bm:toData()
+		local sn = { data = data, sv = {}, sf = {}, se = {}, hv = {}, hf = {} }
+		for v, i in pairs(vi) do
+			if v.sel then sn.sv[#sn.sv + 1] = i end
+			if v.hide then sn.hv[#sn.hv + 1] = i end
+		end
+		for i, f in ipairs(fOrder) do
+			if f.sel then sn.sf[#sn.sf + 1] = i end
+			if f.hide then sn.hf[#sn.hf + 1] = i end
+		end
+		for e in pairs(bm.edges) do if e.sel then sn.se[#sn.se + 1] = { vi[e.v1], vi[e.v2] } end end
+		return sn
+	end
+	local function restore(sn)
+		local nb, vs, fl = BMesh.fromData(sn.data)
+		for _, i in ipairs(sn.sv) do if vs[i] then vs[i].sel = true end end
+		for _, i in ipairs(sn.sf) do if fl[i] then fl[i].sel = true end end
+		for _, p in ipairs(sn.se) do
+			local e = vs[p[1]] and vs[p[2]] and BMesh.edgeExists(vs[p[1]], vs[p[2]])
+			if e then e.sel = true end
+		end
+		for _, i in ipairs(sn.hv) do if vs[i] then vs[i].hide = true end end
+		for _, i in ipairs(sn.hf) do if fl[i] then fl[i].hide = true end end
+		for e in pairs(nb.edges) do if e.v1.hide or e.v2.hide then e.hide = true end end
+		return nb
+	end
+	MOD.snapshot, MOD.restore = snapshot, restore
+	local function changed(what)
+		worldTris = nil
+		dirtyMesh, dirtyCage = true, true
+		if what then commit(what) end
+	end
+	local function wpp(at)
+		local cam = camera()
+		local depth = (cam.CFrame.Position - at).Magnitude
+		return 2 * depth * math.tan(math.rad(cam.FieldOfView) / 2) / math.max(1, cam.ViewportSize.Y)
+	end
+	local function selCenterLocal()
+		local vs = selectedVertsList()
+		return #vs > 0 and centerOf(vs) or V3()
+	end
+	local function cursorLocal() return origin:PointToObjectSpace(CURSOR) end
+	local function viewLocal(vec) return origin:VectorToObjectSpace(vec) end
+
+	-- ----- "live" tools: drag the mouse (or type a number) and the operator re-runs from the snapshot -----
+	-- mode: dist (>= 0, away from the selection), signed, x (left / right), angle (round the selection), drag (distance moved)
+	local function startParam(opts)
+		if not editing or modal then return end
+		local sn = snapshot()
+		local cLocal = opts.center or selCenterLocal()
+		local cw = W(cLocal)
+		local M = { kind = "param", name = opts.name, what = opts.what, cw = cw, cs = toScreen(cw), m0 = mousePos(), num = "", releaseConfirm = opts.releaseConfirm, acc = 0 }
+		local lastA = nil
+		M.update = function()
+			local mp = mousePos()
+			local num = tonumber(M.num)
+			local v
+			if num then
+				v = opts.mode == "angle" and math.rad(num) or num
+			elseif opts.mode == "dist" or opts.mode == "signed" then
+				v = ((mp - M.cs).Magnitude - (M.m0 - M.cs).Magnitude) * wpp(M.cw)
+				if opts.mode == "dist" then v = math.max(0, v) end
+			elseif opts.mode == "x" then
+				v = (mp.X - M.m0.X) / 200
+			elseif opts.mode == "drag" then
+				v = (mp - M.m0).Magnitude * wpp(M.cw)
+			elseif opts.mode == "angle" then
+				local a = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
+				if lastA then
+					local d = a - lastA
+					if d > math.pi then d -= 2 * math.pi elseif d < -math.pi then d += 2 * math.pi end
+					M.acc -= d
+				end
+				lastA = a
+				v = M.acc
+			elseif opts.mode == "vec" then
+				v = mp - M.m0
+			end
+			M.value = v
+			bm = restore(sn)
+			local ok, err = pcall(opts.fn, v)
+			if not ok then setStatus(opts.name .. ": " .. tostring(err)) end
+			worldTris = nil
+			dirtyMesh, dirtyCage = true, true
+			local shown = (typeof(v) == "number") and (opts.mode == "angle" and ("%.1f deg"):format(math.deg(v)) or ("%.3f"):format(v)) or ""
+			setStatus(("%s  %s%s   drag / type a value, click or Enter = done, Esc = cancel"):format(opts.name, shown, M.num ~= "" and ("  [" .. M.num .. "]") or ""))
+		end
+		M.finish = function(cancel)
+			if cancel and not opts.commitOnCancel then
+				bm = restore(sn)
+				changed()
+				setStatus(opts.name .. " cancelled.")
+				return
+			end
+			if cancel then bm = restore(sn) end
+			if M.value == nil and not cancel then M.update() end
+			flush()
+			changed(opts.name)
+			setStatus(opts.name .. " done.")
+		end
+		modal = M
+		lastA = nil
+		M.update()
+	end
+	MOD.startParam = startParam
+
+	local function selVertsSet() return MT.selVerts(bm) end
+	local function origOf(vs) local o = {} for v in pairs(vs) do o[v] = v.co end return o end
+	local function regionNormals(vs)
+		local n = {}
+		for v in pairs(vs) do
+			local s = V3()
+			for _, f in ipairs(BMesh.vertFaces(v)) do if f.sel then s += f.no end end
+			if s.Magnitude < 1e-9 then s = MT.vertNormal(v) end
+			n[v] = s.Magnitude > 1e-9 and s.Unit or V3(0, 1, 0)
+		end
+		return n
+	end
+
+	local T = {}
+	-- bevel (Ctrl B edges, Ctrl Shift B verts)
+	function T.bevel(opts)
+		local vertexOnly = (opts and opts.vertex) or mode == "vert"
+		if not vertexOnly and not next(MT.selEdges(bm)) then setStatus("Pick edges to bevel.") return end
+		if vertexOnly and not next(MT.selVerts(bm)) then setStatus("Pick verts to bevel.") return end
+		startParam({ name = vertexOnly and "Bevel Vertices" or "Bevel", mode = "dist", releaseConfirm = opts and opts.release, fn = function(d)
+			if d < 1e-3 then return end
+			local nb = MT.bevel(bm, d, vertexOnly)
+			if nb then bm = nb setMode("face") end
+		end })
+	end
+	function T.spin(opts)
+		local c, ax = cursorLocal(), viewLocal(camera().CFrame.LookVector)
+		startParam({ name = "Spin", mode = "angle", center = c, releaseConfirm = opts and opts.release, fn = function(a)
+			if math.abs(a) < 1e-3 then return end
+			MT.spin(bm, c, ax, a, 12)
+		end })
+	end
+	function T.smooth(opts)
+		startParam({ name = "Smooth Vertices", mode = "x", releaseConfirm = opts and opts.release, fn = function(x)
+			local f = math.clamp(x, 0, 1)
+			if f > 0 then MT.smooth(bm, selVertsSet(), f, 1 + math.floor(math.max(0, x - 1) * 4)) end
+		end })
+	end
+	function T.randomize(opts)
+		startParam({ name = "Randomize", mode = "drag", releaseConfirm = opts and opts.release, fn = function(d) MT.randomize(bm, selVertsSet(), d * 0.25, 1) end })
+	end
+	function T.shrinkFatten(opts)
+		startParam({ name = opts and opts.name or "Shrink/Fatten", mode = "signed", releaseConfirm = opts and opts.release, commitOnCancel = opts and opts.commitOnCancel, fn = function(d)
+			local vs = selVertsSet()
+			MT.shrinkFatten(vs, origOf(vs), regionNormals(vs), d)
+			bm:normalsUpdate()
+		end })
+	end
+	function T.pushPull(opts)
+		startParam({ name = "Push/Pull", mode = "signed", releaseConfirm = opts and opts.release, fn = function(d)
+			local vs = selVertsSet()
+			local c = V3() local n = 0
+			for v in pairs(vs) do c += v.co n += 1 end
+			if n > 0 then MT.pushPull(vs, origOf(vs), c / n, d) bm:normalsUpdate() end
+		end })
+	end
+	function T.shear(opts)
+		local r, u = viewLocal(camera().CFrame.RightVector), viewLocal(camera().CFrame.UpVector)
+		startParam({ name = "Shear", mode = "x", releaseConfirm = opts and opts.release, fn = function(x)
+			local vs = selVertsSet()
+			local c = V3() local n = 0
+			for v in pairs(vs) do c += v.co n += 1 end
+			if n > 0 then MT.shear(vs, origOf(vs), c / n, r, u, x) bm:normalsUpdate() end
+		end })
+	end
+	function T.toSphere(opts)
+		startParam({ name = "To Sphere", mode = "x", releaseConfirm = opts and opts.release, fn = function(x)
+			local vs = selVertsSet()
+			local c = V3() local n = 0
+			for v in pairs(vs) do c += v.co n += 1 end
+			if n > 0 then MT.toSphere(vs, origOf(vs), c / n, x) bm:normalsUpdate() end
+		end })
+	end
+	-- edge / vertex slide: every selected vert runs along the un-selected edge that best matches the drag
+	function T.slide(opts)
+		local single = opts and opts.vertex
+		startParam({ name = single and "Vertex Slide" or "Edge Slide", mode = "vec", releaseConfirm = opts and opts.release, fn = function(D)
+			if D.Magnitude < 3 then return end
+			local dir = D.Unit
+			for v in pairs(selVertsSet()) do
+				local best, bestDot, bestLen
+				local sp = toScreen(W(v.co))
+				for _, e in ipairs(BMesh.vertEdges(v)) do
+					local o = BMesh.otherVert(e, v)
+					if not e.hide and not (o.sel and not single) then
+						local so = toScreen(W(o.co))
+						local sd = so - sp
+						if sd.Magnitude > 1 then
+							local d = sd.Unit:Dot(dir)
+							if not bestDot or d > bestDot then best, bestDot, bestLen = o, d, sd.Magnitude end
+						end
+					end
+				end
+				if best and bestDot > 0 then
+					local t = math.clamp(D:Dot((toScreen(W(best.co)) - sp).Unit) / bestLen, 0, 1)
+					v.co = v.co:Lerp(best.co, t)
+				end
+			end
+			bm:normalsUpdate()
+		end })
+	end
+	-- extrude variants (Alt E)
+	function T.extrudeNormals(opts)
+		local fs = MT.selFaces(bm)
+		if not next(fs) then Tools.extrude() return end
+		Ops.extrudeFaceRegion(bm, fs)
+		bm:normalsUpdate()
+		flush()
+		T.shrinkFatten({ name = "Extrude Along Normals", release = opts and opts.release, commitOnCancel = true })
+	end
+	function T.extrudeIndividual(opts)
+		local fs = MT.selFaces(bm)
+		if not next(fs) then setStatus("Pick faces to extrude.") return end
+		MT.extrudeIndividual(bm, fs)
+		flush()
+		T.shrinkFatten({ name = "Extrude Individual Faces", release = opts and opts.release, commitOnCancel = true })
+	end
+	-- rip (V): faces on the mouse's side get their own copies of the selected verts, which then move
+	function T.rip(opts)
+		local sv = selVertsSet()
+		if not next(sv) then setStatus("Pick verts or edges to rip.") return end
+		local mp = mousePos()
+		local pts = {}
+		local c2 = Vector2.new()
+		for v in pairs(sv) do local p = toScreen(W(v.co)) pts[#pts + 1] = p c2 += p end
+		c2 = c2 / #pts
+		local lineDir
+		if #pts >= 2 then
+			local far, fd = pts[1], 0
+			for _, p in ipairs(pts) do local d = (p - pts[1]).Magnitude if d > fd then far, fd = p, d end end
+			lineDir = fd > 1 and (far - pts[1]).Unit or nil
+		end
+		local function side(p)
+			if lineDir then return lineDir.X * (p.Y - c2.Y) - lineDir.Y * (p.X - c2.X) end
+			return (p - c2):Dot(mp - c2)
+		end
+		local want = side(mp) >= 0
+		local nb = MT.rip(bm, function(f)
+			local touches = false
+			for _, v in ipairs(BMesh.faceVerts(f)) do if sv[v] then touches = true end end
+			if not touches then return false end
+			return (side(toScreen(W(BMesh.faceCenter(f)))) >= 0) == want
+		end)
+		if not nb then setStatus("Nothing to rip here.") return end
+		bm = nb
+		setMode("vert")
+		changed()
+		startTransform("G", { what = "Rip", releaseConfirm = opts and opts.release })
+	end
+	function T.ripEdge(opts)
+		local sv = selVertsSet()
+		if not next(sv) then setStatus("Pick verts to extend.") return end
+		local nv = Ops.extrudeVerts(bm, sv)
+		MT.clearSel(bm)
+		for v in pairs(nv) do v.sel = true end
+		setMode("vert")
+		changed()
+		startTransform("G", { what = "Rip Edge", releaseConfirm = opts and opts.release })
+	end
+
+	-- ----- knife (K) -----
+	local function knifeSnap(mp)
+		local v = pickVert(mp)
+		if v then return { v = v, pos = W(v.co) } end
+		local e = pickEdge(mp)
+		local function onEdge(ed)
+			local sa, sb = toScreen(W(ed.v1.co)), toScreen(W(ed.v2.co))
+			local _, t = segDist2(mp, sa, sb)
+			t = math.clamp(t, 0.02, 0.98)
+			return { e = ed, t = t, pos = W(ed.v1.co:Lerp(ed.v2.co, t)) }
+		end
+		if e then return onEdge(e) end
+		local f = pickFace()
+		if f then
+			local best, bd
+			for _, l in ipairs(BMesh.faceLoops(f)) do
+				local d = segDist2(mp, toScreen(W(l.e.v1.co)), toScreen(W(l.e.v2.co)))
+				if not bd or d < bd then best, bd = l.e, d end
+			end
+			if best then return onEdge(best) end
+		end
+		return nil
+	end
+	-- the edges a screen segment crosses (so a long cut goes through every face on the way)
+	local function crossings(p, q)
+		local sp, sq = toScreen(p.pos), toScreen(q.pos)
+		local out = {}
+		local skip = {}
+		for _, x in ipairs({ p, q }) do
+			if x.e then skip[x.e] = true end
+			if x.v then for _, e in ipairs(BMesh.vertEdges(x.v)) do skip[e] = true end end
+		end
+		local r = sq - sp
+		for e in pairs(bm.edges) do
+			if not skip[e] and not e.hide then
+				local a, b = toScreen(W(e.v1.co)), toScreen(W(e.v2.co))
+				local s = b - a
+				local den = r.X * s.Y - r.Y * s.X
+				if math.abs(den) > 1e-6 then
+					local w = a - sp
+					local u = (w.X * s.Y - w.Y * s.X) / den
+					local t = (w.X * r.Y - w.Y * r.X) / den
+					if u > 0.001 and u < 0.999 and t > 0.001 and t < 0.999 then
+						local wp = W(e.v1.co:Lerp(e.v2.co, t))
+						if xray or not occluded(wp, faceSetOfEdge(e)) then out[#out + 1] = { e = e, t = t, u = u, pos = wp } end
+					end
+				end
+			end
+		end
+		table.sort(out, function(x, y) return x.u < y.u end)
+		return out
+	end
+	function T.knife()
+		if not editing or modal then return end
+		local M = { kind = "knife", pts = {}, num = "" }
+		M.update = function() M.hover = knifeSnap(mousePos()) dirtyCage = true end
+		M.click = function()
+			M.update()
+			if M.hover then M.pts[#M.pts + 1] = M.hover end
+			setStatus(("Knife: %d point%s. Click to add, Enter = cut, Esc = cancel."):format(#M.pts, #M.pts == 1 and "" or "s"))
+		end
+		M.finish = function(cancel)
+			if cancel or #M.pts < 2 then setStatus("Knife cancelled.") return end
+			local chain = { M.pts[1] }
+			for i = 2, #M.pts do
+				for _, x in ipairs(crossings(M.pts[i - 1], M.pts[i])) do chain[#chain + 1] = x end
+				chain[#chain + 1] = M.pts[i]
+			end
+			local cut = MT.knife(bm, chain)
+			MT.clearSel(bm)
+			for e in pairs(cut) do e.sel = true e.v1.sel = true e.v2.sel = true end
+			setMode("edge")
+			changed("Knife")
+			setStatus("Knife cut.")
+			if MOD.tool == "knife" then task.defer(function() if editing and not modal and MOD.tool == "knife" then T.knife() end end) end
+		end
+		modal = M
+		setStatus("Knife: click points on edges / faces, Enter = cut, Esc = cancel.")
+	end
+	-- bisect: a cut along a line dragged on the screen (through the view)
+	function T.bisect(a, b)
+		local ra, rb = view and view:ray(a) or nil, view and view:ray(b) or nil
+		if not (ra and rb) then return end
+		local c = W(selCenterLocal())
+		local depth = (c - ra.Origin).Magnitude
+		local pa, pb = ra.Origin + ra.Direction * depth, rb.Origin + rb.Direction * depth
+		local n = (pb - pa):Cross(camera().CFrame.LookVector)
+		if n.Magnitude < 1e-6 then return end
+		local fs = MT.selFaces(bm)
+		local cut = MT.bisect(bm, origin:PointToObjectSpace(pa), viewLocal(n), next(fs) and fs or nil)
+		MT.clearSel(bm)
+		for e in pairs(cut) do e.sel = true e.v1.sel = true e.v2.sel = true end
+		setMode("edge")
+		changed("Bisect")
+	end
+
+	-- ----- 3D cursor, measure, annotate -----
+	local function surfacePoint(mp)
+		local ray = view and view:ray(mp) or getRay()
+		local best
+		if editing and bm then
+			local t = rayMesh(ray.Origin, ray.Direction)
+			if t then best = t end
+		end
+		for p, r in pairs(scene) do
+			if r.shown and r.bm and not (editing and p == obj) then
+				local o = originOf(p)
+				for _, t in ipairs(Display.triangles(r.bm)) do
+					local hit = rayTri(ray.Origin, ray.Direction, o * t[1], o * t[2], o * t[3])
+					if hit and (not best or hit < best) then best = hit end
+				end
+			end
+		end
+		if best then return ray.Origin + ray.Direction * best, true end
+		if ray.Direction.Y < -1e-3 then
+			local t = -ray.Origin.Y / ray.Direction.Y
+			if t > 0 then return ray.Origin + ray.Direction * t, false end
+		end
+		local n = camera().CFrame.LookVector
+		return planeHit(ray, CURSOR, n) or CURSOR, false
+	end
+	function MOD.placeCursor(mp)
+		CURSOR = surfacePoint(mp)
+		dirtyCage = true
+		setStatus(("3D cursor: %.2f, %.2f, %.2f"):format(CURSOR.X, CURSOR.Y, CURSOR.Z))
+	end
+	local function snapPoint(mp)
+		if editing and bm then
+			local v = pickVert(mp)
+			if v then return W(v.co) end
+		end
+		return (surfacePoint(mp))
+	end
+
+	-- ----- add cube (drag the base, then the height) -----
+	local function boxCorners(lo, hi)
+		local c = {}
+		for _, x in ipairs({ lo.X, hi.X }) do for _, y in ipairs({ lo.Y, hi.Y }) do for _, z in ipairs({ lo.Z, hi.Z }) do c[#c + 1] = V3(x, y, z) end end end
+		return c
+	end
+	local BOX_EDGES = { { 1, 2 }, { 3, 4 }, { 5, 6 }, { 7, 8 }, { 1, 3 }, { 2, 4 }, { 5, 7 }, { 6, 8 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 } }
+	local function makeBox(lo, hi)
+		local size = hi - lo
+		if math.abs(size.X) < 0.05 or math.abs(size.Z) < 0.05 then setStatus(("Too small (%.2f x %.2f) - drag a bigger base."):format(math.abs(size.X), math.abs(size.Z))) return end
+		local a = V3(math.min(lo.X, hi.X), math.min(lo.Y, hi.Y), math.min(lo.Z, hi.Z))
+		local b = V3(math.max(lo.X, hi.X), math.max(lo.Y, hi.Y), math.max(lo.Z, hi.Z))
+		if b.Y - a.Y < 0.05 then b = V3(b.X, a.Y + math.max(b.X - a.X, b.Z - a.Z), b.Z) end
+		local mid, sz = (a + b) / 2, b - a
+		if editing and bm then
+			local old = {}
+			for v in pairs(bm.verts) do old[v] = true end
+			Ops.cube(bm, 2)
+			MT.clearSel(bm)
+			local lmid = origin:PointToObjectSpace(mid)
+			for v in pairs(bm.verts) do
+				if not old[v] then
+					local w = mid + V3(v.co.X * sz.X / 2, v.co.Y * sz.Y / 2, v.co.Z * sz.Z / 2)
+					v.co = origin:PointToObjectSpace(w)
+					v.sel = true
+				end
+			end
+			bm:normalsUpdate()
+			flush()
+			changed("Add Cube")
+			local _ = lmid
+		else
+			local m = BMesh.new()
+			Ops.cube(m, 2)
+			for v in pairs(m.verts) do v.co = V3(v.co.X * sz.X / 2, v.co.Y * sz.Y / 2, v.co.Z * sz.Z / 2) end
+			m:normalsUpdate()
+			MOD.createPart(m, NAME .. " Cube", CFrame.new(mid))
+		end
+	end
+	function MOD.createPart(m, name, originCF)
+		local mp, c, err = Display.build(m)
+		if not mp then setStatus("Couldn't make the mesh: " .. tostring(err)) return end
+		local rec
+		pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER add") end)
+		mp.Name = name
+		mp.Anchored = true
+		mp.Color = Color3.fromRGB(200, 200, 205)
+		mp.Material = Enum.Material.SmoothPlastic
+		mp.CFrame = originCF * CFrame.new(c)
+		local sv = Instance.new("StringValue")
+		sv.Name = "RB_Data"
+		sv.Value = HttpService:JSONEncode(m:toData())
+		sv.Parent = mp
+		mp:SetAttribute("RB_Center", c)
+		mp:SetAttribute("RB_Size", mp.Size)
+		mp:SetAttribute("ROBLENDER", VERSION)
+		mp.Parent = workspace
+		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
+		sceneAdd(mp)
+		return mp
+	end
+	function T.addCube(a)
+		local p0, hitSurface = surfacePoint(a)
+		local h = p0.Y
+		local M = { kind = "addcube", num = "", phase = "base", base0 = p0, base1 = p0 }
+		local function onPlane(mp)
+			local ray = view and view:ray(mp) or getRay()
+			if math.abs(ray.Direction.Y) < 1e-4 then return M.base1 end
+			local t = (h - ray.Origin.Y) / ray.Direction.Y
+			return t > 0 and (ray.Origin + ray.Direction * t) or M.base1
+		end
+		M.update = function()
+			local mp = mousePos()
+			if M.phase == "base" then
+				M.base1 = onPlane(mp)
+				M.height = math.max(math.abs(M.base1.X - M.base0.X), math.abs(M.base1.Z - M.base0.Z))
+			else
+				M.height = math.max(0.05, (M.mUp.Y - mp.Y) * wpp(M.base1) + (M.h0 or 0))
+				if tonumber(M.num) then M.height = tonumber(M.num) end
+			end
+			dirtyCage = true
+		end
+		M.release = function()
+			if M.phase == "base" then M.phase = "height" M.mUp = mousePos() M.h0 = M.height setStatus("Add Cube: move up / down for the height, click = done.") return true end
+			return false
+		end
+		M.click = function() modal = nil makeBox(M.base0, M.base1 + V3(0, M.height or 1, 0)) dirtyCage = true end
+		M.finish = function(cancel) if not cancel then makeBox(M.base0, M.base1 + V3(0, M.height or 1, 0)) end end
+		M.box = function()
+			local lo = M.base0
+			local hi = M.base1 + V3(0, M.height or 0, 0)
+			return lo, hi
+		end
+		modal = M
+		local _ = hitSurface
+		setStatus("Add Cube: drag the base, let go, then set the height.")
+	end
+
+	-- ----- poly build -----
+	function T.polyBuild(mp, ctrl, shift)
+		if shift then
+			local x = pickAny()
+			if not x then return end
+			if mode == "face" and x.len then Ops.deleteFaces(bm, { [x] = true })
+			elseif x.co then Ops.deleteVerts(bm, { [x] = true })
+			elseif x.v1 then Ops.deleteEdges(bm, { [x] = true }) end
+			changed("Poly Build")
+			return
+		end
+		if ctrl then
+			local vs = selectedVertsList()
+			if #vs == 0 or #vs > 2 then setStatus("Poly Build: pick 1 vert (or an edge), then Ctrl-click.") return end
+			local c = W(centerOf(vs))
+			local p = planeHit(view and view:ray(mp) or getRay(), c, camera().CFrame.LookVector)
+			if not p then return end
+			local nv = bm:vertCreate(origin:PointToObjectSpace(p))
+			if #vs == 1 then
+				bm:edgeCreate(vs[1], nv)
+				MT.clearSel(bm)
+				nv.sel = true
+			else
+				local a, b = vs[1], vs[2]
+				local e = BMesh.edgeExists(a, b)
+				if e and e.l and e.l.v == a then a, b = b, a end
+				bm:faceCreate({ a, b, nv })
+				local keep = ((a.co - nv.co).Magnitude < (b.co - nv.co).Magnitude) and a or b
+				MT.clearSel(bm)
+				nv.sel, keep.sel = true, true
+			end
+			setMode("vert")
+			bm:normalsUpdate()
+			flush()
+			changed("Poly Build")
+			return
+		end
+		local v = pickVert(mp)
+		if v then
+			if not v.sel then MT.clearSel(bm) v.sel = true setMode("vert") flush() end
+			startTransform("G", { what = "Poly Build", releaseConfirm = true })
+		end
+	end
+
+	-- ----- loop cut tool preview -----
+	local function ringPreview(e)
+		local ring = Ops.edgeRing(bm, e)
+		local mids, lines = {}, {}
+		for i, r in ipairs(ring) do mids[i] = W((r.v1.co + r.v2.co) / 2) end
+		for i = 1, #mids - 1 do lines[#lines + 1] = { mids[i], mids[i + 1] } end
+		if #ring > 2 and BMesh.edgeFaceCount(ring[1]) == 2 then
+			local fs1 = faceSetOfEdge(ring[1])
+			for _, f in ipairs(BMesh.edgeFaces(ring[#ring])) do if fs1[f] then lines[#lines + 1] = { mids[#mids], mids[1] } break end end
+		end
+		return lines
+	end
+
+	-- ----- the active tool (toolbar) -----
+	local EDIT_ONLY = { extrude = true, extrudeNormals = true, extrudeIndividual = true, inset = true, bevel = true, loopcut = true, knife = true, bisect = true,
+		polybuild = true, spin = true, smooth = true, randomize = true, edgeslide = true, vertexslide = true, shrinkfatten = true, pushpull = true,
+		shear = true, tosphere = true, rip = true, ripedge = true }
+	function MOD.setTool(name)
+		MOD.tool = name
+		MOD.preview = nil
+		if modal and modal.kind == "knife" and name ~= "knife" then finishModal(true) end
+		if name == "knife" and editing and not modal then T.knife() end
+		dirtyCage = true
+		setStatus("Tool: " .. name)
+	end
+	function MOD.effectiveTool()
+		local t = MOD.tool
+		if EDIT_ONLY[t] and not editing then return "select" end
+		return t
+	end
+	-- LMB pressed in the 3D view with no modal running: returns true when the tool used it
+	function MOD.press(mp, shift, ctrl)
+		local t = MOD.effectiveTool()
+		if t == "select" then return false end
+		if t == "cursor" then MOD.pendingCursor = true return true end
+		if t == "measure" then
+			local p = snapPoint(mp)
+			MOD.measure = { a = p, b = p, dragging = true }
+			return true
+		end
+		if t == "annotate" then
+			MOD.strokes[#MOD.strokes + 1] = { surfacePoint(mp) }
+			MOD.drawing = true
+			MOD.lastAnn = mp
+			return true
+		end
+		if t == "addcube" then T.addCube(mp) return true end
+		if t == "bisect" then MOD.bisectFrom = mp MOD.bisectTo = mp return true end
+		if t == "polybuild" then T.polyBuild(mp, ctrl, shift) return true end
+		if t == "loopcut" then
+			local e = pickEdge(mp)
+			if e then
+				local newEdges = Ops.loopCut(bm, e, 0.5)
+				clearSel()
+				setMode("edge")
+				for ne in pairs(newEdges) do ne.sel = true end
+				flush()
+				changed("Loop cut")
+				MOD.preview = nil
+			end
+			return true
+		end
+		if t == "knife" then
+			if not modal then T.knife() end
+			if modal and modal.click then modal.click() end
+			return true
+		end
+		local hasSel
+		if editing then hasSel = #selectedVertsList() > 0 else hasSel = #Selection:Get() > 0 end
+		if t == "move" or t == "transform" then
+			local hit
+			if editing then hit = pickAny() else hit = pickObject(mp) end
+			if hit then
+				if editing then
+					if not hit.sel then clearSel() toggle(hit, true) flush() end
+					startTransform("G", { releaseConfirm = true })
+				else
+					if not table.find(Selection:Get(), hit) then selectObject(hit, false) end
+					startObjTransform("G")
+					if modal then modal.releaseConfirm = true end
+				end
+				return true
+			end
+			return false
+		end
+		if not hasSel then return false end
+		if t == "rotate" or t == "scale" then
+			local k = t == "rotate" and "R" or "S"
+			if editing then startTransform(k, { releaseConfirm = true }) else startObjTransform(k) if modal then modal.releaseConfirm = true end end
+			return true
+		end
+		local rel = { release = true }
+		if t == "extrude" then Tools.extrude() if modal then modal.releaseConfirm = true end
+		elseif t == "extrudeNormals" then T.extrudeNormals(rel)
+		elseif t == "extrudeIndividual" then T.extrudeIndividual(rel)
+		elseif t == "inset" then Tools.inset() if modal then modal.releaseConfirm = true end
+		elseif t == "bevel" then T.bevel(rel)
+		elseif t == "spin" then T.spin(rel)
+		elseif t == "smooth" then T.smooth(rel)
+		elseif t == "randomize" then T.randomize(rel)
+		elseif t == "edgeslide" then T.slide(rel)
+		elseif t == "vertexslide" then T.slide({ release = true, vertex = true })
+		elseif t == "shrinkfatten" then T.shrinkFatten(rel)
+		elseif t == "pushpull" then T.pushPull(rel)
+		elseif t == "shear" then T.shear(rel)
+		elseif t == "tosphere" then T.toSphere(rel)
+		elseif t == "rip" then T.rip(rel)
+		elseif t == "ripedge" then T.ripEdge(rel)
+		else return false end
+		return true
+	end
+	function MOD.move(mp)
+		local t = MOD.effectiveTool()
+		if MOD.measure and MOD.measure.dragging then MOD.measure.b = snapPoint(mp) dirtyCage = true return true end
+		if MOD.drawing then
+			if (mp - MOD.lastAnn).Magnitude > 4 then
+				local s = MOD.strokes[#MOD.strokes]
+				s[#s + 1] = surfacePoint(mp)
+				MOD.lastAnn = mp
+				dirtyCage = true
+			end
+			return true
+		end
+		if MOD.bisectFrom then MOD.bisectTo = mp dirtyCage = true return true end
+		if t == "loopcut" and editing and not modal then
+			local e = pickEdge(mp)
+			MOD.preview = e and ringPreview(e) or nil
+			dirtyCage = true
+		end
+		return false
+	end
+	function MOD.release(mp)
+		if MOD.pendingCursor then MOD.pendingCursor = nil MOD.placeCursor(mp) return true end
+		if MOD.measure and MOD.measure.dragging then
+			MOD.measure.dragging = false
+			local d = (MOD.measure.b - MOD.measure.a).Magnitude
+			setStatus(("Measure: %.3f studs  (Esc clears)"):format(d))
+			return true
+		end
+		if MOD.drawing then MOD.drawing = nil return true end
+		if MOD.bisectFrom then
+			local a, b = MOD.bisectFrom, mp
+			MOD.bisectFrom, MOD.bisectTo = nil, nil
+			if (b - a).Magnitude > 6 then T.bisect(a, b) end
+			dirtyCage = true
+			return true
+		end
+		return false
+	end
+
+	-- ----- extra drawing: cursor, knife, measure, annotations, previews -----
+	local function px(at, n) return n end
+	drawExtras = function()
+		if not view then return end
+		-- 3D cursor: red / white ring + cross (like Blender's)
+		local cf = view.CFrame
+		local r = view:pixel(CURSOR) * 11
+		local right, up = cf.RightVector, cf.UpVector
+		for i = 0, 11 do
+			local a0, a1 = i / 12 * math.pi * 2, (i + 1) / 12 * math.pi * 2
+			local p0 = CURSOR + (right * math.cos(a0) + up * math.sin(a0)) * r
+			local p1 = CURSOR + (right * math.cos(a1) + up * math.sin(a1)) * r
+			line(p0, p1, (i % 2 == 0) and Color3.fromRGB(255, 50, 50) or Color3.new(1, 1, 1), 1.3)
+		end
+		line(CURSOR - right * r * 1.6, CURSOR - right * r * 0.6, Color3.new(0, 0, 0), 1)
+		line(CURSOR + right * r * 0.6, CURSOR + right * r * 1.6, Color3.new(0, 0, 0), 1)
+		line(CURSOR - up * r * 1.6, CURSOR - up * r * 0.6, Color3.new(0, 0, 0), 1)
+		line(CURSOR + up * r * 0.6, CURSOR + up * r * 1.6, Color3.new(0, 0, 0), 1)
+		-- annotations
+		for _, s in ipairs(MOD.strokes) do
+			for i = 2, #s do line(s[i - 1], s[i], Color3.fromRGB(0, 200, 180), 2) end
+		end
+		-- measure
+		local m = MOD.measure
+		if m then
+			line(m.a, m.b, Color3.new(1, 1, 1), 1.6)
+			view:dot(m.a, Color3.new(1, 1, 1), 6) view:dot(m.b, Color3.new(1, 1, 1), 6)
+			ui:setLabel("measure", toScreen((m.a + m.b) / 2), ("%.3f"):format((m.b - m.a).Magnitude))
+		else
+			ui:setLabel("measure", nil)
+		end
+		-- knife
+		if modal and modal.kind == "knife" then
+			local pts = modal.pts
+			for i, p in ipairs(pts) do
+				view:dot(p.pos, Color3.fromRGB(80, 255, 80), 7)
+				if i > 1 then line(pts[i - 1].pos, p.pos, Color3.fromRGB(80, 255, 80), 1.8) end
+			end
+			if modal.hover then
+				view:dot(modal.hover.pos, Color3.fromRGB(255, 80, 80), 7)
+				if #pts > 0 then line(pts[#pts].pos, modal.hover.pos, Color3.fromRGB(255, 80, 80), 1.4) end
+			end
+		end
+		-- add cube box
+		if modal and modal.kind == "addcube" then
+			local lo, hi = modal.box()
+			local c = boxCorners(lo, hi)
+			for _, e in ipairs(BOX_EDGES) do line(c[e[1]], c[e[2]], Color3.new(1, 1, 1), 1.4) end
+		end
+		-- loop cut tool preview
+		if MOD.preview and not modal then
+			for _, s in ipairs(MOD.preview) do line(s[1], s[2], Color3.fromRGB(255, 220, 60), 2) end
+		end
+		-- bisect line
+		if MOD.bisectFrom and MOD.bisectTo then
+			local ra, rb = view:ray(MOD.bisectFrom), view:ray(MOD.bisectTo)
+			local d = (W(selCenterLocal()) - ra.Origin).Magnitude
+			line(ra.Origin + ra.Direction * d, rb.Origin + rb.Direction * d, Color3.new(1, 1, 1), 1.6)
+		end
+		local _ = px
+	end
+
+	-- ----- menu operators -----
+	local function need(sel, msg) if not sel then setStatus(msg) return false end return true end
+	local O = {}
+	O.Duplicate = function()
+		bm = MT.duplicate(bm)
+		changed()
+		startTransform("G", { what = "Duplicate" })
+	end
+	O.Split = function() local nb = MT.split(bm) if need(nb, "Pick faces to split.") then bm = nb changed("Split") end end
+	O.Separate = function()
+		local fs = MT.selFaces(bm)
+		if not need(next(fs), "Pick faces to separate.") then return end
+		local spec = MT.toSpec(bm)
+		local keepFaces = {}
+		for _, f in ipairs(spec.faces) do if f.sel then keepFaces[#keepFaces + 1] = f end end
+		spec.faces = keepFaces
+		spec.edges = {}
+		for _, sv in ipairs(spec.verts) do sv.loose = false end
+		local part = MT.fromSpec(spec)
+		Ops.deleteFaces(bm, fs)
+		changed("Separate")
+		local np = MOD.createPart(part, obj.Name .. ".001", origin)
+		if np then np.Color, np.Material = obj.Color, obj.Material end
+		setStatus("Separated into " .. (np and np.Name or "a new part") .. ".")
+	end
+	O.MergeCenter = function() Tools.merge() end
+	O.MergeCursor = function()
+		local vs = MT.selVerts(bm)
+		if not need(next(vs), "Pick verts.") then return end
+		local c = cursorLocal()
+		for v in pairs(vs) do v.co = c end
+		local nb = Ops.mergeByDistance(bm, vs, 1e-4)
+		bm = nb
+		changed("Merge at Cursor")
+	end
+	O.MergeCollapse = function()
+		local es = MT.selEdges(bm)
+		if not need(next(es), "Pick edges / faces to collapse.") then return end
+		bm = MT.edgeCollapse(bm, es)
+		changed("Collapse")
+	end
+	O.MergeDistance = function() Tools.mergeDist() end
+	O.DeleteVerts = function() Ops.deleteVerts(bm, MT.selVerts(bm)) changed("Delete") end
+	O.DeleteEdges = function() Ops.deleteEdges(bm, MT.selEdges(bm)) changed("Delete") end
+	O.DeleteFaces = function() Ops.deleteFaces(bm, MT.selFaces(bm)) changed("Delete") end
+	O.DeleteEdgesFaces = function() MT.deleteEdgesFaces(bm, MT.selEdges(bm), MT.selFaces(bm)) changed("Delete") end
+	O.DeleteOnlyFaces = function() MT.deleteOnlyFaces(bm, MT.selFaces(bm)) changed("Delete") end
+	O.DissolveVerts = function() local n = MT.dissolveVerts(bm, MT.selVerts(bm)) changed("Dissolve Vertices") setStatus(("Dissolved %d verts."):format(n)) end
+	O.DissolveEdges = function()
+		local n, ends = MT.dissolveEdges(bm, MT.selEdges(bm))
+		local ok, nb = MT.dissolveDeg2(bm, ends)
+		if ok and nb then bm = nb end
+		changed("Dissolve Edges")
+		setStatus(("Dissolved %d edges."):format(n))
+	end
+	O.DissolveFaces = function() MT.dissolveFaces(bm, MT.selFaces(bm)) changed("Dissolve Faces") end
+	O.Dissolve = function()
+		if mode == "vert" then O.DissolveVerts() elseif mode == "edge" then O.DissolveEdges() else O.DissolveFaces() end
+	end
+	O.EdgeCollapse = O.MergeCollapse
+	O.DeleteEdgeLoops = O.DissolveEdges
+	O.DeleteLoose = function() local n = MT.deleteLoose(bm) changed("Delete Loose") setStatus(("Removed %d loose bits."):format(n)) end
+	O.RotateCW = function() for e in pairs(MT.selEdges(bm)) do MT.rotateEdge(bm, e, false) end changed("Rotate Edge") end
+	O.RotateCCW = function() for e in pairs(MT.selEdges(bm)) do MT.rotateEdge(bm, e, true) end changed("Rotate Edge") end
+	O.Bridge = function() local out, err = MT.bridge(bm) if not out then setStatus(err) return end flush() changed("Bridge Edge Loops") end
+	O.SubdivideRing = function()
+		local e = next(MT.selEdges(bm))
+		if not need(e, "Pick an edge of the ring.") then return end
+		local ne = Ops.loopCut(bm, e, 0.5)
+		MT.clearSel(bm)
+		for x in pairs(ne) do x.sel = true end
+		setMode("edge")
+		changed("Subdivide Edge-Ring")
+	end
+	O.Poke = function() MT.poke(bm, MT.selFaces(bm)) setMode("face") changed("Poke Faces") end
+	O.Triangulate = function() MT.triangulate(bm, MT.selFaces(bm), Display.triangulate) setMode("face") changed("Triangulate Faces") end
+	O.TrisToQuads = function() local n = MT.trisToQuads(bm, MT.selFaces(bm)) flush() changed("Tris to Quads") setStatus(("Joined %d pairs."):format(n)) end
+	O.Solidify = function()
+		local fs = MT.selFaces(bm)
+		if not need(next(fs), "Pick faces to solidify.") then return end
+		startParam({ name = "Solidify Faces", mode = "dist", fn = function(d)
+			if d > 1e-3 then MT.solidify(bm, MT.selFaces(bm), d) end
+		end })
+	end
+	O.Connect = function()
+		local made = MT.connectVerts(bm, MT.selVerts(bm))
+		for e in pairs(made) do e.sel = true end
+		changed("Connect Vertex Pairs")
+	end
+	O.Fill = function() Tools.fill() end
+	O.BeautyFill = function() MT.triangulate(bm, MT.selFaces(bm), Display.triangulate) changed("Beautify Faces") end
+	O.ConvexHull = function()
+		local out, err = MT.convexHull(bm, MT.selVerts(bm))
+		if not out then setStatus(err) return end
+		setMode("face")
+		changed("Convex Hull")
+	end
+	O.SymmetrizeX = function() bm = MT.symmetrize(bm, "X") changed("Symmetrize") end
+	O.RecalcOutside = function()
+		local fs = MT.selFaces(bm)
+		bm = MT.recalcNormals(bm, next(fs) and fs or nil, false)
+		changed("Recalculate Outside")
+	end
+	O.RecalcInside = function()
+		local fs = MT.selFaces(bm)
+		bm = MT.recalcNormals(bm, next(fs) and fs or nil, true)
+		changed("Recalculate Inside")
+	end
+	O.ShadeSmooth = function()
+		local fs = MT.selFaces(bm)
+		for f in pairs(next(fs) and fs or bm.faces) do f.smooth = true end
+		changed("Shade Smooth")
+	end
+	O.ShadeFlat = function()
+		local fs = MT.selFaces(bm)
+		for f in pairs(next(fs) and fs or bm.faces) do f.smooth = nil end
+		changed("Shade Flat")
+	end
+	for _, k in ipairs({ "sharp", "seam" }) do
+		local K = k:sub(1, 1):upper() .. k:sub(2)
+		O["Mark" .. K] = function() for e in pairs(MT.selEdges(bm)) do e[k] = true end changed("Mark " .. K) end
+		O["Clear" .. K] = function() for e in pairs(MT.selEdges(bm)) do e[k] = nil end changed("Clear " .. K) end
+	end
+	O.SelectMore = function() MT.selectMore(bm, mode) flush() changed() end
+	O.SelectLess = function() MT.selectLess(bm, mode) flush() changed() end
+	O.SelectLinked = function() MT.selectLinked(bm, MT.selVerts(bm)) flush() changed() end
+	O.PickLinked = function()
+		local x = pickAny()
+		if not x then return end
+		local seed = {}
+		if x.co then seed[x] = true elseif x.v1 then seed[x.v1] = true else for _, v in ipairs(BMesh.faceVerts(x)) do seed[v] = true end end
+		MT.selectLinked(bm, seed)
+		flush()
+		changed()
+	end
+	O.SelectRandom = function() MT.selectRandom(bm, mode, 0.5, math.floor(os.clock() * 1000) % 997) flush() changed() end
+	O.Checker = function() MT.checkerDeselect(bm, mode) flush() changed() end
+	O.NonManifold = function() setMode("vert") MT.selectNonManifold(bm) flush() changed() end
+	O.Loose = function() setMode("vert") MT.selectLoose(bm) flush() changed() end
+	O.SharpEdges = function() setMode("edge") MT.selectSharp(bm) flush() changed() end
+	O.FacesBySides = function() setMode("face") MT.selectBySides(bm, 4) flush() changed() end
+	O.SelectRing = function()
+		local e = pickEdge(mousePos()) or next(MT.selEdges(bm))
+		if e then setMode("edge") MT.selectRing(bm, e, shiftDown()) flush() changed() end
+	end
+	O.Hide = function() MT.hide(bm, mode, false) changed() end
+	O.HideUnselected = function() MT.hide(bm, mode, true) changed() end
+	O.Reveal = function() MT.reveal(bm) flush() changed() end
+	for _, a in ipairs({ "X", "Y", "Z" }) do
+		O["Mirror" .. a] = function()
+			local vs = MT.selVerts(bm)
+			if not need(next(vs), "Pick something to mirror.") then return end
+			local c = V3()
+			local n = 0
+			for v in pairs(vs) do c += v.co n += 1 end
+			bm = MT.mirror(bm, vs, c / n, ({ X = V3(1, 0, 0), Y = V3(0, 1, 0), Z = V3(0, 0, 1) })[a])
+			changed("Mirror " .. a)
+		end
+	end
+	O.SelToCursor = function()
+		local vs = selectedVertsList()
+		if #vs == 0 then return end
+		local d = cursorLocal() - centerOf(vs)
+		for _, v in ipairs(vs) do v.co += d end
+		bm:normalsUpdate()
+		changed("Selection to Cursor")
+	end
+	O.SelToGrid = function()
+		for _, v in ipairs(selectedVertsList()) do
+			local w = W(v.co)
+			v.co = origin:PointToObjectSpace(V3(math.floor(w.X + 0.5), math.floor(w.Y + 0.5), math.floor(w.Z + 0.5)))
+		end
+		bm:normalsUpdate()
+		changed("Selection to Grid")
+	end
+	O.CursorToSel = function()
+		if editing and bm then
+			local vs = selectedVertsList()
+			if #vs > 0 then CURSOR = W(centerOf(vs)) end
+		else
+			local ps = selectedParts()
+			if #ps > 0 then local c = V3() for _, p in ipairs(ps) do c += p.CFrame.Position end CURSOR = c / #ps end
+		end
+		dirtyCage = true
+	end
+	O.CursorToOrigin = function() CURSOR = V3() dirtyCage = true end
+	O.CursorToGrid = function() CURSOR = V3(math.floor(CURSOR.X + 0.5), math.floor(CURSOR.Y + 0.5), math.floor(CURSOR.Z + 0.5)) dirtyCage = true end
+	O.ClearAnnotations = function() MOD.strokes = {} dirtyCage = true end
+	-- modal tools from menus / keys
+	O.Bevel = function() T.bevel() end
+	O.BevelVerts = function() T.bevel({ vertex = true }) end
+	O.Knife = function() T.knife() end
+	O.Spin = function() T.spin() end
+	O.Smooth = function() T.smooth() end
+	O.Randomize = function() T.randomize() end
+	O.EdgeSlide = function() T.slide() end
+	O.VertexSlide = function() T.slide({ vertex = true }) end
+	O.ShrinkFatten = function() T.shrinkFatten() end
+	O.PushPull = function() T.pushPull() end
+	O.Shear = function() T.shear() end
+	O.ToSphere = function() T.toSphere() end
+	O.Rip = function() T.rip() end
+	O.RipEdge = function() T.ripEdge() end
+	O.ExtrudeNormals = function() T.extrudeNormals() end
+	O.ExtrudeIndividual = function() T.extrudeIndividual() end
+	O.ExtrudeEdges = function() setMode("edge") Tools.extrude() end
+	O.ExtrudeVerts = function() setMode("vert") Tools.extrude() end
+	MOD.ops = O
+	MOD.T = T
+
+	-- ----- Blender's Edit Mode shortcuts (the ones not handled elsewhere) -----
+	function MOD.editKey(k, shift, ctrl, alt)
+		local K = Enum.KeyCode
+		local function menu(name) ui:openNamedMenu(name, mousePos()) return true end
+		if k == K.B and ctrl and shift then O.BevelVerts() return true end
+		if k == K.B and ctrl then O.Bevel() return true end
+		if k == K.K and not ctrl then O.Knife() return true end
+		if k == K.S and ctrl and alt and shift then O.Shear() return true end
+		if k == K.S and alt and shift then O.ToSphere() return true end
+		if k == K.S and alt then O.ShrinkFatten() return true end
+		if k == K.S and shift then return menu("snap") end
+		if k == K.V and ctrl then return menu("vertex") end
+		if k == K.V and not ctrl and not alt then O.Rip() return true end
+		if k == K.D and alt then O.RipEdge() return true end
+		if k == K.D and shift then O.Duplicate() return true end
+		if k == K.Y and not ctrl then O.Split() return true end
+		if k == K.P and not ctrl then O.Separate() return true end
+		if k == K.X and ctrl then O.Dissolve() return true end
+		if k == K.X or k == K.Delete then return menu("delete") end
+		if k == K.M and not ctrl then return menu("merge") end
+		if k == K.J and alt then O.TrisToQuads() return true end
+		if k == K.J and not ctrl then O.Connect() return true end
+		if k == K.T and ctrl then O.Triangulate() return true end
+		if k == K.N and shift then O.RecalcOutside() return true end
+		if k == K.H and alt then O.Reveal() return true end
+		if k == K.H and shift then O.HideUnselected() return true end
+		if k == K.H then O.Hide() return true end
+		if k == K.L and ctrl then O.SelectLinked() return true end
+		if k == K.L then O.PickLinked() return true end
+		if k == K.E and alt then return menu("extrude") end
+		if k == K.E and ctrl then return menu("edge") end
+		if k == K.F and ctrl then return menu("face") end
+		if k == K.F and alt then O.BeautyFill() return true end
+		if k == K.O and not ctrl then EDIT.prop = not EDIT.prop setStatus("Proportional editing " .. (EDIT.prop and "on (wheel = size while moving)" or "off")) return true end
+		if (k == K.KeypadPlus or k == K.Equals) and ctrl then O.SelectMore() return true end
+		if (k == K.KeypadMinus or k == K.Minus) and ctrl then O.SelectLess() return true end
+		return false
+	end
+	-- keys inside a running G (GG = edge slide) and the wheel (proportional size)
+	function MOD.modalKey(k)
+		if k == Enum.KeyCode.G and modal and modal.kind == "G" and not modal.obj and not modal.axis and modal.num == "" then
+			finishModal(true)
+			T.slide()
+			return true
+		end
+		return false
+	end
+	function MOD.wheel(steps)
+		if modal and modal.propWeights then
+			EDIT.propR = math.clamp(EDIT.propR * (steps > 0 and 0.9 or 1.1), 0.05, 1000)
+			modal.propWeights()
+			applyTransform()
+			return true
+		end
+		return false
+	end
+	return MOD
+end
+local MOD = modelingTools()
+
 local function toggleXray() xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off")) end
 local function toggleEdit()
 	if editing then exitEdit() return end
@@ -1440,13 +2533,24 @@ local TOOL = {
 	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
+local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
+for name, fn in pairs(MOD.ops) do
+	if not TOOL[name] or name == "Duplicate" then
+		if ANY_MODE[name] then TOOL[name] = fn
+		elseif name == "Duplicate" then
+			local objDup = TOOL.Duplicate
+			TOOL.Duplicate = function() if editing then if not modal then fn() end else objDup() end end
+		else TOOL[name] = needEdit(fn) end
+	end
+end
 
 local api = { version = VERSION }
 local setUIOn, setStudioView
 function api.state()
 	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
-		camCF = camera().CFrame, viewName = view and view.viewName or nil }
+		camCF = camera().CFrame, viewName = view and view.viewName or nil,
+		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX }
 	local p = selectedPart()
 	if p then
 		st.objName, st.isRB = p.Name, isRB(p)
@@ -1491,6 +2595,11 @@ function api.outliner()
 	return list
 end
 api.toggleEdit = toggleEdit
+api.setTool = function(name) MOD.setTool(name) end
+api.toggleEdit2 = function(key)
+	EDIT[key] = not EDIT[key]
+	setStatus(({ snap = "Snapping", prop = "Proportional editing", mirrorX = "X mirror" })[key] .. (EDIT[key] and " on." or " off."))
+end
 api.toggleXray = toggleXray
 api.togglePanel = function() widget.Enabled = not widget.Enabled end
 api.setMode = function(m) if editing and not modal then setMode(m) end end
@@ -1701,6 +2810,18 @@ end
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
 	if ui:overUI(mp) then return end
+	if modal and modal.click then
+		local ok, err = pcall(modal.click)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
+	if modal and modal.releaseConfirm then return end
+	if not modal and (editing or ownView()) then
+		local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+		local ok, used = pcall(MOD.press, mp, shiftDown(), ctrl)
+		if not ok then warn(NAME .. ": " .. tostring(used)) return end
+		if used then return end
+	end
 	if modal then
 		if modal.kind == "loopcut" then pcall(updateLoopCut) end
 		local ok, err = pcall(finishModal, false)
@@ -1712,6 +2833,19 @@ mouse.Button1Down:Connect(function()
 end)
 mouse.Button1Up:Connect(function()
 	if uiOn then ui:mouseUp() end
+	if modal and modal.release then
+		local ok, used = pcall(modal.release)
+		if ok and used then return end
+	end
+	if modal and modal.releaseConfirm then
+		local ok, err = pcall(finishModal, false)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
+	do
+		local ok, used = pcall(MOD.release, mousePos())
+		if not ok then warn(NAME .. ": " .. tostring(used)) elseif used then down = nil return end
+	end
 	if not down then return end
 	local a, b = down, mousePos()
 	down = nil
@@ -1758,13 +2892,16 @@ pcall(function()
 		if not (nd and nd.rmb) then return end
 		navDrag = nil
 		if nd.moved < 4 then
-			local ok, err = pcall(function() ui:openContextMenu(mousePos()) end)
+			local ok, err = pcall(function()
+				if nd.kind == "pan" then MOD.placeCursor(mousePos()) else ui:openContextMenu(mousePos()) end
+			end)
 			if not ok then warn(NAME .. ": " .. tostring(err)) end
 		end
 	end)
 end)
 local wheelFromMouse = false
 local function wheel(steps)
+	if modal and MOD.wheel(steps) then return end
 	if not ownView() or ui.menuOpen or not ui:inCanvas(mousePos()) then return end
 	view:zoom(steps)
 	dirtyCage = true
@@ -1782,6 +2919,15 @@ mouse.Move:Connect(function()
 		navDrag.moved += math.abs(dx) + math.abs(dy)
 		if dx ~= 0 or dy ~= 0 then api.navDrag(navDrag.kind, dx, dy) end
 		return
+	end
+	if modal and modal.update then
+		local ok, err = pcall(modal.update)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
+	do
+		local ok, used = pcall(MOD.move, mp)
+		if not ok then warn(NAME .. ": " .. tostring(used)) elseif used then return end
 	end
 	if not editing and not (modal and modal.obj) then
 		if down and ownView() then
@@ -1840,11 +2986,12 @@ local function modalKey(k)
 			return
 		end
 	end
+	if k == Enum.KeyCode.Space and modal.kind == "knife" then finishModal(false) return end
 	local ch = DIGITS[k.Name]
 	if ch then modal.num = (modal.num or "") .. ch
 	elseif k == Enum.KeyCode.Backspace then modal.num = (modal.num or ""):sub(1, -2)
 	else return end
-	if modal.kind == "inset" then updateInset() elseif modal.kind ~= "loopcut" then applyTransform() end
+	if modal.update then modal.update() elseif modal.kind == "inset" then updateInset() elseif modal.kind ~= "loopcut" then applyTransform() end
 end
 local function navKey(k, ctrl)
 	if not ownView() then return false end
@@ -1861,6 +3008,7 @@ local function navKey(k, ctrl)
 end
 local function objectKey(k, shift, ctrl, alt)
 	if not ownView() then return end
+	if k == Enum.KeyCode.S and shift and not ctrl and not alt then ui:openNamedMenu("snap", mousePos()) return end
 	if k == Enum.KeyCode.G and not ctrl then startObjTransform("G")
 	elseif k == Enum.KeyCode.R and not ctrl then startObjTransform("R")
 	elseif k == Enum.KeyCode.S and not ctrl then startObjTransform("S")
@@ -1907,12 +3055,18 @@ UIS.InputBegan:Connect(function(input, gp)
 		if used then return end
 	end
 	local ok, err = pcall(function()
-		if modal then modalKey(k) return end
+		if modal then
+			if MOD.modalKey(k) then return end
+			modalKey(k)
+			return
+		end
 		if navKey(k, ctrl) then return end
+		if k == Enum.KeyCode.Escape and MOD.measure then MOD.measure = nil dirtyCage = true return end
 		if not editing then
 			if uiOn then objectKey(k, shift, ctrl, alt) end
 			return
 		end
+		if uiOn and MOD.editKey(k, shift, ctrl, alt) then return end
 		if k == Enum.KeyCode.One then setMode("vert")
 		elseif k == Enum.KeyCode.Two then setMode("edge")
 		elseif k == Enum.KeyCode.Three then setMode("face")

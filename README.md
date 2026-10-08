@@ -35,6 +35,55 @@ Click the **ROBLENDER** button in the Plugins tab. A Blender-style window opens 
 | Properties | Object tab: name, location, rotation, size. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
 | Status bar | Mouse hints and the last message. |
 
+**The Modeling tab (Edit Mode)**
+
+The tool strip has Blender's Edit Mode tools. Click a tool, then drag in the 3D view to use it. Right-click a tool with a small corner mark to pick the other tools in its group.
+
+| Group | Tools |
+|---|---|
+| Select and place | Select Box; Cursor (also Shift right-click) |
+| Transform | Move, Rotate, Scale, Transform |
+| Notes | Annotate; Measure |
+| Add | Add Cube (drag the base, then the height) |
+| Extrude | Extrude Region, Extrude Along Normals, Extrude Individual |
+| Cutting | Inset Faces; Bevel; Loop Cut; Knife and Bisect; Poly Build |
+| Reshaping | Spin; Smooth and Randomize; Edge Slide and Vertex Slide; Shrink/Fatten and Push/Pull; Shear and To Sphere |
+| Rip | Rip Region and Rip Edge |
+
+The header menus (Mesh, Vertex, Edge, Face) follow Blender's own menu lists:
+
+| Menu | What's in it |
+|---|---|
+| Mesh | Transform, Mirror, Snap, Duplicate, Extrude, Merge, Split, Separate, Bisect, Knife, Convex Hull, Symmetrize, Normals, Shading (smooth or flat), Show/Hide, Clean Up, Delete |
+| Vertex | Extrude, Bevel Vertices, New Edge/Face, Connect Vertex Pairs, Rip, Slide, Smooth |
+| Edge | Extrude, Bevel Edges, Bridge Edge Loops, Subdivide (and Edge-Ring), Rotate Edge, Edge Slide, Loop Cut, Mark/Clear Seam and Sharp |
+| Face | Extrude (three ways), Inset, Poke, Triangulate, Tris to Quads, Solidify, Fill, Beautify, Shade Smooth/Flat |
+
+The header also has toggles for snapping, proportional editing (O; the mouse wheel changes its size while moving) and X mirror.
+
+| Keys | What they do |
+|---|---|
+| Ctrl B, Ctrl Shift B | Bevel edges, bevel vertices |
+| K | Knife |
+| V, Alt D | Rip, rip and extend |
+| Y | Split |
+| P | Separate into a new part |
+| Shift D | Duplicate |
+| X / Delete | Delete menu |
+| Ctrl X | Dissolve |
+| M | Merge menu |
+| J | Connect vertex pairs |
+| Ctrl T, Alt J | Triangulate, tris to quads |
+| Shift N | Recalculate normals |
+| H, Shift H, Alt H | Hide selected, hide unselected, reveal |
+| L, Ctrl L | Select linked under the mouse, select linked |
+| Ctrl + / Ctrl - | Select more / less |
+| Alt S, Shift Alt S, Shift Ctrl Alt S | Shrink/Fatten, To Sphere, Shear |
+| G G | Edge slide |
+| Shift S | Snap menu |
+| Alt E | Extrude menu |
+| Ctrl V, Ctrl E, Ctrl F | Vertex, Edge and Face menus |
+
 **Getting around the 3D view**
 
 | Action | How |
@@ -100,6 +149,7 @@ ROBLENDER saves each mesh to Roblox as a real **Mesh asset**, using `AssetServic
 |---|---|
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
+| `src/MeshTools.lua` | The Modeling tab's operators: bevel, knife, bisect, spin, smooth, rip, split, dissolve, bridge, poke, triangulate, solidify, hull, symmetrize, normals, selection tools. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/View.lua` | ROBLENDER's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |

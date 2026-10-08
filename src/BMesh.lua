@@ -401,12 +401,19 @@ function BMesh:toData()
 		fs[#fs + 1] = idx
 		fOrder[#fOrder + 1] = f
 	end
-	-- loose edges (no face) too
-	local es = {}
+	-- loose edges (no face) too, plus smooth faces and sharp / seam edges
+	local es, sm, sh, se = {}, {}, {}, {}
 	for e in pairs(self.edges) do
 		if not e.l then es[#es + 1] = vi[e.v1] es[#es + 1] = vi[e.v2] end
+		if e.sharp then sh[#sh + 1] = vi[e.v1] sh[#sh + 1] = vi[e.v2] end
+		if e.seam then se[#se + 1] = vi[e.v1] se[#se + 1] = vi[e.v2] end
 	end
-	return { v = vs, f = fs, e = es }, vi, fOrder
+	for i, f in ipairs(fOrder) do if f.smooth then sm[#sm + 1] = i end end
+	local d = { v = vs, f = fs, e = es }
+	if #sm > 0 then d.s = sm end
+	if #sh > 0 then d.sh = sh end
+	if #se > 0 then d.se = se end
+	return d, vi, fOrder
 end
 
 -- returns the mesh + its verts and faces in data order (so a selection can be carried across)
@@ -421,6 +428,14 @@ function BMesh.fromData(d)
 	end
 	local es = d.e or {}
 	for i = 1, #es, 2 do if vs[es[i]] and vs[es[i + 1]] then bm:edgeCreate(vs[es[i]], vs[es[i + 1]], true) end end
+	for _, i in ipairs(d.s or {}) do if fl[i] then fl[i].smooth = true end end
+	for key, list in pairs({ sharp = d.sh or {}, seam = d.se or {} }) do
+		for i = 1, #list, 2 do
+			local a, b = vs[list[i]], vs[list[i + 1]]
+			local e = a and b and BMesh.edgeExists(a, b)
+			if e then e[key] = true end
+		end
+	end
 	return bm, vs, fl
 end
 

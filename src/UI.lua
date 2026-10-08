@@ -159,6 +159,48 @@ local function icon(parent, kind, col, size)
 		rect(box, 1, 3, 14, 10, col, false) seg(box, 4, 10, 8, 6, col) seg(box, 8, 6, 12, 10, col)
 	elseif kind == "check" then
 		seg(box, 3, 8, 6.5, 12, col, 2) seg(box, 6.5, 12, 13, 4, col, 2)
+	elseif kind == "cursor" then
+		ring(box, 8, 8, 5, rgb(0xff4040), false) seg(box, 8, 0, 8, 4, col) seg(box, 8, 12, 8, 16, col) seg(box, 0, 8, 4, 8, col) seg(box, 12, 8, 16, 8, col)
+	elseif kind == "transform" then
+		ring(box, 8, 8, 6.5, col, false) seg(box, 8, 3, 8, 13, col) seg(box, 3, 8, 13, 8, col) rect(box, 11, 11, 4, 4, col, true)
+	elseif kind == "annotate" then
+		seg(box, 3, 13, 12, 4, col, 2) seg(box, 12, 4, 14, 2, rgb(0x00c8b4), 2) seg(box, 2, 15, 8, 15, rgb(0x00c8b4), 1.5)
+	elseif kind == "measure" then
+		seg(box, 2, 13, 13, 2, col, 4) seg(box, 5, 10, 6.5, 11.5, T.header, 1) seg(box, 8, 7, 9.5, 8.5, T.header, 1) seg(box, 11, 4, 12.5, 5.5, T.header, 1)
+	elseif kind == "bevel" then
+		seg(box, 2, 14, 2, 6, col) seg(box, 2, 6, 6, 2, rgb(0xffa030), 2) seg(box, 6, 2, 14, 2, col) seg(box, 2, 14, 14, 14, col) seg(box, 14, 14, 14, 2, col)
+	elseif kind == "knife" then
+		seg(box, 3, 13, 13, 3, col, 2) seg(box, 3, 13, 6, 13, col, 2) rect(box, 10, 1, 5, 4, col, true)
+	elseif kind == "bisect" then
+		rect(box, 2, 2, 12, 12, col, false) seg(box, 0, 15, 16, 1, rgb(0xffd800), 1.5)
+	elseif kind == "polybuild" then
+		seg(box, 2, 14, 8, 3, col) seg(box, 8, 3, 13, 14, col) seg(box, 2, 14, 13, 14, col) seg(box, 13, 2, 13, 8, rgb(0x80ff80), 1.5) seg(box, 10, 5, 16, 5, rgb(0x80ff80), 1.5)
+	elseif kind == "spin" then
+		ring(box, 8, 8, 6, col, false) rect(box, 5, 1, 6, 4, T.header, true) seg(box, 11, 2, 14, 4, col) ring(box, 8, 8, 1.5, rgb(0xff4040), true)
+	elseif kind == "smooth" then
+		seg(box, 1, 10, 5, 6, col) seg(box, 5, 6, 9, 10, col) seg(box, 9, 10, 13, 6, col) seg(box, 13, 6, 15, 8, col)
+	elseif kind == "randomize" then
+		ring(box, 3, 4, 1.5, col, true) ring(box, 11, 3, 1.5, col, true) ring(box, 7, 9, 1.5, col, true) ring(box, 13, 12, 1.5, col, true) ring(box, 3, 13, 1.5, col, true)
+	elseif kind == "edgeslide" then
+		seg(box, 2, 4, 14, 4, col) seg(box, 2, 12, 14, 12, col) seg(box, 4, 8, 12, 8, rgb(0xffa030), 2) seg(box, 12, 8, 10, 6, rgb(0xffa030)) seg(box, 12, 8, 10, 10, rgb(0xffa030))
+	elseif kind == "vertexslide" then
+		seg(box, 2, 12, 14, 12, col) ring(box, 6, 12, 2, rgb(0xffa030), true) seg(box, 8, 8, 13, 8, rgb(0xffa030)) seg(box, 13, 8, 11, 6, rgb(0xffa030))
+	elseif kind == "shrinkfatten" then
+		ring(box, 8, 8, 4, col, false) seg(box, 8, 4, 8, 0, col) seg(box, 8, 12, 8, 16, col) seg(box, 4, 8, 0, 8, col) seg(box, 12, 8, 16, 8, col)
+	elseif kind == "pushpull" then
+		ring(box, 8, 8, 2, col, true) seg(box, 2, 2, 5, 5, col) seg(box, 14, 2, 11, 5, col) seg(box, 2, 14, 5, 11, col) seg(box, 14, 14, 11, 11, col)
+	elseif kind == "shear" then
+		seg(box, 5, 3, 15, 3, col) seg(box, 1, 13, 11, 13, col) seg(box, 5, 3, 1, 13, col) seg(box, 15, 3, 11, 13, col)
+	elseif kind == "tosphere" then
+		rect(box, 1, 1, 14, 14, col, false) ring(box, 8, 8, 5, rgb(0xffa030), false)
+	elseif kind == "rip" then
+		seg(box, 2, 2, 8, 9, col) seg(box, 14, 2, 8, 9, col) seg(box, 8, 9, 8, 15, col) seg(box, 4, 2, 9, 7, rgb(0xffa030))
+	elseif kind == "ripedge" then
+		seg(box, 2, 14, 8, 8, col) seg(box, 8, 8, 14, 14, col) seg(box, 8, 8, 8, 2, rgb(0xffa030), 2)
+	elseif kind == "magnet" then
+		seg(box, 4, 3, 4, 10, col, 3) seg(box, 12, 3, 12, 10, col, 3) ring(box, 8, 10, 4, col, false) rect(box, 2, 2, 4, 3, rgb(0xff4040), true) rect(box, 10, 2, 4, 3, rgb(0xff4040), true)
+	elseif kind == "prop" then
+		ring(box, 8, 8, 6.5, col, false) ring(box, 8, 8, 2, col, true)
 	elseif kind == "logo" then
 		local f = rect(box, 0, 0, 16, 16, T.orange, true) corner(f, 4)
 		label(box, { Size = UDim2.fromScale(1, 1), Text = "R", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = T.white, TextXAlignment = Enum.TextXAlignment.Center })
@@ -344,15 +386,27 @@ function UI:buildView()
 		return b
 	end
 	pd("View", function() return self:viewMenu() end)
-	pd("Select", function() return self:selectMenu() end)
+	pd("Select", function() return api.state().editing and self:selectMenuEdit() or self:selectMenu() end)
 	pd("Add", function() return self:addMeshItems() end)
 	self.objMenuBtn = pd("Object", function() return api.state().editing and self:meshMenu() or self:objectMenu() end)
 	self.vertMenuBtn = pd("Vertex", function() return self:vertexMenu() end)
 	self.edgeMenuBtn = pd("Edge", function() return self:edgeMenu() end)
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
+	self.uvMenuBtn = pd("UV", function() return { { "UV editing comes in a later ROBLENDER version", "", nil } } end)
 	-- right side: X-ray + shading
-	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(140, HDR_H) }, hdr)
+	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(250, HDR_H) }, hdr)
 	hlist(right, 1, Enum.HorizontalAlignment.Right)
+	self.toggleBtns = {}
+	for i, tg in ipairs({ { "snap", "magnet", "Snap", "Snap during transform (Ctrl does the opposite)", "" },
+		{ "prop", "prop", "Proportional Editing", "Nearby geometry follows the selection (mouse wheel = size while moving)", "O" },
+		{ "mirrorX", nil, "Mirror X", "Edit both sides of the mesh at once (its own X axis)", "" } }) do
+		local b = self:btn(right, { LayoutOrder = -10 + i, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular, Text = tg[2] and "" or "X", Font = FONT_B }, function() api.toggleEdit2(tg[1]) end, "toggle")
+		corner(b, 4)
+		if tg[2] then icon(b, tg[2]) end
+		self:tip(b, tg[3], tg[4], tg[5])
+		self.toggleBtns[tg[1]] = b
+	end
+	make("Frame", { LayoutOrder = -5, BackgroundTransparency = 1, Size = UDim2.fromOffset(8, 1) }, right)
 	self.xrayBtn = self:btn(right, { LayoutOrder = 1, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.toggleXray() end, "toggle")
 	corner(self.xrayBtn, 4) icon(self.xrayBtn, "xray")
 	self:tip(self.xrayBtn, "Toggle X-Ray", "Transparent scene display. Allow selecting through items", "Alt Z")
@@ -382,34 +436,90 @@ function UI:buildView()
 	make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, tb)
 	self.toolbarFrame = tb
 	self.toolBtns = {}
+	-- from space_toolsystem_toolbar.py (VIEW3D_PT_tools_active, object + edit mesh); a list = a flyout group
 	local TOOLS = {
-		{ "Select", "select", "Select Box", "Select items using box selection", "W", "both" },
+		{ { "select", "select", "Select Box", "Select items using box selection", "W" } },
+		{ { "cursor", "cursor", "Cursor", "Set the cursor location (also Shift Right Click)", "Shift RMB" } },
 		"-",
-		{ "Move", "move", "Move", "Move selected items", "G", "both" },
-		{ "Rotate", "rotate", "Rotate", "Rotate selected items", "R", "both" },
-		{ "Scale", "scale", "Scale", "Scale (resize) selected items", "S", "both" },
+		{ { "move", "move", "Move", "Move selected items (drag on them)", "G" } },
+		{ { "rotate", "rotate", "Rotate", "Rotate selected items", "R" } },
+		{ { "scale", "scale", "Scale", "Scale (resize) selected items", "S" } },
+		{ { "transform", "transform", "Transform", "Supports any combination of grab, rotate, and scale at once", "" } },
 		"-",
-		{ "AddCube", "cube", "Add Cube", "Add cube to mesh interactively", "", "both" },
+		{ { "annotate", "annotate", "Annotate", "Draw free-hand annotation", "" } },
+		{ { "measure", "measure", "Measure", "Measure distance and angles", "" } },
+		"-",
+		{ { "addcube", "cube", "Add Cube", "Add cube to mesh interactively", "" } },
 		"=",
-		{ "Extrude", "extrude", "Extrude Region", "Extrude region together along the average normal", "E", "edit" },
-		{ "Inset", "inset", "Inset Faces", "Inset new faces into selected faces", "I", "edit" },
-		{ "LoopCut", "loopcut", "Loop Cut", "Add a new loop between existing loops", "Ctrl R", "edit" },
+		{ { "extrude", "extrude", "Extrude Region", "Extrude region together along the average normal", "E" },
+			{ "extrudeNormals", "extrude", "Extrude Along Normals", "Extrude region together along local normals", "Alt E" },
+			{ "extrudeIndividual", "extrude", "Extrude Individual", "Extrude individual elements along their normals", "Alt E" } },
+		{ { "inset", "inset", "Inset Faces", "Inset new faces into selected faces", "I" } },
+		{ { "bevel", "bevel", "Bevel", "Cut into selected items at an angle to create bevel or chamfer", "Ctrl B" } },
+		{ { "loopcut", "loopcut", "Loop Cut", "Add a new loop between existing loops", "Ctrl R" } },
+		{ { "knife", "knife", "Knife", "Cut new topology (click points, Enter to cut)", "K" },
+			{ "bisect", "bisect", "Bisect", "Cut geometry along a plane (click-drag to define plane)", "" } },
+		{ { "polybuild", "polybuild", "Poly Build", "Ctrl click: extrude to the mouse, Shift click: delete, drag: move a vert", "" } },
+		{ { "spin", "spin", "Spin", "Extrude around the 3D cursor (drag round)", "" } },
+		{ { "smooth", "smooth", "Smooth", "Flatten angles of selected vertices", "" },
+			{ "randomize", "randomize", "Randomize", "Randomize vertices", "" } },
+		{ { "edgeslide", "edgeslide", "Edge Slide", "Slide edge along a face", "G G" },
+			{ "vertexslide", "vertexslide", "Vertex Slide", "Slide a vertex along a mesh", "" } },
+		{ { "shrinkfatten", "shrinkfatten", "Shrink/Fatten", "Shrink/fatten selected vertices along normals", "Alt S" },
+			{ "pushpull", "pushpull", "Push/Pull", "Push/Pull selected items", "" } },
+		{ { "shear", "shear", "Shear", "Shear selected items along the horizontal screen axis", "Shift Ctrl Alt S" },
+			{ "tosphere", "tosphere", "To Sphere", "Move selected items outward in a spherical shape around the selected center", "Shift Alt S" } },
+		{ { "rip", "rip", "Rip Region", "Disconnect vertex or edges from connected geometry", "V" },
+			{ "ripedge", "ripedge", "Rip Edge", "Extend vertices along the edge closest to the cursor", "Alt D" } },
 	}
+	local EDIT_ONLY = { extrude = true, inset = true, bevel = true, loopcut = true, knife = true, polybuild = true, spin = true, smooth = true, edgeslide = true, shrinkfatten = true, shear = true, rip = true }
 	self.toolSeps = {}
-	for i, t in ipairs(TOOLS) do
-		if t == "-" or t == "=" then
-			local s = make("Frame", { LayoutOrder = i, ZIndex = 3, Size = UDim2.fromOffset(26, 1), BackgroundColor3 = rgb(0x4a4a4a), BorderSizePixel = 0 }, tb)
-			if t == "=" then self.toolSeps[#self.toolSeps + 1] = s end
+	self.toolGroups = {}
+	local editSep = false
+	for i, g in ipairs(TOOLS) do
+		if g == "-" or g == "=" then
+			local sp = make("Frame", { LayoutOrder = i, ZIndex = 3, Size = UDim2.fromOffset(24, 1), BackgroundColor3 = rgb(0x4a4a4a), BorderSizePixel = 0 }, tb)
+			if g == "=" then editSep = true end
+			if editSep then self.toolSeps[#self.toolSeps + 1] = sp end
 		else
-			local b = self:btn(tb, { LayoutOrder = i, ZIndex = 3, Size = UDim2.fromOffset(32, 32), BackgroundColor3 = T.toolItem }, function()
-				if t[1] == "AddCube" then api.add("Cube") elseif t[1] ~= "Select" then api.tool(t[1]) end
+			local grp = { list = g, current = 1, edit = EDIT_ONLY[g[1][1]] == true }
+			local b = self:btn(tb, { LayoutOrder = i, ZIndex = 3, Size = UDim2.fromOffset(30, 30), BackgroundColor3 = T.toolItem }, function()
+				api.setTool(grp.list[grp.current][1])
 			end, "tool")
 			corner(b, 5)
-			local ic = icon(b, t[2], nil, 18)
-			ic.ZIndex = 3
+			grp.b = b
+			local function setIcon()
+				if grp.ic then grp.ic.Parent = nil end
+				grp.ic = icon(b, grp.list[grp.current][2], nil, 17)
+				grp.ic.ZIndex = 3
+				for _, d in ipairs(grp.ic:GetDescendants()) do if d:IsA("GuiObject") then d.ZIndex = 3 end end
+			end
+			setIcon()
 			b:SetAttribute("rbTipRight", true)
-			self:tip(b, t[3], t[4], t[5])
-			self.toolBtns[t[1]] = { b = b, scope = t[6] }
+			local function tipNow()
+				local t = grp.list[grp.current]
+				return t[3], t[4] .. (#grp.list > 1 and "\n(right-click for more tools)" or ""), t[5]
+			end
+			b.MouseEnter:Connect(function()
+				local a, d, k = tipNow()
+				self.tipText.Text = "<b>" .. a .. "</b>\n" .. d .. (k ~= "" and ("\n<font color=\"#999999\">Shortcut: " .. k .. "</font>") or "")
+				local p, sz = b.AbsolutePosition, b.AbsoluteSize
+				if p and sz then self.tipFrame.Position = UDim2.fromOffset(p.X + sz.X + 10, p.Y) end
+				self.tipFrame.Visible = true
+			end)
+			b.MouseLeave:Connect(function() self.tipFrame.Visible = false end)
+			if #g > 1 then
+				-- little corner triangle like Blender's, right-click opens the group
+				make("Frame", { ZIndex = 4, AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -2, 1, -2), Size = UDim2.fromOffset(4, 4), BackgroundColor3 = rgb(0xaaaaaa), BorderSizePixel = 0 }, b)
+				b.MouseButton2Click:Connect(function()
+					local items = {}
+					for k, t in ipairs(grp.list) do
+						items[#items + 1] = { t[3], t[5], function() grp.current = k setIcon() api.setTool(t[1]) end, icon = t[2], check = (k == grp.current) or nil }
+					end
+					self:openMenu(items, b, nil, false)
+				end)
+			end
+			self.toolGroups[#self.toolGroups + 1] = grp
 		end
 	end
 	-- navigation gizmo (top right) + zoom / pan / frame buttons
@@ -785,6 +895,7 @@ function UI:viewMenu()
 		{ "Sidebar", "N", function() self:toggleSidebar() end, check = self.sidebar },
 		"-",
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
+		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
 		{ "Frame All", "Home", function() api.frameAll() end },
 		"-",
 		{ "Viewpoint", "", nil, sub = function() return {
@@ -808,8 +919,30 @@ function UI:selectMenu()
 		{ "None", "Alt A", function() api.tool("SelectNone") end },
 		{ "Invert", "Ctrl I", function() api.tool("Invert") end },
 		"-",
-		{ "Box Select", "B / Drag", nil },
-		{ "Select Loops", "Alt Click", nil },
+		{ "Box Select", "Drag", nil },
+	}
+end
+-- VIEW3D_MT_select_edit_mesh
+function UI:selectMenuEdit()
+	local api = self.api
+	local t = function(n) return function() api.tool(n) end end
+	return {
+		{ "All", "A", t("SelectAll") }, { "None", "Alt A", t("SelectNone") }, { "Invert", "Ctrl I", t("Invert") },
+		"-",
+		{ "Box Select", "Drag", nil },
+		"-",
+		{ "Select Random", "", t("SelectRandom") }, { "Checker Deselect", "", t("Checker") },
+		"-",
+		{ "More/Less", "", nil, sub = function() return { { "More", "Ctrl +", t("SelectMore") }, { "Less", "Ctrl -", t("SelectLess") } } end },
+		"-",
+		{ "Select Linked", "", nil, sub = function() return { { "Linked", "Ctrl L", t("SelectLinked") }, { "Pick Linked", "L", t("PickLinked") } } end },
+		{ "Select Loops", "", nil, sub = function() return { { "Edge Loops", "Alt Click", nil }, { "Edge Rings", "", t("SelectRing") } } end },
+		"-",
+		{ "Sharp Edges", "", t("SharpEdges") },
+		"-",
+		{ "Select All by Trait", "", nil, sub = function() return {
+			{ "Non Manifold", "", t("NonManifold") }, { "Loose Geometry", "", t("Loose") }, { "Faces by Sides", "", t("FacesBySides") },
+		} end },
 	}
 end
 function UI:objectMenu()
@@ -818,65 +951,180 @@ function UI:objectMenu()
 		{ "Transform", "", nil, sub = function() return {
 			{ "Move", "G", function() api.tool("G") end }, { "Rotate", "R", function() api.tool("R") end }, { "Scale", "S", function() api.tool("S") end },
 		} end },
+		{ "Snap", "Shift S", nil, sub = function() return self:snapItems() end },
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
 		"-",
-		{ "Delete", "X", function() api.tool("DeleteObjects") end, icon = nil },
+		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
 end
+function UI:snapItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return {
+		{ "Selection to Cursor", "", t("SelToCursor") }, { "Selection to Grid", "", t("SelToGrid") },
+		"-",
+		{ "Cursor to Selected", "", t("CursorToSel") }, { "Cursor to World Origin", "", t("CursorToOrigin") }, { "Cursor to Grid", "", t("CursorToGrid") },
+	}
+end
+function UI:deleteItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return {
+		{ "Vertices", "", t("DeleteVerts") }, { "Edges", "", t("DeleteEdges") }, { "Faces", "", t("DeleteFaces") },
+		{ "Only Edges & Faces", "", t("DeleteEdgesFaces") }, { "Only Faces", "", t("DeleteOnlyFaces") },
+		"-",
+		{ "Dissolve Vertices", "", t("DissolveVerts") }, { "Dissolve Edges", "", t("DissolveEdges") }, { "Dissolve Faces", "", t("DissolveFaces") },
+		"-",
+		{ "Collapse Edges & Faces", "", t("EdgeCollapse") }, { "Edge Loops", "", t("DeleteEdgeLoops") },
+	}
+end
+function UI:mergeItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return { { "At Center", "", t("MergeCenter") }, { "At Cursor", "", t("MergeCursor") }, { "Collapse", "", t("MergeCollapse") }, "-", { "By Distance", "", t("MergeDistance") } }
+end
+function UI:extrudeItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return { { "Extrude Faces", "", t("Extrude") }, { "Extrude Faces Along Normals", "", t("ExtrudeNormals") }, { "Extrude Individual Faces", "", t("ExtrudeIndividual") },
+		"-", { "Extrude Edges", "", t("ExtrudeEdges") }, { "Extrude Vertices", "", t("ExtrudeVerts") } }
+end
+-- VIEW3D_MT_edit_mesh
 function UI:meshMenu()
 	local api = self.api
+	local t = function(n) return function() api.tool(n) end end
 	return {
 		{ "Transform", "", nil, sub = function() return {
-			{ "Move", "G", function() api.tool("G") end }, { "Rotate", "R", function() api.tool("R") end }, { "Scale", "S", function() api.tool("S") end },
+			{ "Move", "G", t("G") }, { "Rotate", "R", t("R") }, { "Scale", "S", t("S") }, "-",
+			{ "To Sphere", "Shift Alt S", t("ToSphere") }, { "Shear", "Shift Ctrl Alt S", t("Shear") }, { "Push/Pull", "", t("PushPull") },
+			{ "Shrink/Fatten", "Alt S", t("ShrinkFatten") }, "-", { "Randomize", "", t("Randomize") },
 		} end },
+		{ "Mirror", "", nil, sub = function() return { { "X Global", "", t("MirrorX") }, { "Y Global", "", t("MirrorY") }, { "Z Global", "", t("MirrorZ") } } end },
+		{ "Snap", "Shift S", nil, sub = function() return self:snapItems() end },
 		"-",
-		{ "Extrude", "E", function() api.tool("Extrude") end },
+		{ "Duplicate", "Shift D", t("Duplicate") },
+		{ "Extrude", "Alt E", nil, sub = function() return self:extrudeItems() end },
 		"-",
-		{ "Merge", "M", nil, sub = function() return {
-			{ "At Center", "", function() api.tool("Merge") end },
-			{ "By Distance", "", function() api.tool("MergeDist") end },
+		{ "Merge", "M", nil, sub = function() return self:mergeItems() end },
+		{ "Split", "", nil, sub = function() return { { "Selection", "Y", t("Split") } } end },
+		{ "Separate", "P", nil, sub = function() return { { "Selection", "", t("Separate") } } end },
+		"-",
+		{ "Bisect", "", function() api.setTool("bisect") end },
+		{ "Knife Tool", "K", t("Knife") },
+		{ "Convex Hull", "", t("ConvexHull") },
+		"-",
+		{ "Symmetrize", "", t("SymmetrizeX") },
+		"-",
+		{ "Normals", "", nil, sub = function() return {
+			{ "Flip", "", t("Flip") }, { "Recalculate Outside", "Shift N", t("RecalcOutside") }, { "Recalculate Inside", "", t("RecalcInside") },
 		} end },
+		{ "Shading", "", nil, sub = function() return { { "Smooth Faces", "", t("ShadeSmooth") }, { "Flat Faces", "", t("ShadeFlat") } } end },
 		"-",
-		{ "Normals", "", nil, sub = function() return { { "Flip", "", function() api.tool("Flip") end } } end },
+		{ "Show/Hide", "", nil, sub = function() return {
+			{ "Reveal Hidden", "Alt H", t("Reveal") }, { "Hide Selected", "H", t("Hide") }, { "Hide Unselected", "Shift H", t("HideUnselected") },
+		} end },
+		{ "Clean Up", "", nil, sub = function() return { { "Delete Loose", "", t("DeleteLoose") }, { "Merge by Distance", "", t("MergeDistance") } } end },
 		"-",
-		{ "Delete", "X", function() api.tool("Delete") end },
+		{ "Delete", "X", nil, sub = function() return self:deleteItems() end },
+		"-",
+		{ "Bake to Parts", "", t("Bake") }, { "Export .obj", "", t("Export") },
 	}
 end
+-- VIEW3D_MT_edit_mesh_vertices
 function UI:vertexMenu()
 	local api = self.api
+	local t = function(n) return function() api.tool(n) end end
 	return {
-		{ "Extrude Vertices", "E", function() api.setMode("vert") api.tool("Extrude") end },
+		{ "Extrude Vertices", "E", t("ExtrudeVerts") },
+		{ "Bevel Vertices", "Shift Ctrl B", t("BevelVerts") },
 		"-",
-		{ "New Edge/Face from Vertices", "F", function() api.tool("Fill") end },
+		{ "New Edge/Face from Vertices", "F", t("Fill") },
+		{ "Connect Vertex Pairs", "J", t("Connect") },
 		"-",
-		{ "Merge at Center", "M", function() api.tool("Merge") end },
+		{ "Rip Vertices", "V", t("Rip") },
+		{ "Rip Vertices and Extend", "Alt D", t("RipEdge") },
+		"-",
+		{ "Slide Vertices", "", t("VertexSlide") },
+		{ "Smooth Vertices", "", t("Smooth") },
+		"-",
+		{ "Merge Vertices", "M", nil, sub = function() return self:mergeItems() end },
 	}
 end
+-- VIEW3D_MT_edit_mesh_edges
 function UI:edgeMenu()
 	local api = self.api
+	local t = function(n) return function() api.tool(n) end end
 	return {
-		{ "Extrude Edges", "E", function() api.setMode("edge") api.tool("Extrude") end },
+		{ "Extrude Edges", "", t("ExtrudeEdges") },
+		{ "Bevel Edges", "Ctrl B", t("Bevel") },
+		{ "Bridge Edge Loops", "", t("Bridge") },
 		"-",
-		{ "Subdivide", "", function() api.tool("Subdivide") end },
+		{ "Subdivide", "", t("Subdivide") },
+		{ "Subdivide Edge-Ring", "", t("SubdivideRing") },
 		"-",
-		{ "Loop Cut and Slide", "Ctrl R", function() api.tool("LoopCut") end },
+		{ "Rotate Edge CW", "", t("RotateCW") },
+		{ "Rotate Edge CCW", "", t("RotateCCW") },
+		"-",
+		{ "Edge Slide", "G G", t("EdgeSlide") },
+		{ "Loop Cut and Slide", "Ctrl R", t("LoopCut") },
+		"-",
+		{ "Mark Seam", "", t("MarkSeam") }, { "Clear Seam", "", t("ClearSeam") },
+		"-",
+		{ "Mark Sharp", "", t("MarkSharp") }, { "Clear Sharp", "", t("ClearSharp") },
 	}
 end
+-- VIEW3D_MT_edit_mesh_faces
 function UI:faceMenu()
 	local api = self.api
+	local t = function(n) return function() api.tool(n) end end
 	return {
-		{ "Extrude Faces", "E", function() api.setMode("face") api.tool("Extrude") end },
+		{ "Extrude Faces", "E", t("Extrude") },
+		{ "Extrude Faces Along Normals", "", t("ExtrudeNormals") },
+		{ "Extrude Individual Faces", "", t("ExtrudeIndividual") },
 		"-",
-		{ "Inset Faces", "I", function() api.tool("Inset") end },
+		{ "Inset Faces", "I", t("Inset") },
+		{ "Poke Faces", "", t("Poke") },
+		{ "Triangulate Faces", "Ctrl T", t("Triangulate") },
+		{ "Tris to Quads", "Alt J", t("TrisToQuads") },
+		{ "Solidify Faces", "", t("Solidify") },
 		"-",
-		{ "Fill", "F", function() api.tool("Fill") end },
+		{ "Fill", "F", t("Fill") },
+		{ "Beautify Faces", "Alt F", t("BeautyFill") },
 		"-",
-		{ "Subdivide", "", function() api.tool("Subdivide") end },
+		{ "Shade Smooth", "", t("ShadeSmooth") },
+		{ "Shade Flat", "", t("ShadeFlat") },
 	}
+end
+-- X / M / Shift S / Alt E / Ctrl V E F popups
+function UI:openNamedMenu(name, at)
+	local lists = {
+		delete = function() return self:deleteItems(), "Delete" end,
+		merge = function() return self:mergeItems(), "Merge" end,
+		snap = function() return self:snapItems(), "Snap" end,
+		extrude = function() return self:extrudeItems(), "Extrude" end,
+		vertex = function() return self:vertexMenu(), "Vertex" end,
+		edge = function() return self:edgeMenu(), "Edge" end,
+		face = function() return self:faceMenu(), "Face" end,
+	}
+	local f = lists[name]
+	if not f then return end
+	local items, title = f()
+	return self:openMenu(items, at, title)
+end
+-- floating labels in the 3D view (measure tool)
+function UI:setLabel(id, pos, text)
+	self.labels = self.labels or {}
+	local l = self.labels[id]
+	if not pos then if l then l.Visible = false end return end
+	if not l then
+		l = label(self.overlay, { ZIndex = 4, AutomaticSize = Enum.AutomaticSize.XY, Size = UDim2.fromOffset(0, 0), Font = FONT_B, TextSize = 13,
+			TextStrokeTransparency = 0.3, TextStrokeColor3 = Color3.new(0, 0, 0), AnchorPoint = Vector2.new(0.5, 1) })
+		self.labels[id] = l
+	end
+	local off = self.canvas.AbsolutePosition or Vector2.new()
+	l.Position = UDim2.fromOffset(pos.X - off.X, pos.Y - off.Y - 6)
+	l.Text = text
+	l.Visible = true
 end
 -- right-click menus (VIEW3D_MT_edit_mesh_context_menu / VIEW3D_MT_object_context_menu)
 function UI:openContextMenu(at)
@@ -888,6 +1136,15 @@ function UI:openContextMenu(at)
 			items[#items + 1] = { header = "Vertex", icon = "vert" }
 			items[#items + 1] = { "Subdivide", "", function() api.tool("Subdivide") end }
 			items[#items + 1] = { "Extrude Vertices", "", function() api.tool("Extrude") end }
+			items[#items + 1] = { "Bevel Vertices", "", function() api.tool("BevelVerts") end }
+			items[#items + 1] = { "Connect Vertex Pairs", "", function() api.tool("Connect") end }
+			items[#items + 1] = { "Push/Pull", "", function() api.tool("PushPull") end }
+			items[#items + 1] = { "Shrink/Fatten", "", function() api.tool("ShrinkFatten") end }
+			items[#items + 1] = { "Shear", "", function() api.tool("Shear") end }
+			items[#items + 1] = { "Slide Vertices", "", function() api.tool("VertexSlide") end }
+			items[#items + 1] = { "Smooth Vertices", "", function() api.tool("Smooth") end }
+			items[#items + 1] = { "Mirror Vertices", "", nil, sub = function() return { { "X", "", function() api.tool("MirrorX") end }, { "Y", "", function() api.tool("MirrorY") end }, { "Z", "", function() api.tool("MirrorZ") end } } end }
+			items[#items + 1] = { "Snap Vertices", "", nil, sub = function() return self:snapItems() end }
 			items[#items + 1] = { "New Edge/Face from Vertices", "", function() api.tool("Fill") end }
 			items[#items + 1] = { "Merge Vertices", "", function() api.tool("Merge") end }
 			items[#items + 1] = "-"
@@ -896,6 +1153,13 @@ function UI:openContextMenu(at)
 			items[#items + 1] = { header = "Edge", icon = "edge" }
 			items[#items + 1] = { "Subdivide", "", function() api.tool("Subdivide") end }
 			items[#items + 1] = { "Extrude Edges", "", function() api.tool("Extrude") end }
+			items[#items + 1] = { "Bevel Edges", "", function() api.tool("Bevel") end }
+			items[#items + 1] = { "Bridge Edge Loops", "", function() api.tool("Bridge") end }
+			items[#items + 1] = { "Rotate Edge CW", "", function() api.tool("RotateCW") end }
+			items[#items + 1] = { "Edge Slide", "", function() api.tool("EdgeSlide") end }
+			items[#items + 1] = { "Loop Cut and Slide", "", function() api.tool("LoopCut") end }
+			items[#items + 1] = { "Mark Sharp", "", function() api.tool("MarkSharp") end }
+			items[#items + 1] = { "Clear Sharp", "", function() api.tool("ClearSharp") end }
 			items[#items + 1] = { "New Face from Edges", "", function() api.tool("Fill") end }
 			items[#items + 1] = "-"
 			items[#items + 1] = { "Delete Edges", "", function() api.tool("Delete") end }
@@ -904,6 +1168,12 @@ function UI:openContextMenu(at)
 			items[#items + 1] = { "Subdivide", "", function() api.tool("Subdivide") end }
 			items[#items + 1] = { "Extrude Faces", "", function() api.tool("Extrude") end }
 			items[#items + 1] = { "Inset Faces", "", function() api.tool("Inset") end }
+			items[#items + 1] = { "Extrude Faces Along Normals", "", function() api.tool("ExtrudeNormals") end }
+			items[#items + 1] = { "Extrude Individual Faces", "", function() api.tool("ExtrudeIndividual") end }
+			items[#items + 1] = { "Poke Faces", "", function() api.tool("Poke") end }
+			items[#items + 1] = { "Triangulate Faces", "", function() api.tool("Triangulate") end }
+			items[#items + 1] = { "Shade Smooth", "", function() api.tool("ShadeSmooth") end }
+			items[#items + 1] = { "Shade Flat", "", function() api.tool("ShadeFlat") end }
 			items[#items + 1] = "-"
 			items[#items + 1] = { "Delete Faces", "", function() api.tool("Delete") end }
 		end
@@ -1019,13 +1289,19 @@ function UI:refresh(force)
 	if s.modal then self.opText.Text = s.modalText or "" end
 	-- canvas: hide our 3D view when Studio's own is used
 	self.toolbarFrame.Visible = self.toolbar
-	local active = ({ G = "Move", R = "Rotate", S = "Scale", inset = "Inset", loopcut = "LoopCut" })[s.modal or ""] or (s.modal == nil and "Select" or nil)
-	if s.modal == "G" and s.modalWhat == "Extrude" then active = "Extrude" end
-	for key, t in pairs(self.toolBtns) do
-		t.b.Visible = t.scope == "both" or s.editing
-		self:setOnStyle(t.b, key == active, T.toolItem)
+	local active = s.activeTool or "select"
+	for _, g in ipairs(self.toolGroups) do
+		g.b.Visible = (not g.edit) or s.editing
+		local on = false
+		for k, t in ipairs(g.list) do if t[1] == active then on = true if g.current ~= k then g.current = k end end end
+		self:setOnStyle(g.b, on, T.toolItem)
 	end
 	for _, sep in ipairs(self.toolSeps) do sep.Visible = s.editing end
+	for k, b in pairs(self.toggleBtns) do
+		self:setOnStyle(b, s[k] == true)
+		b.Visible = s.editing or k == "snap"
+	end
+	self.uvMenuBtn.Visible = s.editing
 	-- info text (Blender: "User Perspective" + "(1) Collection | Cube")
 	local lines = { s.viewName or "User Perspective", "(1) Collection" .. (s.objName and (" | " .. s.objName) or "") }
 	if s.editing and s.stats then

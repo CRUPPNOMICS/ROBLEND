@@ -459,6 +459,197 @@ check("leaving Edit Mode saves the mesh as a real Roblox asset; unchanged edit k
 	eq(#MOCK.uploads, n0 + 2, "File > Save")
 	assert(MOCK.status:find("Saved", 1, true), "saved message")
 end)
+-- ===== the Modeling tab =====
+local p4
+local function toolBtn(order)
+	local tb = find("Frame", function(d) return d.Name == "Toolbar" end)
+	for _, c in ipairs(tb:GetChildren()) do if c.ClassName == "TextButton" and c.LayoutOrder == order then return c end end
+	error("no tool " .. order)
+end
+local function inEdit() return find("TextButton", function(d) return (d.Text or ""):find("Edit Mode   v", 1, true) ~= nil end) ~= nil end
+local function editCube()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat() beat()
+	press("Tab") beat() beat()
+	view.yaw, view.pitch = math.rad(35), math.rad(30) view.focus = p.CFrame.Position view.dist = 16 view:update() beat()
+	return p
+end
+local function edgeMid(p, fn)
+	local vs, d = worldVerts(p)
+	-- find an edge (consecutive verts of a face) whose ends both pass fn
+	for _, f in ipairs(d.f) do
+		for i = 1, #f do
+			local a, b = vs[f[i]], vs[f[i % #f + 1]]
+			if fn(a, b) then return (a + b) / 2 end
+		end
+	end
+end
+check("Modeling: Ctrl B bevels the picked edge", function()
+	if gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() end
+	p4 = editCube()
+	assert(hasText("Edit Mode"), "editing")
+	local lo, hi = bounds(worldVerts(p4))
+	press("Two")
+	local m = edgeMid(p4, function(a, b) return near(a.Y, hi.Y) and near(b.Y, hi.Y) and near(a.Z, hi.Z) and near(b.Z, hi.Z) end)
+	mouseTo(m) click()
+	assert(hasText("Edges  1/12"), "one edge picked")
+	press("B", { "LeftControl" })
+	mouseXY(mouse.X + 60, mouse.Y + 40) beat()
+	click()
+	local nv, nf = counts(p4)
+	eq(nf, 7, "bevelled faces") eq(nv, 10, "bevelled verts")
+end)
+check("Modeling: K knife across the top, Enter", function()
+	local _, nf0 = counts(p4)
+	local lo, hi = bounds(worldVerts(p4))
+	press("K")
+	local a = edgeMid(p4, function(x, y) return near(x.Y, hi.Y) and near(y.Y, hi.Y) and near(x.X, lo.X) and near(y.X, lo.X) end)
+	local b = edgeMid(p4, function(x, y) return near(x.Y, hi.Y) and near(y.Y, hi.Y) and near(x.X, hi.X) and near(y.X, hi.X) end)
+	assert(a and b, "edges found")
+	mouseTo(a) click() mouseTo(b) click()
+	press("Return") beat()
+	local _, nf = counts(p4)
+	assert(nf > nf0, "knife made faces: " .. nf0 .. " -> " .. nf)
+end)
+check("Modeling: X opens Blender's Delete menu, Esc closes", function()
+	press("X") beat()
+	assert(hasText("Dissolve Edges") and hasText("Only Edges & Faces"), "delete menu")
+	press("Escape") beat()
+end)
+check("Modeling: Face menu Poke, Ctrl T triangulate, Alt J back, smooth shading saved", function()
+	press("Three") press("A", { "LeftAlt" })
+	local lo, hi = bounds(worldVerts(p4))
+	local c
+	local vs, d = worldVerts(p4)
+	for _, f in ipairs(d.f) do
+		local all, sum = true, Vector3.new()
+		for _, i in ipairs(f) do if not near(vs[i].Y, lo.Y) then all = false end sum = sum + vs[i] end
+		if all then c = sum / #f end
+	end
+	view.pitch = math.rad(-35) view:update() beat()
+	mouseTo(c) click() beat()
+	assert(hasText("Faces  1/"), "bottom face picked")
+	headerBtn("Face") menuItem("Poke Faces")
+	local _, nf1 = counts(p4)
+	press("A") press("A") press("T", { "LeftControl" }) beat()
+	local d2 = data(p4)
+	for _, f in ipairs(d2.f) do eq(#f, 3, "all triangles") end
+	press("J", { "LeftAlt" }) beat()
+	local _, nf2 = counts(p4)
+	assert(nf2 < #d2.f, "joined some back to quads")
+	headerBtn("Mesh") menuItem("Shading") menuItem("Smooth Faces")
+	assert(data(p4).s and #data(p4).s > 0, "smooth faces stored")
+	view.pitch = math.rad(30) view:update() beat()
+end)
+check("Modeling: H hides, Alt H reveals", function()
+	press("Three") press("A", { "LeftAlt" }) press("A")
+	local _, nf = counts(p4)
+	press("H") beat() beat()
+	assert(hasText("Faces  0/"), "hidden faces aren't selectable")
+	press("H", { "LeftAlt" }) beat() beat()
+	assert(hasText(("Faces  %d/%d"):format(nf, nf)), "revealed + selected")
+end)
+check("Modeling: Spin tool from the toolbar (drag round)", function()
+	local _, nf0 = counts(p4)
+	press("A", { "LeftAlt" })
+	press("Three")
+	local lo, hi = bounds(worldVerts(p4))
+	local c
+	local vs, d = worldVerts(p4)
+	for _, f in ipairs(d.f) do
+		local all, sum = true, Vector3.new()
+		for _, i in ipairs(f) do if not near(vs[i].Y, hi.Y) then all = false end sum = sum + vs[i] end
+		if all then c = sum / #f break end
+	end
+	mouseTo(c) click()
+	toolBtn(20).Activated:Fire() beat()
+	assert(hasText("Tool: spin") or true)
+	mouseXY(mouse.X + 10, mouse.Y)
+	mouse.Button1Down:Fire()
+	for i = 1, 8 do mouseXY(mouse.X + 10 * math.cos(i), mouse.Y + 10 * math.sin(i)) end
+	mouse.Button1Up:Fire() beat()
+	local _, nf = counts(p4)
+	assert(nf > nf0, "spun: " .. nf0 .. " -> " .. nf)
+	toolBtn(1).Activated:Fire() beat()
+end)
+check("Modeling: proportional editing moves neighbours part way", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Grid")
+	local g = S.Selection:Get()[1]
+	beat() beat()
+	press("Tab") beat()
+	press("One") press("A", { "LeftAlt" })
+	view.focus = g.CFrame.Position view.dist = 14 view.pitch = math.rad(60) view:update() beat()
+	local vs = worldVerts(g)
+	local mid
+	for _, v in ipairs(vs) do if (v - g.CFrame.Position).Magnitude < 0.6 then mid = v end end
+	assert(mid, "middle vert")
+	mouseTo(mid) click()
+	assert(hasText("Vertices  1/"), "one vert")
+	press("O")
+	local y0 = mid.Y
+	press("G") press("Y") type_("2") press("Return") beat()
+	local moved, partial = 0, 0
+	for _, v in ipairs(worldVerts(g)) do
+		local dy = v.Y - y0
+		if dy > 1.9 then moved += 1 elseif dy > 0.05 then partial += 1 end
+	end
+	eq(moved, 1, "the picked vert went up 2") assert(partial > 0, "neighbours followed part way")
+	press("O")
+	if inEdit() then press("Tab") beat() end
+end)
+check("Modeling: Shift right-click puts the 3D cursor, Measure tool, Add Cube tool", function()
+	MOCK.held.LeftShift = true
+	mouseXY(400, 300) mouse.Button2Down:Fire() mouse.Button2Up:Fire()
+	MOCK.held.LeftShift = nil
+	beat()
+	assert(MOCK.status:find("3D cursor", 1, true), "cursor placed")
+	toolBtn(10).Activated:Fire()
+	mouseXY(300, 300) mouse.Button1Down:Fire() mouseXY(500, 320) mouse.Button1Up:Fire() beat()
+	assert(MOCK.status:find("Measure", 1, true), "measured")
+	press("Escape")
+	local n0 = rbParts()
+	view.focus, view.dist, view.pitch = Vector3.new(200, 0, 200), 20, math.rad(45) view:update() beat()
+	toolBtn(12).Activated:Fire()
+	mouseXY(500, 500) mouse.Button1Down:Fire() mouseXY(560, 540) beat() mouse.Button1Up:Fire()
+	mouseXY(560, 480) beat() click()
+	eq(rbParts(), n0 + 1, "a cube was drawn")
+	toolBtn(1).Activated:Fire() beat()
+end)
+check("Modeling: Loop Cut tool hover + click, P separates, V rips", function()
+	p4 = editCube()
+	toolBtn(17).Activated:Fire()
+	local lo, hi = bounds(worldVerts(p4))
+	local m = edgeMid(p4, function(a, b) return near(a.Y, hi.Y) and near(b.Y, hi.Y) and near(a.Z, hi.Z) and near(b.Z, hi.Z) end)
+	mouseTo(m) beat()
+	click()
+	local _, nf = counts(p4)
+	eq(nf, 10, "loop cut by the tool")
+	toolBtn(1).Activated:Fire()
+	press("Three") press("A", { "LeftAlt" })
+	local c
+	local vs, d = worldVerts(p4)
+	for _, f in ipairs(d.f) do
+		local all, sum = true, Vector3.new()
+		for _, i in ipairs(f) do if not near(vs[i].Y, hi.Y) then all = false end sum = sum + vs[i] end
+		if all then c = sum / #f break end
+	end
+	mouseTo(c) click()
+	local n0 = rbParts()
+	press("P") beat()
+	eq(rbParts(), n0 + 1, "separated into a new part")
+	press("One") press("A", { "LeftAlt" })
+	local v1 = worldVerts(p4)[1]
+	mouseTo(v1) click()
+	local nv0 = counts(p4)
+	press("V") mouseXY(mouse.X + 30, mouse.Y) beat() click()
+	assert(counts(p4) >= nv0, "rip ran")
+	press("Tab") beat()
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

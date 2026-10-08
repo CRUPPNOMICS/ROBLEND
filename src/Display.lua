@@ -67,9 +67,10 @@ function Display.triangulate(verts, no)
 end
 
 -- every triangle of the mesh as world-or-local points {a, b, c, face}
-function Display.triangles(bm)
+function Display.triangles(bm, skipHidden)
 	local out = {}
 	for f in pairs(bm.faces) do
+		if skipHidden and f.hide then continue end
 		local vs = BMesh.faceVerts(f)
 		for _, t in ipairs(Display.triangulate(vs, f.no)) do
 			out[#out + 1] = { vs[t[1]].co, vs[t[2]].co, vs[t[3]].co, f }
@@ -92,7 +93,9 @@ end
 
 -- build a MeshPart for the mesh. Verts go in centred on their box (centre returned) - flat shaded
 -- (every face gets its own corners). selColor: tint for selected faces (edit mode)
-function Display.build(bm, selColor)
+-- smooth faces share their corners (so the normals blend); flat faces get their own. skipHidden: leave out
+-- faces hidden with H (the edit view only)
+function Display.build(bm, selColor, skipHidden)
 	local c = Display.bounds(bm)
 	-- Roblox limit: 20,000 triangles / 60,000 verts per EditableMesh
 	local nt, nvx = 0, 0
@@ -107,10 +110,19 @@ function Display.build(bm, selColor)
 		if selColor then sel = em:AddColor(selColor, 1) end
 	end)
 	local tris = 0
+	local shared = {}
 	for f in pairs(bm.faces) do
+		if skipHidden and f.hide then continue end
 		local vs = BMesh.faceVerts(f)
 		local ids = {}
-		for i, v in ipairs(vs) do ids[i] = em:AddVertex(v.co - c) end
+		for i, v in ipairs(vs) do
+			if f.smooth then
+				if not shared[v] then shared[v] = em:AddVertex(v.co - c) end
+				ids[i] = shared[v]
+			else
+				ids[i] = em:AddVertex(v.co - c)
+			end
+		end
 		for _, t in ipairs(Display.triangulate(vs, f.no)) do
 			local fid = em:AddTriangle(ids[t[1]], ids[t[2]], ids[t[3]])
 			tris += 1

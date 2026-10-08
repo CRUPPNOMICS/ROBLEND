@@ -7,7 +7,7 @@ rd = lambda p: (root / p).read_text()
 
 
 def mod(name, text):
-    text = text.replace('require(script.Parent.BMesh)', 'BMesh')
+    text = text.replace('require(script.Parent.BMesh)', 'BMesh').replace('require(script.Parent.Ops)', 'Ops')
     return f'{name} = (function()\n{text}\nend)()\n'
 
 
@@ -19,13 +19,14 @@ def run(tag, src):
     return r.returncode
 
 
-engine = rd('tests/mock.luau') + mod('BMesh', rd('src/BMesh.lua')) + mod('Ops', rd('src/Ops.lua')) + rd('tests/test_engine.luau')
+engine = (rd('tests/mock.luau') + mod('BMesh', rd('src/BMesh.lua')) + mod('Ops', rd('src/Ops.lua')) + mod('MT', rd('src/MeshTools.lua'))
+          + 'do\n' + rd('tests/test_engine.luau') + '\nend\n' + rd('tests/test_tools.luau'))
 main = rd('src/Main.server.lua')
 for a, b in [('require(script.BMesh)', 'BMesh'), ('require(script.Ops)', 'Ops'), ('require(script.Display)', 'Display'),
-             ('os.clock()', 'MOCK.t'), ('local function setStatus(t) status.Text = t', 'local function setStatus(t) status.Text = t MOCK.status = t'), ('require(script.UI)', 'UI'), ('require(script.View)', 'View'), ('view = View.new(ui.canvas)', 'view = View.new(ui.canvas) MOCK.view = view')]:
+             ('os.clock()', 'MOCK.t'), ('local function setStatus(t) status.Text = t', 'local function setStatus(t) status.Text = t MOCK.status = t'), ('require(script.UI)', 'UI'), ('require(script.View)', 'View'), ('require(script.MeshTools)', 'MT'), ('view = View.new(ui.canvas)', 'view = View.new(ui.canvas) MOCK.view = view')]:
     assert a in main, a
     main = main.replace(a, b)
 editor = (rd('tests/mock.luau') + rd('tests/studio_mock.luau') + 'MOCK.t = 0\n' + mod('BMesh', rd('src/BMesh.lua')) + mod('Ops', rd('src/Ops.lua'))
-          + mod('Display', rd('src/Display.lua')) + mod('UI', rd('src/UI.lua')) + mod('View', rd('src/View.lua')) + 'do\n' + main + '\nend\n' + rd('tests/test_editor.luau'))
+          + mod('Display', rd('src/Display.lua')) + mod('MT', rd('src/MeshTools.lua')) + mod('UI', rd('src/UI.lua')) + mod('View', rd('src/View.lua')) + 'do\n' + main + '\nend\n' + rd('tests/test_editor.luau'))
 rc = run('engine', engine) | run('editor', editor)
 sys.exit(rc)
