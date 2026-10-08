@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.5.0"
+local VERSION = "0.5.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -2476,6 +2476,22 @@ local function toggleXray() xray = not xray worldTris = nil dirtyCage = true set
 local function toggleEdit()
 	if editing then exitEdit() return end
 	local p = selectedPart()
+	if not isRB(p) and uiOn then
+		-- like Blender's Modeling tab: use the active / last mesh, else the first one, else make a cube
+		if isRB(activeObj) and activeObj.Parent then p = activeObj end
+		if not isRB(p) then
+			local names = {}
+			for q, r in pairs(scene) do if q.Parent and not r.hidden then names[#names + 1] = q end end
+			table.sort(names, function(a, b) return a.Name < b.Name end)
+			p = names[1]
+		end
+		if not isRB(p) then
+			addShape("Cube")
+			sceneAdd(Selection:Get()[1])
+			p = Selection:Get()[1]
+		end
+		if isRB(p) then Selection:Set({ p }) activeObj = p end
+	end
 	if not isRB(p) then setStatus("Select a " .. NAME .. " mesh first (Shift A adds one).") return end
 	enterEdit(p)
 end
