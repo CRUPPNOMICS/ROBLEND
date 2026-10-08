@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.3.0"
+local VERSION = "0.4.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -28,6 +28,7 @@ local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local CHS = game:GetService("ChangeHistoryService")
 local HttpService = game:GetService("HttpService")
+local AssetService = game:GetService("AssetService")
 local CoreGui = game:GetService("CoreGui")
 
 local V3 = Vector3.new
@@ -159,9 +160,14 @@ local function originOf(p)
 end
 
 -- put the mesh on the part (new look). Keeps the part where its origin is.
+local applyBuilt
 local function applyMesh(p, b, tint)
 	local mp, c, err = Display.build(b, tint and SEL_COL or nil)
 	if not mp then return false, err end
+	return applyBuilt(p, mp, c)
+end
+-- put an already-built MeshPart's mesh on the part (keeps the part where its origin is)
+applyBuilt = function(p, mp, c)
 	local o = originOf(p)
 	local ok = pcall(function() p:ApplyMesh(mp) end)
 	if not ok then
@@ -181,6 +187,77 @@ local function applyMesh(p, b, tint)
 	p:SetAttribute("RB_Center", c)
 	p:SetAttribute("RB_Size", p.Size)
 	return true, nil, p
+end
+
+-- ===== saving to Roblox (real Mesh assets, so the mesh stays in the place and publishes) =====
+local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Luau API\", then restart Studio."
+local autoSave = true
+pcall(function() local v = plugin:GetSetting("RB_AutoSave") if v ~= nil then autoSave = v == true end end)
+local saving = {}
+local function dataHash(str)
+	local h = 2166136261
+	for i = 1, #str do h = bit32.band(bit32.bxor(h, string.byte(str, i)) * 16777619, 0xFFFFFFFF) end
+	return string.format("%08x:%d", h, #str)
+end
+local function isSaved(p)
+	local d = p and p:FindFirstChild("RB_Data")
+	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(d.Value)
+end
+local function saveMesh(p, quiet)
+	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
+	saving[p] = true
+	task.spawn(function()
+		local ok, err = pcall(function()
+			setStatus("Saving " .. p.Name .. " to Roblox...")
+			local data = p.RB_Data.Value
+			local m = loadFrom(p)
+			local params = { Name = p.Name, Description = "Made with ROBLENDER (free, open source mesh editor)" }
+			pcall(function()
+				if game.CreatorType == Enum.CreatorType.Group and game.CreatorId > 0 then
+					params.CreatorId = game.CreatorId
+					params.CreatorType = Enum.AssetCreatorType.Group
+				end
+			end)
+			local id, uerr, kind, c = Display.upload(m, params)
+			if not id then
+				setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
+				return
+			end
+			p:SetAttribute("RB_AssetId", id)
+			local real, lerr = Display.fromAsset(id)
+			if not real then
+				setStatus(("Uploaded %s as rbxassetid://%s but Roblox hasn't made it ready yet (%s). Save again in a minute."):format(p.Name, tostring(id), tostring(lerr)))
+				return
+			end
+			if p.Parent and not (editing and p == obj) and p.RB_Data.Value == data then
+				local rec
+				pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER save") end)
+				applyBuilt(p, real, c)
+				p:SetAttribute("RB_SavedHash", dataHash(data))
+				if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
+				setStatus(("Saved %s to Roblox (rbxassetid://%s). It stays in the place and publishes."):format(p.Name, tostring(id)))
+			else
+				real:Destroy()
+				setStatus(p.Name .. " changed while saving - it will save again when you leave Edit Mode.")
+			end
+		end)
+		saving[p] = nil
+		if not ok then setStatus("Couldn't save " .. p.Name .. ": " .. tostring(err)) end
+	end)
+end
+-- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
+local function restoreSaved(p)
+	local id = p:GetAttribute("RB_AssetId")
+	if not id then return end
+	task.spawn(function()
+		local real = Display.fromAsset(id)
+		if real and p.Parent and not (editing and p == obj) and isSaved(p) then
+			local c = Display.bounds(loadFrom(p))
+			applyBuilt(p, real, c)
+		elseif real then
+			real:Destroy()
+		end
+	end)
 end
 
 -- ===== world helpers =====
@@ -477,6 +554,8 @@ local function exitEdit()
 		editing = false
 		local ok, _, np = applyMesh(obj, bm, false)
 		if np then obj = np end
+		local done = obj
+		task.defer(function() if isSaved(done) then restoreSaved(done) elseif autoSave then saveMesh(done, true) end end)
 		Selection:Set({ obj })
 		activeObj = obj
 		if scene[obj] then scene[obj].data = nil end -- redraw it untinted
@@ -1084,9 +1163,11 @@ r = row()
 button(r, "Bake to parts", 116, Tools.bake, Color3.fromRGB(40, 130, 80))
 button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
-label("SAVING: the mesh is kept on the part and comes back when you edit it. Roblox doesn't save plugin-made meshes into the place yet - use Bake to parts (normal parts) or Export .obj (3D Importer) to keep it for good.", 10, Color3.fromRGB(255, 200, 120))
+label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Luau API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
 
 -- ===== the Blender-style window (UI.lua + View.lua) =====
+-- (in its own function: Luau allows 200 locals per function)
+local function window()
 local function shiftDown() return UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) end
 local function selectedPart()
 	if editing and obj then return obj end
@@ -1342,6 +1423,19 @@ local TOOL = {
 		end
 	end,
 	Bake = Tools.bake, Export = Tools.exportOBJ,
+	Save = function()
+		local p = selectedPart()
+		if not isRB(p) then setStatus("Select a " .. NAME .. " mesh to save.") return end
+		if editing and p == obj then exitEdit() end
+		if isSaved(p) then setStatus(p.Name .. " is already saved (rbxassetid://" .. tostring(p:GetAttribute("RB_AssetId")) .. ").") return end
+		saveMesh(p)
+	end,
+	SaveAll = function()
+		if editing then exitEdit() end
+		local n = 0
+		for q in pairs(scene) do if q.Parent and not isSaved(q) then saveMesh(q) n += 1 end end
+		if n == 0 then setStatus("Everything is saved.") end
+	end,
 	DeleteObjects = function() if not editing and not modal then deleteObjects() end end,
 	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
@@ -1350,7 +1444,7 @@ TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
 local api = { version = VERSION }
 local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio,
+	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame, viewName = view and view.viewName or nil }
 	local p = selectedPart()
@@ -1361,6 +1455,11 @@ function api.state()
 		st.objRot = V3(math.deg(rx), math.deg(ry), math.deg(rz))
 		st.color, st.material = p.Color, p.Material and p.Material.Name
 		st.hidden = scene[p] ~= nil and scene[p].hidden == true
+		if isRB(p) then
+			st.saved = isSaved(p)
+			st.assetId = p:GetAttribute("RB_AssetId")
+			st.saving = saving[p] == true
+		end
 	end
 	local m = (editing and bm) or (p and scene[p] and scene[p].bm)
 	if m then
@@ -1386,7 +1485,7 @@ function api.outliner()
 	local sel = {}
 	for _, p in ipairs(Selection:Get()) do sel[p] = true end
 	for p, r in pairs(scene) do
-		if p.Parent then list[#list + 1] = { key = p, name = p.Name, selected = sel[p] == true or (editing and p == obj), active = p == activeObj or (editing and p == obj), hidden = r.hidden == true } end
+		if p.Parent then list[#list + 1] = { key = p, name = p.Name, unsaved = not isSaved(p), selected = sel[p] == true or (editing and p == obj), active = p == activeObj or (editing and p == obj), hidden = r.hidden == true } end
 	end
 	table.sort(list, function(a, b) return a.name < b.name end)
 	return list
@@ -1426,6 +1525,11 @@ api.undo = function() pcall(function() CHS:Undo() end) end
 api.redo = function() pcall(function() CHS:Redo() end) end
 api.close = function() setUIOn(false) end
 api.setStudioView = function(b) setStudioView(b) end
+api.setAutoSave = function(b)
+	autoSave = b
+	pcall(function() plugin:SetSetting("RB_AutoSave", b) end)
+	setStatus(b and "Meshes save to Roblox when you leave Edit Mode." or "Auto save off - use File > Save Mesh.")
+end
 api.rename = function(name)
 	local p = selectedPart()
 	if p then record("Rename", function() p.Name = name end) end
@@ -1516,10 +1620,14 @@ setUIOn = function(on)
 		sceneScan()
 		view.frame.Visible = not useStudio
 		if ownView() then plugin:Activate(true) end
-		setStatus("Welcome to " .. NAME .. ". Shift A = add, click a mesh + Tab = edit, MMB / RMB drag = orbit, wheel = zoom.")
+		local hasApi = pcall(function() assert(AssetService.CreateAssetAsync) end)
+		setStatus(hasApi and ("Welcome to " .. NAME .. ". Shift A = add, click a mesh + Tab = edit, MMB / RMB drag = orbit, wheel = zoom.") or BETA_MSG)
 	else
 		if view then view:beginCage() view:endCage() end
 		plugin:Deactivate()
+		local n = 0
+		for q in pairs(scene) do if q.Parent and not isSaved(q) then n += 1 end end
+		if n > 0 then setStatus(("%d mesh%s not saved to Roblox yet - open ROBLENDER and use File > Save All Meshes."):format(n, n == 1 and "" or "es")) end
 	end
 	dirtyCage = true
 end
@@ -1885,5 +1993,8 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 end)
+
+end
+window()
 
 print(NAME .. " " .. VERSION .. " loaded - free + open source (GPL-2.0-or-later). Mesh engine converted from Blender's BMesh.")

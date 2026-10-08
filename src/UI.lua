@@ -170,7 +170,7 @@ UI.icon = icon
 -- ===== construction =====
 function UI.new(api, parentGui)
 	local self = setmetatable({ api = api, on = false, menuOpen = nil, subOpen = nil, sidebar = false, toolbar = true,
-		hover = {}, report = "", drag = nil, propTab = "object", panelsOpen = { transform = true, vis = false, mesh = true, surface = true, keep = true },
+		hover = {}, report = "", drag = nil, propTab = "object", panelsOpen = { transform = true, vis = false, mesh = true, surface = true, save = true, keep = false },
 		fields = {}, outRows = {}, version = api.version or "" }, UI)
 	local gui = make("ScreenGui", { Name = "ROBLENDER_UI", Enabled = false, IgnoreGuiInset = true, DisplayOrder = 50, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false }, parentGui)
 	self.gui = gui
@@ -261,6 +261,10 @@ function UI:buildTopBar()
 		return b
 	end
 	menu("File", function() return {
+		{ "Save Mesh to Roblox", "", function() api.tool("Save") end },
+		{ "Save All Meshes", "", function() api.tool("SaveAll") end },
+		{ "Auto Save (leaving Edit Mode)", "", function() api.setAutoSave(not api.state().autoSave) end, check = api.state().autoSave },
+		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
 		"-",
@@ -489,7 +493,7 @@ function UI:refreshOutliner(s)
 	local api = self.api
 	local objs = api.outliner and api.outliner() or {}
 	local sig = {}
-	for _, o in ipairs(objs) do sig[#sig + 1] = o.name .. (o.selected and "*" or "") .. (o.active and "!" or "") .. (o.hidden and "h" or "") end
+	for _, o in ipairs(objs) do sig[#sig + 1] = o.name .. (o.selected and "*" or "") .. (o.active and "!" or "") .. (o.hidden and "h" or "") .. (o.unsaved and "u" or "") end
 	local key = table.concat(sig, "|")
 	if key == self.outKey then return end
 	self.outKey = key
@@ -497,7 +501,7 @@ function UI:refreshOutliner(s)
 	outRow(self, 1, 0, "scene", "Scene Collection", false)
 	outRow(self, 2, 1, "collection", "Collection", true)
 	for i, o in ipairs(objs) do
-		local r, l = outRow(self, 2 + i, 2, "mesh", o.name, i % 2 == 0)
+		local r, l = outRow(self, 2 + i, 2, "mesh", o.name .. (o.unsaved and " *" or ""), i % 2 == 0)
 		if o.active then r.BackgroundColor3, r.BackgroundTransparency = T.outActive, 0 l.TextColor3 = T.activeObj
 		elseif o.selected then r.BackgroundColor3, r.BackgroundTransparency = T.outSel, 0 l.TextColor3 = T.selObj end
 		local data = make("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -30, 0, 2), Size = UDim2.fromOffset(16, 16) }, r)
@@ -653,11 +657,22 @@ function UI:buildPropContent()
 			corner(mb, 4)
 		end)
 	else
-		self:panel(1, "keep", "Keep It", function(b)
-			label(b, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
-				Text = "The mesh is stored on the part and comes back when you edit it. Roblox doesn't save plugin-made meshes into the place yet, so to keep one for good:" })
-			self:wideButton(b, 2, "Bake to Parts", function() api.tool("Bake") end, rgb(0x2f6f46))
-			self:wideButton(b, 3, "Export .obj (for the 3D Importer)", function() api.tool("Export") end)
+		self:panel(1, "save", "Save to Roblox", function(b)
+			local txt
+			if s.saving then txt = "Saving..."
+			elseif s.saved then txt = "Saved as rbxassetid://" .. tostring(s.assetId) .. " - it stays in the place and publishes."
+			elseif s.objName then txt = "Not saved yet. Saving uploads the mesh as a real Roblox Mesh asset."
+			else txt = "Select a mesh." end
+			label(b, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = s.saved and rgb(0x8bdc00) or T.textDim, Text = txt })
+			self:wideButton(b, 2, "Save Mesh to Roblox", function() api.tool("Save") end, T.blue)
+			self:wideButton(b, 3, "Save All Meshes", function() api.tool("SaveAll") end)
+			self:wideButton(b, 4, (s.autoSave and "[x]" or "[  ]") .. "  Auto save when leaving Edit Mode", function() api.setAutoSave(not s.autoSave) self:buildPropContent() end, T.textField)
+			label(b, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "Needs Studio's beta \"CreateAssetAsync Luau API\" (File > Beta Features)." })
+		end)
+		self:panel(2, "keep", "Other Ways", function(b)
+			self:wideButton(b, 1, "Bake to Parts", function() api.tool("Bake") end, rgb(0x2f6f46))
+			self:wideButton(b, 2, "Export .obj (for the 3D Importer)", function() api.tool("Export") end)
 		end)
 	end
 	self.fieldsDirty = true
@@ -1055,7 +1070,8 @@ function UI:refresh(force)
 		self.base[b] = (t == self.propTab) and T.tabSel or T.tabInner
 		if not self.hover[b] then b.BackgroundColor3 = self.base[b] end
 	end
-	if s.objName ~= self.lastPropObj then self.lastPropObj = s.objName self:buildPropContent() end
+	local propKey = tostring(s.objName) .. "|" .. tostring(s.saved) .. tostring(s.saving) .. tostring(s.assetId) .. tostring(s.autoSave)
+	if propKey ~= self.lastPropKey then self.lastPropKey = propKey self:buildPropContent() end
 	for _, f in pairs(self.fields) do
 		if not f.box:IsFocused() then
 			local v = f.get(s)

@@ -96,7 +96,9 @@ UDim2 = {
 	fromOffset = function(a, b) return { 0, a, 0, b } end,
 }
 DockWidgetPluginGuiInfo = { new = function(...) return { ... } end }
-Content = { fromObject = function(o) return { obj = o } end }
+Content = { fromObject = function(o) return { obj = o } end, fromAssetId = function(id) return { assetId = id } end, fromUri = function(u) return { uri = u } end }
+MOCK_DEFER = {}
+task = { spawn = function(f, ...) f(...) end, wait = function() end, defer = function(f, ...) local a = { ... } table.insert(MOCK_DEFER, function() f(table.unpack(a)) end) end }
 local enumCache = {}
 Enum = setmetatable({}, { __index = function(_, cat)
 	enumCache[cat] = enumCache[cat] or setmetatable({}, { __index = function(t, name)
@@ -279,7 +281,17 @@ end
 function EM:AddColor() self.c += 1 return self.c end
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
 MOCK.meshesMade = 0
+MOCK.uploads = {}
+function Inst.CreateAssetAsync(_, em, assetType, params)
+	if MOCK.noAssetApi then error("CreateAssetAsync is not enabled") end
+	assert(assetType.Name == "Mesh", "mesh asset")
+	assert(em.__kind == "EditableMesh", "uploads an EditableMesh")
+	MOCK.uploads[#MOCK.uploads + 1] = { em = em, params = params }
+	return Enum.CreateAssetResult.Success, 900000 + #MOCK.uploads
+end
 function Inst.CreateMeshPartAsync(_, content)
+	if content.assetId then content = { obj = assert(MOCK.uploads[content.assetId - 900000], "unknown asset").em } end
+	assert(content.obj, "content")
 	local em = content.obj
 	assert(#em.t > 0, "empty mesh")
 	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)

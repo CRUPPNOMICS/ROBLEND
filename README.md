@@ -71,12 +71,28 @@ The 3D view only shows ROBLENDER meshes. To edit in Studio's own 3D view instead
 
 Studio's own camera keys (W A S D Q E) still move the camera, so tap those keys quickly. The panel buttons do the same jobs.
 
-## Saving
+## Saving (needs a Studio beta)
 
-The mesh data is stored on the part (`RB_Data`), and editing the part again brings the mesh back.
-Roblox doesn't yet save meshes that a plugin makes into the place file. To keep a model permanently, use one of these:
-- **Bake to parts**: builds a copy out of normal wedge parts.
-- **Export .obj**: then bring the file in with the 3D Importer.
+ROBLENDER saves each mesh to Roblox as a real **Mesh asset**, using `AssetService:CreateAssetAsync`, so the mesh stays in the place and publishes like any imported mesh.
+
+**Set it up once**
+1. In Studio, open File > Beta Features and turn on **CreateAssetAsync Luau API**, then restart Studio.
+2. Install ROBLENDER as a **local plugin** (the .rbxmx in your Plugins folder). Roblox only allows this API in local plugins, not in plugins installed from the Creator Store.
+
+**When it saves**
+- Automatically when you leave Edit Mode, if the mesh changed. You can turn this off under File > Auto Save.
+- When you choose File > Save Mesh to Roblox or File > Save All Meshes.
+- Unsaved meshes have a `*` after their name in the Outliner.
+
+**Things to know**
+- Every save is a new upload. Uploads are moderated like any other mesh.
+- Roblox allows 30 uploads a minute.
+- In a group game, meshes upload to the group.
+- The editable copy of the mesh is also kept on the part (`RB_Data`), so you can always edit it again.
+
+**Other ways to keep a mesh**
+- Bake to Parts: builds a copy out of wedge parts.
+- Export .obj: bring the file in with the 3D Importer.
 
 ## What's in it
 

@@ -128,6 +128,34 @@ function Display.build(bm, selColor)
 	return mp, c, nil, em
 end
 
+-- ===== save: upload the mesh as a real Roblox Mesh asset (AssetService:CreateAssetAsync, local plugins,
+-- Studio beta "CreateAssetAsync Luau API"). Returns id, err, errKind ("api" = the API isn't available), centre
+function Display.upload(bm, params)
+	local mp, c, err, em = Display.build(bm)
+	if not mp or not em then return nil, err or "no mesh" end
+	mp:Destroy()
+	local ok, result, idOrErr = pcall(function() return AssetService:CreateAssetAsync(em, Enum.AssetType.Mesh, params) end)
+	if not ok then return nil, tostring(result), "api" end
+	if result ~= Enum.CreateAssetResult.Success then return nil, tostring(idOrErr or result) end
+	return idOrErr, nil, nil, c
+end
+-- a MeshPart using the uploaded mesh (new uploads can take a moment to be ready, so it retries)
+function Display.fromAsset(id)
+	local lastErr
+	for attempt = 1, 5 do
+		for _, make in ipairs({
+			function() return Content.fromAssetId(id) end,
+			function() return Content.fromUri("rbxassetid://" .. tostring(id)) end,
+		}) do
+			local ok, mp = pcall(function() return AssetService:CreateMeshPartAsync(make()) end)
+			if ok and mp then return mp end
+			lastErr = mp
+		end
+		if attempt < 5 then task.wait(1.5) end
+	end
+	return nil, tostring(lastErr)
+end
+
 -- ===== bake: the mesh as real Roblox parts (wedges), glued - this SAVES and publishes like any part =====
 local function wedgePair(a, b, c, thick, parent, look)
 	-- longest side = base, the third corner splits the triangle into two right-angled wedges

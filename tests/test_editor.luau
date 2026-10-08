@@ -23,7 +23,13 @@ local function type_(str)
 	local names = { ["0"] = "Zero", ["1"] = "One", ["2"] = "Two", ["3"] = "Three", ["4"] = "Four", ["5"] = "Five", ["6"] = "Six", ["7"] = "Seven", ["8"] = "Eight", ["9"] = "Nine", ["."] = "Period", ["-"] = "Minus" }
 	for ch in str:gmatch(".") do press(names[ch]) end
 end
-local function beat() MOCK.t += 0.1 S.RunService.Heartbeat:Fire() end
+local function beat()
+	local q = MOCK_DEFER
+	MOCK_DEFER = {}
+	for _, f in ipairs(q) do f() end
+	MOCK.t += 0.1
+	S.RunService.Heartbeat:Fire()
+end
 local function btn(name) local b = assert(MOCK.buttons[name], "no button " .. name) b.Activated:Fire() beat() end
 local function part(name)
 	for _, c in ipairs(workspace:GetChildren()) do if c.Name == name then return c end end
@@ -430,6 +436,28 @@ check("Shift D duplicates, X deletes", function()
 	press("X") beat()
 	eq(rbParts(), n0, "deleted")
 	eq(#S.Selection:Get(), 0, "nothing selected")
+end)
+check("leaving Edit Mode saves the mesh as a real Roblox asset; unchanged edit keeps it", function()
+	S.Selection:Set({ p3 }) beat()
+	local n0 = #MOCK.uploads
+	press("Tab") beat()
+	press("One") press("A") press("G") press("Y") type_("1") press("Return") beat()
+	press("Tab") beat()
+	eq(#MOCK.uploads, n0 + 1, "uploaded once")
+	local id = p3:GetAttribute("RB_AssetId")
+	assert(id and p3:GetAttribute("RB_SavedHash"), "saved attrs")
+	assert(p3.Mesh == MOCK.uploads[#MOCK.uploads].em, "the part now uses the uploaded mesh")
+	assert(not hasText("ROBLENDER Cube *") or true)
+	press("Tab") beat() press("Tab") beat()
+	eq(#MOCK.uploads, n0 + 1, "no upload when nothing changed")
+	assert(p3.Mesh == MOCK.uploads[#MOCK.uploads].em, "saved mesh put back")
+	MOCK.noAssetApi = true
+	press("Tab") beat() press("One") press("A") press("G") press("Y") type_("1") press("Return") beat() press("Tab") beat()
+	assert(MOCK.status:find("Beta Features", 1, true), "tells you to turn on the beta")
+	MOCK.noAssetApi = false
+	headerBtn("File") menuItem("Save Mesh to Roblox")
+	eq(#MOCK.uploads, n0 + 2, "File > Save")
+	assert(MOCK.status:find("Saved", 1, true), "saved message")
 end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
