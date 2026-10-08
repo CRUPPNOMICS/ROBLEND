@@ -20,6 +20,8 @@ V.__tostring = function(a) return string.format("%g, %g, %g", a.X, a.Y, a.Z) end
 function V.Dot(a, b) return a.X * b.X + a.Y * b.Y + a.Z * b.Z end
 function V.Cross(a, b) return V.new(a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X) end
 function V.Lerp(a, b, t) return a + (b - a) * t end
+function V.Min(a, b) return V.new(math.min(a.X, b.X), math.min(a.Y, b.Y), math.min(a.Z, b.Z)) end
+function V.Max(a, b) return V.new(math.max(a.X, b.X), math.max(a.Y, b.Y), math.max(a.Z, b.Z)) end
 Vector3 = { new = V.new, zero = V.new(0, 0, 0) }
 
 -- just enough CFrame for MeshTools (rotation about an axis applied to a Vector3)

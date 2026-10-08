@@ -397,5 +397,89 @@ check2("merge doubles welds two touching cubes' shared corners", function()
 	local same, k = Mods.mergeDoubles(cube(), 0.001)
 	eq(k, 0, "nothing to merge")
 end)
+check2("weld + triangulate modifiers", function()
+	local out = Mods.evaluate(cube(), { Mods.new("array"), Mods.new("weld") })
+	eq(out.nv, 16, "array copies welded")
+	local tri = Mods.evaluate(cube(), { Mods.new("triangulate") })
+	eq(tri.nf, 12, "12 triangles") closed(tri) outward(tri)
+end)
+check2("decimate (planar) joins a flat grid back into one face", function()
+	local g = BMesh.new() Ops.grid(g, 4, 4, 4)
+	local out = Mods.evaluate(g, { Mods.new("decimate") })
+	out:validate()
+	eq(out.nf, 1, "one face") eq(out.nv, 4, "4 corners")
+	local c = Mods.evaluate(Mods.evaluate(cube(), { Mods.new("subsurf") }), { Mods.new("decimate") })
+	eq(c.nf, 24, "a curved surface is left alone")
+end)
+check2("screw: a line spun 360 degrees makes a closed tube band", function()
+	local bm = BMesh.new()
+	local a, b = bm:vertCreate(Vector3.new(1, -1, 0)), bm:vertCreate(Vector3.new(1, 1, 0))
+	bm:edgeCreate(a, b)
+	local m = Mods.new("screw")
+	m.steps = 8
+	local out = Mods.evaluate(bm, { m })
+	out:validate()
+	eq(out.nf, 8, "faces") eq(out.nv, 16, "verts")
+	for v in pairs(out.verts) do assert(math.abs(Vector3.new(v.co.X, 0, v.co.Z).Magnitude - 1) < 1e-4, "radius 1") end
+	m.angle, m.screw = 180, 2
+	out = Mods.evaluate(bm, { m })
+	eq(out.nf, 8, "half turn faces") eq(out.nv, 18, "open ends")
+end)
+check2("simple deform: twist keeps the ends, bend curls, taper narrows the top", function()
+	local tall = cube()
+	for v in pairs(tall.verts) do v.co = Vector3.new(v.co.X, v.co.Y * 4, v.co.Z) end
+	local m = Mods.new("simpledeform")
+	m.angle = 90
+	local out = Mods.evaluate(tall, { m })
+	out:validate()
+	for v in pairs(out.verts) do
+		assert(math.abs(Vector3.new(v.co.X, 0, v.co.Z).Magnitude - math.sqrt(2)) < 1e-4, "twist keeps the radius")
+		assert(math.abs(math.abs(v.co.Y) - 4) < 1e-4, "same height")
+	end
+	m.method = "Taper"
+	out = Mods.evaluate(tall, { m })
+	for v in pairs(out.verts) do
+		if v.co.Y > 0 then assert(math.abs(math.abs(v.co.X) - 1.5) < 1e-4, "top wider by factor") else assert(math.abs(math.abs(v.co.X) - 0.5) < 1e-4, "bottom narrower") end
+	end
+	local long = cube()
+	for v in pairs(long.verts) do v.co = Vector3.new(v.co.X * 4, v.co.Y, v.co.Z) end
+	m.method, m.angle, m.axis = "Bend", 180, "Z"
+	out = Mods.evaluate(long, { m })
+	out:validate()
+	local hy = -math.huge
+	for v in pairs(out.verts) do hy = math.max(hy, v.co.Y) end
+	assert(hy > 2.5, "the ends curl up into a half circle: " .. hy)
+	m.method, m.axis = "Stretch", "Y"
+	out = Mods.evaluate(tall, { m })
+	local hy = 0 for v in pairs(out.verts) do hy = math.max(hy, v.co.Y) end
+	assert(math.abs(hy - 6) < 1e-4, "stretched to 1.5x")
+end)
+check2("cast to sphere, wave, displace", function()
+	local m = Mods.new("cast") m.factor = 1
+	local s = Mods.evaluate(Mods.evaluate(cube(), { Mods.new("subsurf") }), { m })
+	local r
+	for v in pairs(s.verts) do
+		local d = v.co.Magnitude
+		r = r or d
+		assert(math.abs(d - r) < 1e-4, "all on one sphere")
+	end
+	local g = BMesh.new() Ops.grid(g, 8, 8, 8)
+	local w = Mods.evaluate(g, { Mods.new("wave") })
+	local lo, hi = math.huge, -math.huge
+	for v in pairs(w.verts) do lo = math.min(lo, v.co.Y) hi = math.max(hi, v.co.Y) end
+	assert(hi - lo > 0.5, "waves")
+	local d = Mods.evaluate(g, { Mods.new("displace") })
+	local diff = 0
+	for v in pairs(d.verts) do diff += math.abs(v.co.Y) end
+	assert(diff > 0.1, "displaced")
+	local d2 = Mods.evaluate(g, { Mods.new("displace") })
+	local same = true
+	local ys = {} for v in pairs(d.verts) do ys[#ys + 1] = v.co.Y end
+	table.sort(ys)
+	local ys2 = {} for v in pairs(d2.verts) do ys2[#ys2 + 1] = v.co.Y end
+	table.sort(ys2)
+	for i = 1, #ys do if math.abs(ys[i] - ys2[i]) > 1e-9 then same = false end end
+	assert(same, "same result every time")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

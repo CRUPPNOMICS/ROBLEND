@@ -448,7 +448,8 @@ function UI:buildView()
 	self.toolBtns = {}
 	-- from space_toolsystem_toolbar.py (VIEW3D_PT_tools_active, object + edit mesh); a list = a flyout group
 	local TOOLS = {
-		{ { "select", "select", "Select Box", "Select items using box selection", "W" } },
+		{ { "select", "select", "Select Box", "Select items using box selection", "W" },
+			{ "circle", "select", "Select Circle", "Select items using circle selection (drag to paint, wheel = size)", "C" } },
 		{ { "cursor", "cursor", "Cursor", "Set the cursor location (also Shift Right Click)", "Shift RMB" } },
 		"-",
 		{ { "move", "move", "Move", "Move selected items (drag on them)", "G" } },
@@ -751,6 +752,50 @@ local MOD_FIELDS = {
 		num(3, "Segments", "segments", 1, 32, true)
 		num(4, "Angle", "angle", 0, 180)
 	end,
+	weld = function(self, b, i, m, api, num)
+		num(2, "Distance", "distance", 0, 100)
+	end,
+	triangulate = function(self, b)
+		label(b, { LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, TextColor3 = T.textDim, Text = "Splits every face into triangles." })
+	end,
+	decimate = function(self, b, i, m, api, num)
+		self:toggleRow(b, 2, "Mode", { { "Planar", true, function() end, "Joins faces that are flatter than the angle limit" } })
+		num(3, "Angle Limit", "angle", 0, 180)
+	end,
+	screw = function(self, b, i, m, api, num)
+		num(2, "Angle", "angle", -3600, 3600)
+		num(3, "Screw", "screw", -1000, 1000)
+		num(4, "Steps Viewport", "steps", 1, 256, true)
+		local ax = m.axis or "Y"
+		self:toggleRow(b, 5, "Axis", {
+			{ "X", ax == "X", function() api.modSet(i, "axis", "X") end }, { "Y", ax == "Y", function() api.modSet(i, "axis", "Y") end }, { "Z", ax == "Z", function() api.modSet(i, "axis", "Z") end } })
+		label(b, { LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Spins the mesh's open edges (a profile line) round the axis through the origin." })
+	end,
+	simpledeform = function(self, b, i, m, api, num)
+		local me = m.method or "Twist"
+		self:toggleRow(b, 2, "Method", {
+			{ "Twist", me == "Twist", function() api.modSet(i, "method", "Twist") end }, { "Bend", me == "Bend", function() api.modSet(i, "method", "Bend") end },
+			{ "Taper", me == "Taper", function() api.modSet(i, "method", "Taper") end }, { "Stretch", me == "Stretch", function() api.modSet(i, "method", "Stretch") end } })
+		if me == "Twist" or me == "Bend" then num(3, "Angle", "angle", -3600, 3600) else num(3, "Factor", "factor", -10, 10) end
+		local ax = m.axis or "Y"
+		self:toggleRow(b, 4, "Axis", {
+			{ "X", ax == "X", function() api.modSet(i, "axis", "X") end }, { "Y", ax == "Y", function() api.modSet(i, "axis", "Y") end }, { "Z", ax == "Z", function() api.modSet(i, "axis", "Z") end } })
+	end,
+	cast = function(self, b, i, m, api, num)
+		self:toggleRow(b, 2, "Shape", { { "Sphere", true, function() end } })
+		num(3, "Factor", "factor", -10, 10)
+	end,
+	wave = function(self, b, i, m, api, num)
+		self:toggleRow(b, 2, "Motion", { { "Radial", m.radial ~= false, function() api.modSet(i, "radial", true) end }, { "Along X", m.radial == false, function() api.modSet(i, "radial", false) end } })
+		num(3, "Height", "height", -100, 100)
+		num(4, "Width", "width", 0.001, 1000)
+		num(5, "Offset", "offset", -1000, 1000)
+	end,
+	displace = function(self, b, i, m, api, num)
+		num(2, "Strength", "strength", -100, 100)
+		num(3, "Texture Size", "size", 0.001, 1000)
+		num(4, "Seed", "seed", -100000, 100000, true)
+	end,
 	smooth = function(self, b, i, m, api, num)
 		num(2, "Factor", "factor", -2, 2)
 		num(3, "Repeat", "repeat", 0, 50, true)
@@ -863,6 +908,9 @@ function UI:buildPropContent()
 				local r = make("Frame", { LayoutOrder = i, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18) }, b)
 				label(r, { Size = UDim2.new(0.5, -6, 1, 0), Text = k[1], TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = T.textDim })
 				label(r, { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, 0, 1, 0), Text = tostring(k[2] or "-") })
+			end
+			if s.mods and #s.mods > 0 and not s.editing then
+				label(b, { LayoutOrder = 9, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, TextColor3 = T.textDim, Text = "Counts include the modifiers." })
 			end
 			self:wideButton(b, 10, "Merge by Distance", function() api.tool("MergeDist") end)
 			self:wideButton(b, 11, "Flip Normals", function() api.tool("Flip") end)
@@ -1051,7 +1099,7 @@ function UI:selectMenuEdit()
 	return {
 		{ "All", "A", t("SelectAll") }, { "None", "Alt A", t("SelectNone") }, { "Invert", "Ctrl I", t("Invert") },
 		"-",
-		{ "Box Select", "Drag", nil },
+		{ "Box Select", "Drag", nil }, { "Circle Select", "C", t("CircleSelect") },
 		"-",
 		{ "Select Random", "", t("SelectRandom") }, { "Checker Deselect", "", t("Checker") },
 		"-",
@@ -1076,12 +1124,23 @@ function UI:objectMenu()
 		{ "Snap", "Shift S", nil, sub = function() return self:snapItems() end },
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
+		{ "Join", "Ctrl J", function() api.tool("Join") end },
+		"-",
+		{ "Subdivision", "", nil, sub = function()
+			local items = {}
+			for lv = 0, 4 do items[#items + 1] = { "Level " .. lv, "Ctrl " .. lv, function() api.subdivSet(lv) end } end
+			return items
+		end },
 		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
+end
+function UI:separateItems()
+	local t = function(n) return function() self.api.tool(n) end end
+	return { { "Selection", "", t("Separate") }, { "By Loose Parts", "", t("SeparateLoose") } }
 end
 function UI:snapItems()
 	local t = function(n) return function() self.api.tool(n) end end
@@ -1129,7 +1188,7 @@ function UI:meshMenu()
 		"-",
 		{ "Merge", "M", nil, sub = function() return self:mergeItems() end },
 		{ "Split", "", nil, sub = function() return { { "Selection", "Y", t("Split") } } end },
-		{ "Separate", "P", nil, sub = function() return { { "Selection", "", t("Separate") } } end },
+		{ "Separate", "P", nil, sub = function() return self:separateItems() end },
 		"-",
 		{ "Bisect", "", function() api.setTool("bisect") end },
 		{ "Knife Tool", "K", t("Knife") },
@@ -1223,6 +1282,7 @@ function UI:openNamedMenu(name, at)
 		delete = function() return self:deleteItems(), "Delete" end,
 		merge = function() return self:mergeItems(), "Merge" end,
 		snap = function() return self:snapItems(), "Snap" end,
+		separate = function() return self:separateItems(), "Separate" end,
 		extrude = function() return self:extrudeItems(), "Extrude" end,
 		vertex = function() return self:vertexMenu(), "Vertex" end,
 		edge = function() return self:edgeMenu(), "Edge" end,
@@ -1305,6 +1365,7 @@ function UI:openContextMenu(at)
 		{ "Add", "", nil, sub = function() return self:addMeshItems() end },
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
+		{ "Join", "Ctrl J", function() api.tool("Join") end },
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}, at, "Object")
@@ -1315,7 +1376,8 @@ function UI:helpItems()
 		{ "Edit / Object Mode", "Tab" }, { "Vertex / Edge / Face", "1  2  3" }, { "Select / Extend / Box", "Click  Shift  Drag" },
 		{ "Select Loop", "Alt Click" }, { "All / None / Invert", "A  Alt A  Ctrl I" }, { "Move / Rotate / Scale", "G  R  S" },
 		{ "Axis / Snap / Value", "X Y Z  Ctrl  0-9" }, { "Extrude / Inset", "E  I" }, { "Loop Cut", "Ctrl R" },
-		{ "Extrude to Mouse", "Ctrl RMB" }, { "Repeat Last", "Shift R" },
+		{ "Extrude to Mouse", "Ctrl RMB" }, { "Repeat Last", "Shift R" }, { "Circle Select", "C" },
+		{ "Inset: individual / depth", "I then I / Ctrl" }, { "Subdivision level", "Ctrl 0-4" }, { "Join / Separate", "Ctrl J  /  P" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },

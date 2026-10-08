@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.7.0"
+local VERSION = "0.8.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1105,18 +1105,26 @@ local function updateInset()
 	local cam = camera()
 	local depth = (cam.CFrame.Position - M.cw).Magnitude
 	local wpp = 2 * depth * math.tan(math.rad(cam.FieldOfView) / 2) / math.max(1, cam.ViewportSize.Y)
-	local thick = tonumber(M.num) or math.abs((mousePos() - M.cs).Magnitude - (M.m0 - M.cs).Magnitude) * wpp
+	local thick, depth
+	if M.depthMode then
+		thick = M.thickFixed or 0
+		depth = tonumber(M.num) or ((M.depth0 or 0) + (M.dm0.Y - mousePos().Y) * wpp)
+	else
+		thick = tonumber(M.num) or math.abs((mousePos() - M.cs).Magnitude - (M.m0 - M.cs).Magnitude) * wpp
+		depth = M.depth or 0
+	end
+	M.thick, M.depth = thick, depth
 	local nb, _, fl = BMesh.fromData(M.snap)
 	local set = {}
 	for _, i in ipairs(M.picked) do if fl[i] then set[fl[i]] = true end end
-	local _, nf = Ops.insetRegion(nb, set, thick, 0)
+	local _, nf = (M.individual and Ops.insetIndividual or Ops.insetRegion)(nb, set, thick, depth)
 	bm = nb
 	clearSel()
 	for f in pairs(nf) do f.sel = true end
 	flush()
 	worldTris = nil
 	dirtyMesh, dirtyCage = true, true
-	setStatus(("INSET %.3f   click / Enter = done, Esc = cancel"):format(thick))
+	setStatus(("INSET %.3f  depth %.3f%s   I = individual, Ctrl = depth, click / Enter = done, Esc = cancel"):format(thick, depth, M.individual and "  (individual)" or ""))
 end
 function Tools.loopCut()
 	modal = { kind = "loopcut", num = "" }
@@ -1496,6 +1504,49 @@ local function duplicateObjects()
 	Selection:Set(copies)
 	activeObj = copies[#copies]
 	startObjTransform("G")
+end
+-- Ctrl J (Blender's Join): the other selected meshes go into the active one
+local function joinObjects()
+	local ps = {}
+	for _, p in ipairs(selectedParts()) do if isRB(p) then ps[#ps + 1] = p end end
+	local act = (isRB(activeObj) and table.find(ps, activeObj)) and activeObj or ps[1]
+	if #ps < 2 then setStatus("Select two or more " .. NAME .. " meshes to join (Shift click).") return end
+	local base = loadFrom(act)
+	local spec = MT.toSpec(base)
+	local o = originOf(act)
+	for _, p in ipairs(ps) do
+		if p ~= act then
+			local m = loadFrom(p)
+			local src = MT.toSpec(m)
+			local op = originOf(p)
+			local off = #spec.verts
+			for _, sv in ipairs(src.verts) do
+				spec.verts[#spec.verts + 1] = { co = o:PointToObjectSpace(op * sv.co), sel = false, loose = sv.loose }
+			end
+			for _, f in ipairs(src.faces) do
+				local r = {}
+				for j, k in ipairs(f.v) do r[j] = k + off end
+				spec.faces[#spec.faces + 1] = { v = r, sel = false, smooth = f.smooth }
+			end
+			for _, e in ipairs(src.edges) do spec.edges[#spec.edges + 1] = { e[1] + off, e[2] + off } end
+			for k, fl in pairs(src.eflags) do
+				local a, b = k:match("(%d+):(%d+)")
+				spec.eflags[(tonumber(a) + off) .. ":" .. (tonumber(b) + off)] = fl
+			end
+		end
+	end
+	local joined = MT.fromSpec(spec)
+	record("Join", function()
+		dataOf(act).Value = encode(joined)
+		local _, _, np = applyMesh(act, joined, false)
+		act = np or act
+		for _, p in ipairs(ps) do if p ~= act then p.Parent = nil end end
+	end)
+	Selection:Set({ act })
+	activeObj = act
+	if scene[act] then scene[act].data = nil end
+	dirtyCage = true
+	setStatus(("Joined %d meshes into %s."):format(#ps, act.Name))
 end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
@@ -2125,6 +2176,11 @@ local function modelingTools()
 		polybuild = true, spin = true, smooth = true, randomize = true, edgeslide = true, vertexslide = true, shrinkfatten = true, pushpull = true,
 		shear = true, tosphere = true, rip = true, ripedge = true }
 	function MOD.setTool(name)
+		if name == "circle" then
+			-- Select Circle runs as a mode (like pressing C); the tool stays Select Box
+			if editing and not modal then T.circleSelect() else setStatus("Select Circle works in Edit Mode (Tab).") end
+			return
+		end
 		MOD.tool = name
 		MOD.preview = nil
 		if modal and modal.kind == "knife" and name ~= "knife" then finishModal(true) end
@@ -2356,6 +2412,53 @@ local function modelingTools()
 		if np then np.Color, np.Material = obj.Color, obj.Material end
 		setStatus("Separated into " .. (np and np.Name or "a new part") .. ".")
 	end
+	-- P > By Loose Parts: every unconnected piece becomes its own part (the biggest stays)
+	O.SeparateLoose = function()
+		local comps, seen = {}, {}
+		for v in pairs(bm.verts) do
+			if not seen[v] then
+				local set, n, stack = {}, 0, { v }
+				seen[v] = true
+				while #stack > 0 do
+					local x = table.remove(stack)
+					set[x] = true
+					n += 1
+					for _, e in ipairs(BMesh.vertEdges(x)) do
+						local o = BMesh.otherVert(e, x)
+						if not seen[o] then seen[o] = true stack[#stack + 1] = o end
+					end
+				end
+				comps[#comps + 1] = { set = set, n = n }
+			end
+		end
+		if #comps < 2 then setStatus("The mesh is one piece - nothing to separate.") return end
+		table.sort(comps, function(a, b) return a.n > b.n end)
+		local made = 0
+		local gone = {}
+		for i = 2, #comps do
+			local spec = MT.toSpec(bm)
+			local inSet = {}
+			for v, k in pairs(spec.vi) do if comps[i].set[v] then inSet[k] = true end end
+			local fs = {}
+			for _, f in ipairs(spec.faces) do
+				local all = true
+				for _, k in ipairs(f.v) do if not inSet[k] then all = false break end end
+				if all then fs[#fs + 1] = f end
+			end
+			spec.faces = fs
+			local es = {}
+			for _, e in ipairs(spec.edges) do if inSet[e[1]] and inSet[e[2]] then es[#es + 1] = e end end
+			spec.edges = es
+			for k, sv in ipairs(spec.verts) do sv.loose = sv.loose and inSet[k] == true end
+			local piece = MT.fromSpec(spec)
+			local np = MOD.createPart(piece, obj.Name .. "." .. string.format("%03d", i - 1), origin)
+			if np then np.Color, np.Material = obj.Color, obj.Material made += 1 end
+			for v in pairs(comps[i].set) do gone[v] = true end
+		end
+		Ops.deleteVerts(bm, gone)
+		changed("Separate")
+		setStatus(("Separated %d loose part%s."):format(made, made == 1 and "" or "s"))
+	end
 	O.MergeCenter = function() Tools.merge() end
 	O.MergeCursor = function()
 		local vs = MT.selVerts(bm)
@@ -2538,6 +2641,70 @@ local function modelingTools()
 	O.ExtrudeIndividual = function() T.extrudeIndividual() end
 	O.ExtrudeEdges = function() setMode("edge") Tools.extrude() end
 	O.ExtrudeVerts = function() setMode("vert") Tools.extrude() end
+	-- C (Blender's Circle Select): LMB paints a selection, Shift + LMB deselects, wheel = size, RMB / Esc / Enter = done
+	function T.circleSelect()
+		if modal or not editing then return end
+		local ring = Instance.new("Frame")
+		ring.Name = "RB_Circle"
+		ring.BackgroundTransparency = 1
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.ZIndex = 50
+		local uc = Instance.new("UICorner") uc.CornerRadius = UDim.new(0.5, 0) uc.Parent = ring
+		local us = Instance.new("UIStroke") us.Color = Color3.fromRGB(235, 235, 235) us.Thickness = 1 us.Parent = ring
+		ring.Parent = ui and ui.gui or nil
+		local M = { kind = "circle", num = "", r = MOD.circleR or 25 }
+		local function place()
+			local mp = mousePos()
+			ring.Position = UDim2.fromOffset(mp.X, mp.Y)
+			ring.Size = UDim2.fromOffset(M.r * 2, M.r * 2)
+		end
+		local function paint()
+			local mp = mousePos()
+			local on = M.painting ~= "sub"
+			local function inside(wp)
+				local sp, vis = toScreen(wp)
+				return vis and (sp - mp).Magnitude <= M.r
+			end
+			if mode == "vert" then
+				for v in pairs(bm.verts) do
+					if not v.hide then
+						local wp = W(v.co)
+						if inside(wp) and (xray or not occluded(wp, faceSetOfVert(v))) then v.sel = on end
+					end
+				end
+			elseif mode == "edge" then
+				for e in pairs(bm.edges) do
+					local a, b = W(e.v1.co), W(e.v2.co)
+					local mid = (a + b) / 2
+					if inside(mid) and (xray or not occluded(mid, faceSetOfEdge(e))) then e.sel = on e.v1.sel = on e.v2.sel = on end
+				end
+			else
+				for f in pairs(bm.faces) do
+					local c = W(BMesh.faceCenter(f))
+					if inside(c) and (xray or not occluded(c, { [f] = true })) then f.sel = on end
+				end
+			end
+			flush()
+			dirtyCage, dirtyMesh = true, true
+		end
+		M.update = function() place() if M.painting then paint() end end
+		M.click = function() M.painting = shiftDown() and "sub" or "add" paint() end
+		M.release = function() M.painting = nil return true end
+		M.onWheel = function(steps) M.r = math.clamp(M.r * (steps > 0 and 0.85 or 1.18), 4, 400) place() end
+		M.onKey = function(k)
+			if k == Enum.KeyCode.Equals or k == Enum.KeyCode.KeypadPlus then M.r = math.min(400, M.r * 1.18) place() return true end
+			if k == Enum.KeyCode.Minus or k == Enum.KeyCode.KeypadMinus then M.r = math.max(4, M.r * 0.85) place() return true end
+			return false
+		end
+		M.finish = function()
+			MOD.circleR = M.r
+			ring.Parent = nil
+			setStatus("Circle select done.")
+		end
+		modal = M
+		place()
+		setStatus("CIRCLE SELECT: drag = select, Shift drag = deselect, wheel = size. Right click / Esc = done.")
+	end
 	-- Ctrl + right click (Blender's Extrude to Mouse): extrude the selection to the mouse, or add a vertex there
 	O.ExtrudeToMouse = function()
 		local ray = getRay()
@@ -2579,6 +2746,7 @@ local function modelingTools()
 			setStatus("Added a vertex. Ctrl + right click again to extrude to the mouse.")
 		end
 	end
+	O.CircleSelect = function() T.circleSelect() end
 	-- remember the last operator for Shift R (Repeat Last)
 	MOD.opDepth = 0
 	for name, fn in pairs(O) do
@@ -2609,6 +2777,10 @@ local function modelingTools()
 		local function menu(name) ui:openNamedMenu(name, mousePos()) return true end
 		if k == K.R and ctrl then T.loopCutModal() return true end
 		if k == K.R and shift and not alt then MOD.repeatLast() return true end
+		if k == K.C and not ctrl and not shift and not alt then T.circleSelect() return true end
+		if k == K.P and not ctrl then return menu("separate") end
+		local LEVEL = { [K.Zero] = 0, [K.One] = 1, [K.Two] = 2, [K.Three] = 3, [K.Four] = 4, [K.Five] = 5 }
+		if ctrl and LEVEL[k] then MOD.subdivSet(LEVEL[k]) return true end
 		if k == K.B and ctrl and shift then O.BevelVerts() return true end
 		if k == K.B and ctrl then O.Bevel() return true end
 		if k == K.K and not ctrl then O.Knife() return true end
@@ -2621,7 +2793,6 @@ local function modelingTools()
 		if k == K.D and alt then O.RipEdge() return true end
 		if k == K.D and shift then O.Duplicate() return true end
 		if k == K.Y and not ctrl then O.Split() return true end
-		if k == K.P and not ctrl then O.Separate() return true end
 		if k == K.X and ctrl then O.Dissolve() return true end
 		if k == K.X or k == K.Delete then return menu("delete") end
 		if k == K.M and not ctrl then return menu("merge") end
@@ -2645,6 +2816,18 @@ local function modelingTools()
 	end
 	-- keys inside a running G (GG = edge slide) and the wheel (proportional size)
 	function MOD.modalKey(k)
+		if modal and modal.kind == "inset" then
+			local K = Enum.KeyCode
+			if k == K.I then modal.individual = not modal.individual updateInset() return true end
+			if k == K.LeftControl or k == K.RightControl then
+				modal.depthMode = not modal.depthMode
+				modal.dm0 = mousePos()
+				modal.depth0 = modal.depth or 0
+				modal.thickFixed = modal.thick
+				updateInset()
+				return true
+			end
+		end
 		if modal and modal.onKey and modal.onKey(k) then
 			if modal.update then modal.update() end
 			return true
@@ -2758,6 +2941,7 @@ local TOOL = {
 	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
+TOOL.Join = function() if not editing and not modal then joinObjects() end end
 TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
 local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
 for name, fn in pairs(MOD.ops) do
@@ -2858,6 +3042,24 @@ api.mods = function()
 end
 api.modTypes = Mods.TYPES
 api.repeatLast = function() if editing and not modal then MOD.repeatLast() end end
+-- Ctrl 0..5 (Blender's Subdivision Set): add a Subdivision Surface modifier, or set its levels
+api.subdivSet = function(level)
+	local p = modTarget()
+	if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
+	level = math.clamp(level, 0, 4)
+	local list = modsOf(p)
+	local idx
+	for i, m in ipairs(list) do if m.type == "subsurf" then idx = i end end
+	if idx then
+		api.modSet(idx, "levels", level)
+	else
+		api.modAdd("subsurf")
+		api.modSet(#modsOf(p), "levels", level)
+	end
+	setStatus(("Subdivision level %d."):format(level))
+end
+MOD.subdivSet = api.subdivSet
+api.join = joinObjects
 local function modEdit(what, fn)
 	local p = modTarget()
 	if not p then setStatus("Pick a " .. NAME .. " part first.") return end
@@ -3379,6 +3581,8 @@ local function objectKey(k, shift, ctrl, alt)
 	elseif k == Enum.KeyCode.A and alt then TOOL.SelectNone()
 	elseif k == Enum.KeyCode.A and not ctrl then TOOL.SelectAll()
 	elseif k == Enum.KeyCode.I and ctrl then TOOL.Invert()
+	elseif k == Enum.KeyCode.J and ctrl then joinObjects()
+	elseif ctrl and ({ Zero = 0, One = 1, Two = 2, Three = 3, Four = 4, Five = 5 })[k.Name] then MOD.subdivSet(({ Zero = 0, One = 1, Two = 2, Three = 3, Four = 4, Five = 5 })[k.Name])
 	elseif k == Enum.KeyCode.Z and alt then toggleXray()
 	elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
 	end

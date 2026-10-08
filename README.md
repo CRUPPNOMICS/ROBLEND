@@ -153,10 +153,18 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 |---|---|---|
 | Array | Repeats the mesh in a row | Count, axis, relative offset |
 | Bevel | Rounds every edge sharper than the angle | Amount, segments, angle |
+| Decimate (Planar) | Joins faces that are flatter than the angle into bigger ones | Angle limit |
 | Mirror | Copies the mesh across its own X / Y / Z, welding the middle | Axis, merge, distance |
+| Screw | Spins the open edges (a profile line) round an axis: vases, springs, bolts | Angle, screw height, steps, axis |
 | Solidify | Gives a flat surface thickness | Thickness, offset |
-| Subdivision Surface | Catmull-Clark smoothing | Levels (0 to 4) |
+| Subdivision Surface | Catmull-Clark smoothing (Ctrl 0 to 4 sets it) | Levels (0 to 4) |
+| Triangulate | Splits every face into triangles | - |
+| Weld | Merges verts closer than the distance | Distance |
+| Cast | Pulls the mesh towards a sphere | Factor |
+| Displace | Pushes the surface in and out with noise (rocks, terrain) | Strength, texture size, seed |
+| Simple Deform | Twist, Bend, Taper or Stretch | Method, angle / factor, axis |
 | Smooth | Relaxes the shape | Factor, repeat |
+| Wave | Ripples, out from the middle or along X | Height, width, offset |
 
 - Each modifier panel has: the eye (on or off), the Edit Mode toggle, move up / down, **Apply** (makes it real geometry) and **X** (removes it).
 - The stack runs top to bottom. It is stored on the part (`RB_Mods`), and saving uploads the result.
@@ -166,6 +174,13 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - Ctrl + right-click: extrude the selection to the mouse, or add a vertex there when nothing is selected.
 - Shift R: repeat the last operator (also in the Edit menu).
 - Auto Merge (the header button next to Mirror X): after a move, vertices that land on each other are welded.
+- C: circle select. Drag to paint a selection, Shift-drag to remove, wheel for the size, right-click or Esc when done. Also in the tool strip (right-click Select Box).
+- Inset (I): press I again for each face on its own; press Ctrl to set the depth with the mouse.
+- P: Separate > Selection or By Loose Parts.
+- Ctrl 0 to 4 (both modes): sets the Subdivision Surface level, adding the modifier if needed.
+
+**Object Mode**
+- Ctrl J joins the selected meshes into the active one (Object > Join).
 
 ## What's in it
 
@@ -174,7 +189,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/MeshTools.lua` | The Modeling tab's operators: bevel, knife, bisect, spin, smooth, rip, split, dissolve, bridge, poke, triangulate, solidify, hull, symmetrize, normals, selection tools. |
-| `src/Modifiers.lua` | The modifier stack: Mirror, Subdivision Surface, Solidify, Array, Bevel, Smooth, and merge by distance. |
+| `src/Modifiers.lua` | The modifier stack (14 modifiers) and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/View.lua` | ROBLENDER's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
