@@ -17,6 +17,7 @@
 	  source/blender/modifiers/intern/MOD_cast.cc       (Cast, sphere)
 	  source/blender/modifiers/intern/MOD_wave.cc       (Wave)
 	  source/blender/modifiers/intern/MOD_displace.cc   (Displace, with Roblox's math.noise as the texture)
+	  source/blender/modifiers/intern/MOD_wireframe.cc  + bmesh/operators/bmo_wireframe.cc (Wireframe, simplified)
 	Original: Copyright (C) Blender Authors (GPL-2.0-or-later)
 	Luau conversion: Copyright (C) 2026 Cruppnomics (Giga_gad27) - GPL-2.0-or-later.
 
@@ -25,6 +26,7 @@
 ]]
 
 local BMesh = require(script.Parent.BMesh)
+local Ops = require(script.Parent.Ops)
 local MT = require(script.Parent.MeshTools)
 local Mods = {}
 local V3 = Vector3.new
@@ -40,6 +42,7 @@ Mods.TYPES = {
 	{ id = "subsurf", name = "Subdivision Surface", group = "Generate", defaults = { levels = 1 } },
 	{ id = "triangulate", name = "Triangulate", group = "Generate", defaults = {} },
 	{ id = "weld", name = "Weld", group = "Generate", defaults = { distance = 0.01 } },
+	{ id = "wireframe", name = "Wireframe", group = "Generate", defaults = { thickness = 0.1 } },
 	{ id = "cast", name = "Cast", group = "Deform", defaults = { factor = 0.5 } },
 	{ id = "displace", name = "Displace", group = "Deform", defaults = { strength = 0.3, size = 1, seed = 0 } },
 	{ id = "simpledeform", name = "Simple Deform", group = "Deform", defaults = { method = "Twist", angle = 45, factor = 0.5, axis = "Y" } },
@@ -249,6 +252,34 @@ end
 function Mods.weld(bm, m)
 	local nb = Mods.mergeDoubles(bm, math.max(m.distance or 0.01, 1e-5))
 	return nb
+end
+
+-- ===== Wireframe: every face becomes a frame round its edges, then gets thickness =====
+-- turns faces `fs` into frames (an inset ring each, middle removed); returns the frame faces
+function Mods.wireframeFaces(bm, fs, t)
+	local before = {}
+	for f in pairs(bm.faces) do before[f] = true end
+	local _, inner = Ops.insetIndividual(bm, fs, t, 0)
+	local kill = {}
+	for f in pairs(inner or {}) do kill[f] = true end
+	Ops.deleteFaces(bm, kill)
+	local frame = {}
+	for f in pairs(bm.faces) do if not before[f] then frame[f] = true end end
+	bm:normalsUpdate()
+	return frame
+end
+function Mods.wireframe(bm, m)
+	local out = copy(bm)
+	local t = math.max(m.thickness or 0.1, 1e-3)
+	local fs = {}
+	for f in pairs(out.faces) do fs[f] = true end
+	if not next(fs) then return bm end
+	Mods.wireframeFaces(out, fs, t)
+	local all = {}
+	for f in pairs(out.faces) do all[f] = true end
+	MT.solidify(out, all, t)
+	for f in pairs(out.faces) do f.sel = false end
+	return out
 end
 
 -- ===== Triangulate =====

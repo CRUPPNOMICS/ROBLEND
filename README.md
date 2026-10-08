@@ -160,6 +160,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | Subdivision Surface | Catmull-Clark smoothing (Ctrl 0 to 4 sets it) | Levels (0 to 4) |
 | Triangulate | Splits every face into triangles | - |
 | Weld | Merges verts closer than the distance | Distance |
+| Wireframe | Turns every edge into a beam (cages, scaffolding, lattices) | Thickness |
 | Cast | Pulls the mesh towards a sphere | Factor |
 | Displace | Pushes the surface in and out with noise (rocks, terrain) | Strength, texture size, seed |
 | Simple Deform | Twist, Bend, Taper or Stretch | Method, angle / factor, axis |
@@ -179,8 +180,18 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - P: Separate > Selection or By Loose Parts.
 - Ctrl 0 to 4 (both modes): sets the Subdivision Surface level, adding the modifier if needed.
 
+- Shift G: Select Similar (faces by area, sides, normal, coplanar...; edges by length, direction...; verts by edge count...).
+- A selects all, Alt A deselects (Blender 2.8+ keys).
+- Select Box modes in the header: Set, Extend, Subtract, Difference, Intersect.
+- The small arrow next to Proportional Editing picks the falloff: Smooth, Sphere, Root, Inverse Square, Sharp, Linear, Constant, Random.
+- Face > Wireframe turns the selected faces into a frame of beams (drag for the thickness).
+
 **Object Mode**
+- Add > Mesh now also has Ico Sphere, Cone and Torus.
 - Ctrl J joins the selected meshes into the active one (Object > Join).
+- Object > Set Origin: Geometry to Origin, Origin to Geometry, Origin to 3D Cursor. Mirror, Screw and Simple Deform work round the origin, so this moves where they mirror or spin.
+- Object > Apply > Rotation bakes the part's rotation into the mesh.
+- Object > Shade Smooth / Shade Flat.
 
 ## What's in it
 

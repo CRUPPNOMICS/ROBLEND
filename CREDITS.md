@@ -15,7 +15,7 @@ The Blender source files used are:
 | `source/blender/bmesh/intern/bmesh_core.cc` | Create, kill, split edge, split face |
 | `source/blender/bmesh/intern/bmesh_polygon.cc` | Face normal and centre |
 | `source/blender/bmesh/intern/bmesh_delete.cc` | Delete |
-| `source/blender/bmesh/operators/bmo_primitive.cc` | Primitives |
+| `source/blender/bmesh/operators/bmo_primitive.cc` | Primitives, including cone and ico sphere (the torus follows Blender's add-mesh torus script) |
 | `source/blender/bmesh/operators/bmo_extrude.cc` | Extrude |
 | `source/blender/bmesh/operators/bmo_inset.cc` | Inset (simplified) |
 | `source/blender/bmesh/operators/bmo_subdivide.cc` | Edge ring and loop cut |
@@ -25,8 +25,9 @@ The Blender source files used are:
 | `source/blender/bmesh/operators/bmo_utils.cc`, `bmo_poke.cc`, `bmo_triangulate.cc`, `bmo_join_triangles.cc` | Smooth vertices, poke, triangulate, tris to quads |
 | `source/blender/bmesh/operators/bmo_bridge.cc`, `bmo_dissolve.cc`, `bmo_rotate_edges.cc`, `bmo_connect.cc` | Bridge loops, dissolve, rotate edge, connect vertex pairs |
 | `source/blender/bmesh/operators/bmo_dupe.cc`, `bmo_hull.cc`, `bmo_symmetrize.cc`, `bmo_normals.cc` | Duplicate, split, spin, convex hull, symmetrize, recalculate normals |
-| `source/blender/modifiers/intern/MOD_mirror.cc`, `MOD_subsurf.cc`, `MOD_solidify.cc`, `MOD_array.cc`, `MOD_bevel.cc`, `MOD_smooth.cc`, `MOD_weld.cc`, `MOD_screw.cc`, `MOD_triangulate.cc`, `MOD_decimate.cc`, `MOD_simpledeform.cc`, `MOD_cast.cc`, `MOD_wave.cc`, `MOD_displace.cc` | The modifier stack (Subdivision uses the Catmull-Clark rules OpenSubdiv implements) |
+| `source/blender/modifiers/intern/MOD_mirror.cc`, `MOD_subsurf.cc`, `MOD_solidify.cc`, `MOD_array.cc`, `MOD_bevel.cc`, `MOD_smooth.cc`, `MOD_weld.cc`, `MOD_screw.cc`, `MOD_triangulate.cc`, `MOD_decimate.cc`, `MOD_simpledeform.cc`, `MOD_cast.cc`, `MOD_wave.cc`, `MOD_displace.cc`, `MOD_wireframe.cc` | The modifier stack (Subdivision uses the Catmull-Clark rules OpenSubdiv implements) |
 | `scripts/startup/bl_ui/properties_data_modifier.py` | The Modifiers tab and the Add Modifier menu |
+| `source/blender/editors/mesh/editmesh_select_similar.cc`, `source/blender/editors/object/object_transform.cc` | Select Similar; Set Origin and Apply Rotation |
 | `release/datafiles/userdef/userdef_default_theme.c` | Every colour of the window and the 3D view |
 | `scripts/startup/bl_ui/space_view3d.py` | The 3D view header menus, the Add menu and the right-click menus |
 | `scripts/startup/bl_ui/space_toolsystem_toolbar.py` | Tool strip names, tooltips and shortcuts |

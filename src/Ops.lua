@@ -119,6 +119,100 @@ function Ops.uvSphere(bm, segs, rings, r)
 	return out
 end
 
+-- cone (bmo_primitive.cc create_cone with radius 2 = 0): a ring, a point on top, a filled base
+function Ops.cone(bm, segs, r, depth)
+	segs = math.max(3, segs or 32)
+	r, depth = r or 2, depth or 4
+	local lo = ring(bm, segs, r, -depth / 2)
+	local apex = bm:vertCreate(V3(0, depth / 2, 0))
+	local out = {}
+	for i = 1, segs do
+		local j = i % segs + 1
+		out[#out + 1] = bm:faceCreate({ lo[i], apex, lo[j] })
+	end
+	local bot = {}
+	for i = 1, segs do bot[#bot + 1] = lo[i] end
+	out[#out + 1] = bm:faceCreate(bot)
+	return out
+end
+
+-- make a face list wind so its normal points away from `inside`
+local function facing(vs, inside)
+	local a, b, c = vs[1].co, vs[2].co, vs[3].co
+	local n = (b - a):Cross(c - a)
+	local mid = V3()
+	for _, v in ipairs(vs) do mid += v.co end
+	mid /= #vs
+	if n:Dot(mid - inside) < 0 then
+		local r = {}
+		for i = #vs, 1, -1 do r[#r + 1] = vs[i] end
+		return r
+	end
+	return vs
+end
+
+-- torus (scripts/addons_core add_mesh_torus.py): major ring round Y, tube round it
+function Ops.torus(bm, majorSegs, minorSegs, R, r)
+	majorSegs, minorSegs = math.max(3, majorSegs or 48), math.max(3, minorSegs or 12)
+	R, r = R or 2, r or 0.5
+	local p = {}
+	for i = 0, majorSegs - 1 do
+		local a = 2 * PI * i / majorSegs
+		local out = V3(math.cos(a), 0, math.sin(a))
+		p[i] = {}
+		for j = 0, minorSegs - 1 do
+			local b = 2 * PI * j / minorSegs
+			p[i][j] = bm:vertCreate(out * (R + r * math.cos(b)) + V3(0, r * math.sin(b), 0))
+		end
+	end
+	local faces = {}
+	for i = 0, majorSegs - 1 do
+		local i2 = (i + 1) % majorSegs
+		local a = 2 * PI * (i + 0.5) / majorSegs
+		local tube = V3(math.cos(a) * R, 0, math.sin(a) * R)
+		for j = 0, minorSegs - 1 do
+			local j2 = (j + 1) % minorSegs
+			faces[#faces + 1] = bm:faceCreate(facing({ p[i][j], p[i][j2], p[i2][j2], p[i2][j] }, tube))
+		end
+	end
+	return faces
+end
+
+-- ico sphere (bmo_primitive.cc create_icosphere): an icosahedron, each triangle cut in 4 per subdivision
+function Ops.icoSphere(bm, subdiv, r)
+	subdiv, r = math.clamp(subdiv or 2, 0, 5), r or 2
+	local g = (1 + math.sqrt(5)) / 2
+	local pts = { { -1, g, 0 }, { 1, g, 0 }, { -1, -g, 0 }, { 1, -g, 0 }, { 0, -1, g }, { 0, 1, g }, { 0, -1, -g }, { 0, 1, -g },
+		{ g, 0, -1 }, { g, 0, 1 }, { -g, 0, -1 }, { -g, 0, 1 } }
+	local tris = { { 1, 12, 6 }, { 1, 6, 2 }, { 1, 2, 8 }, { 1, 8, 11 }, { 1, 11, 12 }, { 2, 6, 10 }, { 6, 12, 5 }, { 12, 11, 3 }, { 11, 8, 7 }, { 8, 2, 9 },
+		{ 4, 10, 5 }, { 4, 5, 3 }, { 4, 3, 7 }, { 4, 7, 9 }, { 4, 9, 10 }, { 5, 10, 6 }, { 3, 5, 12 }, { 7, 3, 11 }, { 9, 7, 8 }, { 10, 9, 2 } }
+	local co = {}
+	for i, q in ipairs(pts) do co[i] = V3(q[1], q[2], q[3]).Unit * r end
+	for _ = 1, subdiv do
+		local mid = {}
+		local function m(a, b)
+			local k = math.min(a, b) .. ":" .. math.max(a, b)
+			if not mid[k] then
+				co[#co + 1] = ((co[a] + co[b]) / 2).Unit * r
+				mid[k] = #co
+			end
+			return mid[k]
+		end
+		local nt = {}
+		for _, t in ipairs(tris) do
+			local a, b, c = t[1], t[2], t[3]
+			local ab, bc, ca = m(a, b), m(b, c), m(c, a)
+			nt[#nt + 1] = { a, ab, ca } nt[#nt + 1] = { b, bc, ab } nt[#nt + 1] = { c, ca, bc } nt[#nt + 1] = { ab, bc, ca }
+		end
+		tris = nt
+	end
+	local vs = {}
+	for i, c in ipairs(co) do vs[i] = bm:vertCreate(c) end
+	local out = {}
+	for _, t in ipairs(tris) do out[#out + 1] = bm:faceCreate(facing({ vs[t[1]], vs[t[2]], vs[t[3]] }, V3())) end
+	return out
+end
+
 -- ===== extrude (bmo_extrude.cc) =====
 -- face region: the faces are copied onto new verts, side walls fill every edge on the region's border,
 -- the old faces go (and any edge / vert they leave with nothing). Returns new verts, new faces.

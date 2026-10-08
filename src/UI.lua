@@ -197,6 +197,16 @@ local function icon(parent, kind, col, size)
 		seg(box, 2, 2, 8, 9, col) seg(box, 14, 2, 8, 9, col) seg(box, 8, 9, 8, 15, col) seg(box, 4, 2, 9, 7, rgb(0xffa030))
 	elseif kind == "ripedge" then
 		seg(box, 2, 14, 8, 8, col) seg(box, 8, 8, 14, 14, col) seg(box, 8, 8, 8, 2, rgb(0xffa030), 2)
+	elseif kind == "boxset" then
+		rect(box, 2, 2, 12, 12, col, true, 0.35) rect(box, 2, 2, 12, 12, col, false)
+	elseif kind == "boxadd" then
+		rect(box, 1, 1, 9, 9, col, true, 0.35) rect(box, 6, 6, 9, 9, col, true, 0.35)
+	elseif kind == "boxsub" then
+		rect(box, 1, 1, 9, 9, col, true, 0.35) rect(box, 6, 6, 9, 9, col, false)
+	elseif kind == "boxxor" then
+		rect(box, 1, 1, 9, 9, col, true, 0.35) rect(box, 6, 6, 9, 9, col, true, 0.35) rect(box, 6, 6, 4, 4, T.header or rgb(0x303030), true)
+	elseif kind == "boxand" then
+		rect(box, 1, 1, 9, 9, col, false) rect(box, 6, 6, 9, 9, col, false) rect(box, 6, 6, 4, 4, col, true)
 	elseif kind == "wrench" then
 		seg(box, 2.5, 13.5, 9, 7, T.iconModifier, 3) ring(box, 11, 5, 3.5, T.iconModifier, false) rect(box, 11, 1, 4, 4, T.props or rgb(0x303030), true)
 	elseif kind == "automerge" then
@@ -403,19 +413,40 @@ function UI:buildView()
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
 	self.uvMenuBtn = pd("UV", function() return { { "UV editing comes in a later ROBLENDER version", "", nil } } end)
 	-- right side: X-ray + shading
-	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(280, HDR_H) }, hdr)
+	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(420, HDR_H) }, hdr)
 	hlist(right, 1, Enum.HorizontalAlignment.Right)
 	self.toggleBtns = {}
 	for i, tg in ipairs({ { "snap", "magnet", "Snap", "Snap during transform (Ctrl does the opposite)", "" },
 		{ "prop", "prop", "Proportional Editing", "Nearby geometry follows the selection (mouse wheel = size while moving)", "O" },
 		{ "mirrorX", nil, "Mirror X", "Edit both sides of the mesh at once (its own X axis)", "" },
 		{ "autoMerge", "automerge", "Auto Merge Vertices", "After moving, vertices that end up on top of each other are welded", "" } }) do
-		local b = self:btn(right, { LayoutOrder = -10 + i, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular, Text = tg[2] and "" or "X", Font = FONT_B }, function() api.toggleEdit2(tg[1]) end, "toggle")
+		local b = self:btn(right, { LayoutOrder = -20 + i * 2, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular, Text = tg[2] and "" or "X", Font = FONT_B }, function() api.toggleEdit2(tg[1]) end, "toggle")
 		corner(b, 4)
 		if tg[2] then icon(b, tg[2]) end
 		self:tip(b, tg[3], tg[4], tg[5])
 		self.toggleBtns[tg[1]] = b
 	end
+	-- proportional falloff dropdown (just after the proportional button)
+	self.falloffBtn = self:btn(right, { LayoutOrder = -20 + 2 * 2 + 1, Size = UDim2.fromOffset(16, 20), BackgroundColor3 = T.regular, Text = "v", TextSize = 10 }, function(b)
+		local st = api.state()
+		local items = { { header = "Proportional Falloff" } }
+		for _, n in ipairs(api.falloffs) do items[#items + 1] = { n, "", function() api.setFalloff(n) end, check = st.propFalloff == n } end
+		self:openMenu(items, b)
+	end, "toggle")
+	corner(self.falloffBtn, 4)
+	self:tip(self.falloffBtn, "Proportional Editing Falloff", "How nearby geometry follows: Smooth, Sphere, Root, Sharp, Linear, Constant...")
+	-- Select Box modes (the tool header in Blender): Set, Extend, Subtract, Difference, Intersect
+	self.boxModeBtns = {}
+	for i, bm in ipairs({ { "set", "boxset", "Set", "Set a new selection" }, { "add", "boxadd", "Extend", "Extend the existing selection (Shift)" },
+		{ "sub", "boxsub", "Subtract", "Subtract from the existing selection (Ctrl)" }, { "xor", "boxxor", "Difference", "Invert the existing selection" },
+		{ "and", "boxand", "Intersect", "Intersect the existing selection" } }) do
+		local b = self:btn(right, { LayoutOrder = -40 + i, Size = UDim2.fromOffset(22, 20), BackgroundColor3 = T.regular }, function() api.setBoxMode(bm[1]) end, "toggle")
+		corner(b, 4)
+		icon(b, bm[2])
+		self:tip(b, bm[3], bm[4])
+		self.boxModeBtns[bm[1]] = b
+	end
+	make("Frame", { LayoutOrder = -30, BackgroundTransparency = 1, Size = UDim2.fromOffset(10, 1) }, right)
 	make("Frame", { LayoutOrder = -5, BackgroundTransparency = 1, Size = UDim2.fromOffset(8, 1) }, right)
 	self.xrayBtn = self:btn(right, { LayoutOrder = 1, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.toggleXray() end, "toggle")
 	corner(self.xrayBtn, 4) icon(self.xrayBtn, "xray")
@@ -752,6 +783,9 @@ local MOD_FIELDS = {
 		num(3, "Segments", "segments", 1, 32, true)
 		num(4, "Angle", "angle", 0, 180)
 	end,
+	wireframe = function(self, b, i, m, api, num)
+		num(2, "Thickness", "thickness", 0.001, 100)
+	end,
 	weld = function(self, b, i, m, api, num)
 		num(2, "Distance", "distance", 0, 100)
 	end,
@@ -1048,7 +1082,7 @@ end
 function UI:addMeshItems()
 	local api = self.api
 	local items = {}
-	for _, k in ipairs({ { "Plane", "Plane" }, { "Cube", "Cube" }, { "Circle", "Circle" }, { "UV Sphere", "Sphere" }, { "Cylinder", "Cylinder" }, "-", { "Grid", "Grid" } }) do
+	for _, k in ipairs({ { "Plane", "Plane" }, { "Cube", "Cube" }, { "Circle", "Circle" }, { "UV Sphere", "Sphere" }, { "Ico Sphere", "IcoSphere" }, { "Cylinder", "Cylinder" }, { "Cone", "Cone" }, { "Torus", "Torus" }, "-", { "Grid", "Grid" } }) do
 		if k == "-" then items[#items + 1] = "-" else items[#items + 1] = { k[1], "", function() api.add(k[2]) end, icon = "mesh" } end
 	end
 	return items
@@ -1101,6 +1135,8 @@ function UI:selectMenuEdit()
 		"-",
 		{ "Box Select", "Drag", nil }, { "Circle Select", "C", t("CircleSelect") },
 		"-",
+		{ "Select Similar", "Shift G", nil, sub = function() return self:similarItems() end },
+		"-",
 		{ "Select Random", "", t("SelectRandom") }, { "Checker Deselect", "", t("Checker") },
 		"-",
 		{ "More/Less", "", nil, sub = function() return { { "More", "Ctrl +", t("SelectMore") }, { "Less", "Ctrl -", t("SelectLess") } } end },
@@ -1126,6 +1162,16 @@ function UI:objectMenu()
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		{ "Join", "Ctrl J", function() api.tool("Join") end },
 		"-",
+		{ "Set Origin", "", nil, sub = function() return {
+			{ "Geometry to Origin", "", function() api.tool("GeometryToOrigin") end },
+			{ "Origin to Geometry", "", function() api.tool("OriginToGeometry") end },
+			{ "Origin to 3D Cursor", "", function() api.tool("OriginToCursor") end },
+		} end },
+		{ "Apply", "Ctrl A", nil, sub = function() return { { "Rotation", "", function() api.tool("ApplyRotation") end } } end },
+		"-",
+		{ "Shade Smooth", "", function() api.tool("ObjShadeSmooth") end },
+		{ "Shade Flat", "", function() api.tool("ObjShadeFlat") end },
+		"-",
 		{ "Subdivision", "", nil, sub = function()
 			local items = {}
 			for lv = 0, 4 do items[#items + 1] = { "Level " .. lv, "Ctrl " .. lv, function() api.subdivSet(lv) end } end
@@ -1137,6 +1183,11 @@ function UI:objectMenu()
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
+end
+function UI:similarItems()
+	local items = {}
+	for _, k in ipairs(self.api.similarList()) do items[#items + 1] = { k[2], "", function() self.api.selectSimilar(k[1]) end } end
+	return items
 end
 function UI:separateItems()
 	local t = function(n) return function() self.api.tool(n) end end
@@ -1268,6 +1319,7 @@ function UI:faceMenu()
 		{ "Triangulate Faces", "Ctrl T", t("Triangulate") },
 		{ "Tris to Quads", "Alt J", t("TrisToQuads") },
 		{ "Solidify Faces", "", t("Solidify") },
+		{ "Wireframe", "", t("Wireframe") },
 		"-",
 		{ "Fill", "F", t("Fill") },
 		{ "Beautify Faces", "Alt F", t("BeautyFill") },
@@ -1283,6 +1335,7 @@ function UI:openNamedMenu(name, at)
 		merge = function() return self:mergeItems(), "Merge" end,
 		snap = function() return self:snapItems(), "Snap" end,
 		separate = function() return self:separateItems(), "Separate" end,
+		similar = function() return self:similarItems(), "Select Similar" end,
 		extrude = function() return self:extrudeItems(), "Extrude" end,
 		vertex = function() return self:vertexMenu(), "Vertex" end,
 		edge = function() return self:edgeMenu(), "Edge" end,
@@ -1485,6 +1538,11 @@ function UI:refresh(force)
 	for k, b in pairs(self.toggleBtns) do
 		self:setOnStyle(b, s[k] == true)
 		b.Visible = s.editing or k == "snap"
+	end
+	self.falloffBtn.Visible = s.editing == true
+	for k, b in pairs(self.boxModeBtns) do
+		self:setOnStyle(b, (s.boxMode or "set") == k)
+		b.Visible = s.editing == true and (s.activeTool or "select") == "select"
 	end
 	self.uvMenuBtn.Visible = s.editing
 	-- info text (Blender: "User Perspective" + "(1) Collection | Cube")

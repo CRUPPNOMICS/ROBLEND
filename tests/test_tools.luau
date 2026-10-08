@@ -481,5 +481,41 @@ check2("cast to sphere, wave, displace", function()
 	for i = 1, #ys do if math.abs(ys[i] - ys2[i]) > 1e-9 then same = false end end
 	assert(same, "same result every time")
 end)
+check2("cone, torus and ico sphere are closed and face outwards", function()
+	local c = BMesh.new() Ops.cone(c, 16, 2, 4) c:validate() closed(c) outward(c) eq(c.nf, 17, "cone faces")
+	local t = BMesh.new() Ops.torus(t, 24, 8, 2, 0.5) t:validate() closed(t) eq(t.nf, 192, "torus faces")
+	for f in pairs(t.faces) do
+		BMesh.faceNormalUpdate(f)
+		local cc = BMesh.faceCenter(f)
+		local tube = Vector3.new(cc.X, 0, cc.Z).Unit * 2
+		assert((cc - tube):Dot(f.no) > 0, "torus face points out of the tube")
+	end
+	local s = BMesh.new() Ops.icoSphere(s, 2, 2) s:validate() closed(s) outward(s)
+	eq(s.nf, 320, "ico faces") eq(s.nv, 162, "ico verts")
+	for v in pairs(s.verts) do assert(math.abs(v.co.Magnitude - 2) < 1e-4, "on the sphere") end
+end)
+check2("wireframe modifier: a cube becomes 12 closed beams' worth of frame", function()
+	local out = Mods.evaluate(cube(), { Mods.new("wireframe") })
+	out:validate()
+	closed(out)
+	eq(out.nf, 24 * 3, "frame quads outside + inside + the rims round the 6 holes")
+end)
+check2("select similar: face area, edge length, vert edge count", function()
+	local bm = cube()
+	local g = BMesh.new() Ops.grid(g, 2, 2, 4)
+	local f1 = next(g.faces)
+	f1.sel = true
+	local n = MT.selectSimilar(g, "face", "area")
+	eq(n, 3, "the other 3 grid squares")
+	for e in pairs(bm.edges) do e.sel = false end
+	local e0 = next(bm.edges) e0.sel = true
+	eq(MT.selectSimilar(bm, "edge", "length"), 11, "all cube edges are the same length")
+	for v in pairs(bm.verts) do v.sel = false end
+	local vv = next(bm.verts) vv.sel = true
+	eq(MT.selectSimilar(bm, "vert", "edges"), 7, "all corners have 3 edges")
+	for f in pairs(bm.faces) do f.sel = false end
+	local top = topFace(bm) top.sel = true
+	eq(MT.selectSimilar(bm, "face", "normal"), 0, "no other face points up")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

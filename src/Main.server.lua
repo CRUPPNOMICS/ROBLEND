@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.8.0"
+local VERSION = "0.9.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -61,7 +61,19 @@ local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false } -- header toggles: proportional, X mirror, snapping
+local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set" }
+-- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
+local FALLOFF = {
+	Smooth = function(t) return t * t * (3 - 2 * t) end,
+	Sphere = function(t) return math.sqrt(math.max(0, 2 * t - t * t)) end,
+	Root = function(t) return math.sqrt(t) end,
+	["Inverse Square"] = function(t) return t * (2 - t) end,
+	Sharp = function(t) return t * t end,
+	Linear = function(t) return t end,
+	Constant = function() return 1 end,
+	Random = function(t) return t * math.random() end,
+}
+local FALLOFF_ORDER = { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "Linear", "Constant", "Random" } -- header toggles: proportional, X mirror, snapping
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
@@ -644,7 +656,10 @@ local function primitive(m, kind)
 	elseif kind == "Grid" then Ops.grid(m, 6, 6, 6)
 	elseif kind == "Circle" then Ops.circle(m, 32, 2)
 	elseif kind == "Cylinder" then Ops.cylinder(m, 24, 2, 4)
-	elseif kind == "Sphere" then Ops.uvSphere(m, 24, 12, 2) end
+	elseif kind == "Sphere" then Ops.uvSphere(m, 24, 12, 2)
+	elseif kind == "IcoSphere" then Ops.icoSphere(m, 2, 2)
+	elseif kind == "Cone" then Ops.cone(m, 32, 2, 4)
+	elseif kind == "Torus" then Ops.torus(m, 48, 12, 2, 0.5) end
 end
 local function addShape(kind)
 	if editing and bm and not modal then
@@ -820,7 +835,7 @@ local function startTransform(kind, opts)
 					for _, s in ipairs(vs) do local d = (co - orig[s]).Magnitude if d < best then best = d end end
 					if best < EDIT.propR then
 						local t = 1 - best / EDIT.propR
-						modal.prop[v] = t * t * (3 - 2 * t)
+						modal.prop[v] = (FALLOFF[EDIT.propFalloff] or FALLOFF.Smooth)(t)
 						orig[v] = co
 					end
 				end
@@ -1208,15 +1223,12 @@ function Tools.subdivide()
 	commit("Subdivide")
 	setStatus("Subdivided.")
 end
+-- A = select all (Blender 2.8+ keymap; Alt A deselects)
 function Tools.selectAll()
-	local any = false
-	for v in pairs(bm.verts) do if v.sel then any = true break end end
 	clearSel()
-	if not any then
-		for v in pairs(bm.verts) do v.sel = not v.hide end
-		for e in pairs(bm.edges) do e.sel = not e.hide end
-		for f in pairs(bm.faces) do f.sel = not f.hide end
-	end
+	for v in pairs(bm.verts) do v.sel = not v.hide end
+	for e in pairs(bm.edges) do e.sel = not e.hide end
+	for f in pairs(bm.faces) do f.sel = not f.hide end
 	flush()
 	dirtyCage, dirtyMesh = true, true
 end
@@ -1547,6 +1559,76 @@ local function joinObjects()
 	if scene[act] then scene[act].data = nil end
 	dirtyCage = true
 	setStatus(("Joined %d meshes into %s."):format(#ps, act.Name))
+end
+-- rebuild a part with new mesh coords and a new origin (keeps where the mesh is in the world unless asked)
+local function reshapePart(p, m, newOrigin, what)
+	record(what, function()
+		dataOf(p).Value = encode(m)
+		-- point the part's origin at newOrigin, then applyMesh puts the mesh round it
+		p.CFrame = newOrigin * CFrame.new(p:GetAttribute("RB_Center") or V3())
+		local _, _, np = applyMesh(p, m, false)
+		p = np or p
+	end)
+	if scene[p] then scene[p].data = nil end
+	return p
+end
+local function rbSelected()
+	local out = {}
+	for _, p in ipairs(selectedParts()) do if isRB(p) then out[#out + 1] = p end end
+	return out
+end
+-- Object > Set Origin (Blender's object.origin_set)
+local function setOrigin(how)
+	if editing then setStatus("Set Origin works in Object Mode (Tab).") return end
+	local ps = rbSelected()
+	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
+	for _, p in ipairs(ps) do
+		local m = loadFrom(p)
+		local o = originOf(p)
+		local c = Display.bounds(m)
+		local newO = o
+		if how == "geometry" then
+			-- Origin to Geometry: the origin moves to the middle of the mesh
+			newO = o * CFrame.new(c)
+			for v in pairs(m.verts) do v.co -= c end
+		elseif how == "cursor" then
+			newO = CFrame.new(CURSOR) * o.Rotation
+			for v in pairs(m.verts) do v.co = newO:PointToObjectSpace(o * v.co) end
+		else
+			-- Geometry to Origin: the mesh moves so its middle is on the origin
+			for v in pairs(m.verts) do v.co -= c end
+		end
+		m:normalsUpdate()
+		reshapePart(p, m, newO, "Set Origin")
+	end
+	dirtyCage = true
+	setStatus(({ geometry = "Origin moved to the middle of the mesh.", cursor = "Origin moved to the 3D cursor.", origin = "Mesh moved onto its origin." })[how] or "Origin set.")
+end
+-- Object > Apply > Rotation: bake the part's rotation into the mesh, the part goes back to 0, 0, 0
+local function applyRotation()
+	if editing then return end
+	local ps = rbSelected()
+	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
+	for _, p in ipairs(ps) do
+		local m = loadFrom(p)
+		local o = originOf(p)
+		local newO = CFrame.new(o.Position)
+		for v in pairs(m.verts) do v.co = newO:PointToObjectSpace(o * v.co) end
+		m:normalsUpdate()
+		reshapePart(p, m, newO, "Apply Rotation")
+	end
+	setStatus("Rotation applied: the mesh keeps its look, the part's rotation is 0.")
+end
+-- Object > Shade Smooth / Shade Flat (every face of the selected meshes)
+local function shadeObjects(smooth)
+	local ps = rbSelected()
+	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
+	for _, p in ipairs(ps) do
+		local m = (editing and p == obj) and bm or loadFrom(p)
+		for f in pairs(m.faces) do f.smooth = smooth or nil end
+		if editing and p == obj then commit("Shade") else reshapePart(p, m, originOf(p), "Shade") end
+	end
+	setStatus(smooth and "Shade Smooth." or "Shade Flat.")
 end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
@@ -2518,6 +2600,16 @@ local function modelingTools()
 			if d > 1e-3 then MT.solidify(bm, MT.selFaces(bm), d) end
 		end })
 	end
+	O.Wireframe = function()
+		local fs = MT.selFaces(bm)
+		if not need(next(fs), "Pick faces for Wireframe.") then return end
+		startParam({ name = "Wireframe", mode = "dist", fn = function(d)
+			if d > 1e-3 then
+				local frame = Mods.wireframeFaces(bm, MT.selFaces(bm), d)
+				MT.solidify(bm, frame, d)
+			end
+		end })
+	end
 	O.Connect = function()
 		local made = MT.connectVerts(bm, MT.selVerts(bm))
 		for e in pairs(made) do e.sel = true end
@@ -2778,6 +2870,7 @@ local function modelingTools()
 		if k == K.R and ctrl then T.loopCutModal() return true end
 		if k == K.R and shift and not alt then MOD.repeatLast() return true end
 		if k == K.C and not ctrl and not shift and not alt then T.circleSelect() return true end
+		if k == K.G and shift and not ctrl and not alt then return menu("similar") end
 		if k == K.P and not ctrl then return menu("separate") end
 		local LEVEL = { [K.Zero] = 0, [K.One] = 1, [K.Two] = 2, [K.Three] = 3, [K.Four] = 4, [K.Five] = 5 }
 		if ctrl and LEVEL[k] then MOD.subdivSet(LEVEL[k]) return true end
@@ -2942,6 +3035,12 @@ local TOOL = {
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
 TOOL.Join = function() if not editing and not modal then joinObjects() end end
+TOOL.OriginToGeometry = function() setOrigin("geometry") end
+TOOL.OriginToCursor = function() setOrigin("cursor") end
+TOOL.GeometryToOrigin = function() setOrigin("origin") end
+TOOL.ApplyRotation = applyRotation
+TOOL.ObjShadeSmooth = function() if not editing then shadeObjects(true) end end
+TOOL.ObjShadeFlat = function() if not editing then shadeObjects(false) end end
 TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
 local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
 for name, fn in pairs(MOD.ops) do
@@ -2961,6 +3060,7 @@ function api.state()
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame, viewName = view and view.viewName or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
+		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
 	if p then
@@ -3059,6 +3159,23 @@ api.subdivSet = function(level)
 	setStatus(("Subdivision level %d."):format(level))
 end
 MOD.subdivSet = api.subdivSet
+api.similarList = function()
+	local out = {}
+	for _, k in ipairs(MT.SIMILAR[mode] or {}) do out[#out + 1] = { k[1], k[2] } end
+	return out
+end
+api.selectSimilar = function(kind)
+	if not editing or modal then return end
+	local n = MT.selectSimilar(bm, mode, kind, 0)
+	flush()
+	dirtyCage, dirtyMesh = true, true
+	setStatus(("Select Similar: %d more selected."):format(n))
+end
+api.falloffs = FALLOFF_ORDER
+api.setFalloff = function(name)
+	if FALLOFF[name] then EDIT.propFalloff = name EDIT.prop = true setStatus("Proportional falloff: " .. name .. " (proportional editing on).") end
+end
+api.setBoxMode = function(m) EDIT.boxMode = m end
 api.join = joinObjects
 local function modEdit(what, fn)
 	local p = modTarget()
@@ -3339,21 +3456,35 @@ local function boxSelect(a, b, add, sub)
 		dirtyCage = true
 		return
 	end
-	if not add and not sub then clearSel() end
+	-- Shift / Ctrl override the header's box mode (Set, Extend, Subtract, Difference, Intersect)
+	local bmode = sub and "sub" or add and "add" or EDIT.boxMode or "set"
+	if bmode == "set" then clearSel() end
+	local function apply(x, hit)
+		if bmode == "set" or bmode == "add" then if hit then x.sel = true end
+		elseif bmode == "sub" then if hit then x.sel = false end
+		elseif bmode == "xor" then if hit then x.sel = not x.sel end
+		elseif bmode == "and" then x.sel = x.sel and hit end
+	end
 	if mode == "vert" then
 		for v in pairs(bm.verts) do
 			local wp = W(v.co)
-			if inside(wp) and not occluded(wp, faceSetOfVert(v)) then v.sel = not sub end
+			apply(v, inside(wp) and not occluded(wp, faceSetOfVert(v)))
 		end
 	elseif mode == "edge" then
 		for e in pairs(bm.edges) do
 			local a2, b2 = W(e.v1.co), W(e.v2.co)
-			if inside(a2) and inside(b2) and not occluded((a2 + b2) / 2, faceSetOfEdge(e)) then e.sel = not sub end
+			apply(e, inside(a2) and inside(b2) and not occluded((a2 + b2) / 2, faceSetOfEdge(e)))
 		end
+		if bmode ~= "set" and bmode ~= "add" then for v in pairs(bm.verts) do v.sel = false end for e in pairs(bm.edges) do if e.sel then e.v1.sel = true e.v2.sel = true end end end
 	else
 		for f in pairs(bm.faces) do
 			local c = W(BMesh.faceCenter(f))
-			if inside(c) and not occluded(c, { [f] = true }) then f.sel = not sub end
+			apply(f, inside(c) and not occluded(c, { [f] = true }))
+		end
+		if bmode ~= "set" and bmode ~= "add" then
+			for v in pairs(bm.verts) do v.sel = false end
+			for e in pairs(bm.edges) do e.sel = false end
+			for f in pairs(bm.faces) do if f.sel then for _, v in ipairs(BMesh.faceVerts(f)) do v.sel = true end end end
 		end
 	end
 	flush()

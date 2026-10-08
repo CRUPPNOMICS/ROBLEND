@@ -1392,6 +1392,78 @@ function MT.selectLinked(bm, seedVerts)
 		if all then selectFace(f) end
 	end
 end
+-- Shift G (Blender's Select Similar, editmesh_select_similar.cc): select everything that matches a selected element
+local function faceArea(f)
+	local vs = fverts(f)
+	local a = 0
+	for i = 2, #vs - 1 do a += (vs[i].co - vs[1].co):Cross(vs[i + 1].co - vs[1].co).Magnitude / 2 end
+	return a
+end
+local function facePerimeter(f)
+	local vs, p = fverts(f), 0
+	for i = 1, #vs do p += (vs[i % #vs + 1].co - vs[i].co).Magnitude end
+	return p
+end
+MT.SIMILAR = {
+	vert = {
+		{ "edges", "Amount of Connecting Edges", function(v) return #BMesh.vertEdges(v) end },
+		{ "faces", "Amount of Adjacent Faces", function(v) return #BMesh.vertFaces(v) end },
+		{ "normal", "Vertex Normal", function(v) return MT.vertNormal(v) end },
+	},
+	edge = {
+		{ "length", "Length", function(e) return (e.v1.co - e.v2.co).Magnitude end },
+		{ "direction", "Direction", function(e) local d = e.v2.co - e.v1.co return d.Magnitude > 1e-9 and d.Unit or d end },
+		{ "faces", "Amount of Faces Around an Edge", function(e) return BMesh.edgeFaceCount(e) end },
+		{ "angle", "Face Angles", function(e) local f = BMesh.edgeFaces(e) if #f ~= 2 then return -1 end return math.acos(math.clamp(f[1].no:Dot(f[2].no), -1, 1)) end },
+		{ "sharp", "Sharpness", function(e) return e.sharp and 1 or 0 end },
+		{ "seam", "Seam", function(e) return e.seam and 1 or 0 end },
+	},
+	face = {
+		{ "sides", "Amount of Sides", function(f) return f.len end },
+		{ "area", "Area", faceArea },
+		{ "perimeter", "Perimeter", facePerimeter },
+		{ "normal", "Normal", function(f) return f.no end },
+		{ "coplanar", "Coplanar", function(f) return { n = f.no, d = f.no:Dot(BMesh.faceCenter(f)) } end },
+		{ "smooth", "Flat/Smooth", function(f) return f.smooth and 1 or 0 end },
+	},
+}
+function MT.selectSimilar(bm, mode, kind, threshold)
+	threshold = threshold or 0
+	local list = MT.SIMILAR[mode]
+	local fn
+	for _, k in ipairs(list or {}) do if k[1] == kind then fn = k[3] end end
+	if not fn then return 0 end
+	local src = mode == "vert" and bm.verts or mode == "edge" and bm.edges or bm.faces
+	local keys = {}
+	for x in pairs(src) do if x.sel and not x.hide then keys[#keys + 1] = fn(x) end end
+	if #keys == 0 then return 0 end
+	local function same(a, b)
+		if type(a) == "number" then
+			return math.abs(a - b) <= math.max(threshold * math.max(math.abs(a), 1), 1e-4)
+		elseif kind == "coplanar" then
+			return a.n:Dot(b.n) >= math.cos(math.max(threshold, 0.01)) and math.abs(a.d - b.d) <= math.max(threshold, 1e-3)
+		else -- a direction
+			local lim = math.cos(math.max(threshold * math.pi, 0.01))
+			if kind == "direction" then return math.abs(a:Dot(b)) >= lim end
+			return a:Dot(b) >= lim
+		end
+	end
+	local n = 0
+	for x in pairs(src) do
+		if not x.sel and not x.hide then
+			local k = fn(x)
+			for _, s in ipairs(keys) do
+				if same(s, k) then
+					if mode == "face" then selectFace(x) else x.sel = true if mode == "edge" then x.v1.sel = true x.v2.sel = true end end
+					n += 1
+					break
+				end
+			end
+		end
+	end
+	return n
+end
+
 function MT.selectRandom(bm, mode, ratio, seed)
 	local i = 0
 	local src = mode == "vert" and bm.verts or mode == "edge" and bm.edges or bm.faces
