@@ -189,6 +189,7 @@ function MT.bevel(bm, offset, vertexOnly)
 		local o = BMesh.otherVert(e, v)
 		local d = o.co - v.co
 		local len = d.Magnitude
+		if len < 1e-6 then slide[v][e] = vi[v] return vi[v] end
 		local maxd = (BV[o] and (len * 0.5) or len) * 0.98
 		local k = MT.addVert(spec, v.co + d.Unit * math.min(offset, maxd), true)
 		slide[v][e] = k
@@ -201,6 +202,7 @@ function MT.bevel(bm, offset, vertexOnly)
 		local v = l.v
 		local a, b = (l.prev.v.co - v.co), (l.next.v.co - v.co)
 		local la, lb = a.Magnitude, b.Magnitude
+		if la < 1e-6 or lb < 1e-6 then inner[key] = vi[v] return vi[v] end
 		a, b = a.Unit, b.Unit
 		local s = a:Cross(b).Magnitude
 		local t = s > 1e-4 and offset / s or offset

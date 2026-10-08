@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.5.2"
+local VERSION = "0.5.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -162,6 +162,7 @@ local function originOf(p)
 end
 
 -- put the mesh on the part (new look). Keeps the part where its origin is.
+local function ownView() return uiOn and view ~= nil and not useStudio end
 local applyBuilt
 local function applyMesh(p, b, tint)
 	local mp, c, err = Display.build(b, tint and SEL_COL or nil, tint)
@@ -183,6 +184,8 @@ applyBuilt = function(p, mp, c)
 		p = mp
 	else
 		p.Size = mp.Size
+		Display.adopt(p, Display.emOf[mp])
+		Display.emOf[mp] = nil
 		mp:Destroy()
 	end
 	p.CFrame = o * CFrame.new(c)
@@ -205,12 +208,12 @@ local function isSaved(p)
 	local d = p and p:FindFirstChild("RB_Data")
 	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(d.Value)
 end
-local function saveMesh(p, quiet)
+local function saveMesh(p, quiet, silent)
 	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
 	saving[p] = true
 	task.spawn(function()
 		local ok, err = pcall(function()
-			setStatus("Saving " .. p.Name .. " to Roblox...")
+			if not silent then setStatus("Saving " .. p.Name .. " to Roblox...") end
 			local data = p.RB_Data.Value
 			local m = loadFrom(p)
 			local params = { Name = p.Name, Description = "Made with ROBLENDER (free, open source mesh editor)" }
@@ -231,7 +234,7 @@ local function saveMesh(p, quiet)
 				setStatus(("Uploaded %s as rbxassetid://%s but Roblox hasn't made it ready yet (%s). Save again in a minute."):format(p.Name, tostring(id), tostring(lerr)))
 				return
 			end
-			if p.Parent and not (editing and p == obj) and p.RB_Data.Value == data then
+			if p.Parent and not (editing and p == obj and not ownView()) and p.RB_Data.Value == data then
 				local rec
 				pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER save") end)
 				applyBuilt(p, real, c)
@@ -240,12 +243,21 @@ local function saveMesh(p, quiet)
 				setStatus(("Saved %s to Roblox (rbxassetid://%s). It stays in the place and publishes."):format(p.Name, tostring(id)))
 			else
 				real:Destroy()
-				setStatus(p.Name .. " changed while saving - it will save again when you leave Edit Mode.")
+				if not silent then setStatus(p.Name .. " changed while saving - it will save again when you leave Edit Mode.") end
 			end
 		end)
 		saving[p] = nil
 		if not ok then setStatus("Couldn't save " .. p.Name .. ": " .. tostring(err)) end
 	end)
+end
+-- a ROBLENDER part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
+-- from RB_Data (only once per session, and only for parts not saved to Roblox)
+local fixedLook = setmetatable({}, { __mode = "k" })
+local function fixUnsaved(p)
+	if fixedLook[p] or not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) then return end
+	fixedLook[p] = true
+	if isSaved(p) or Display.partEm[p] then return end
+	pcall(function() applyMesh(p, loadFrom(p), false) end)
 end
 -- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
 local function restoreSaved(p)
@@ -264,7 +276,6 @@ end
 
 -- ===== world helpers =====
 local function W(co) return origin * co end
-local function ownView() return uiOn and view ~= nil and not useStudio end
 local function camera() if ownView() then return view end return workspace.CurrentCamera end
 local function toScreen(wp)
 	local sp, vis = camera():WorldToViewportPoint(wp)
@@ -493,9 +504,11 @@ local function commit(what)
 	local val = encode(bm)
 	lastWritten = val
 	dataOf(obj).Value = val
-	local ok, _, np = applyMesh(obj, bm, editing and not ownView())
-	if np then obj = np end
-	origin = originOf(obj)
+	if not ownView() then
+		local _, _, np = applyMesh(obj, bm, editing)
+		if np then obj = np end
+		origin = originOf(obj)
+	end
 	worldTris = nil
 	showEdit()
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. what) end
@@ -642,6 +655,7 @@ local function addShape(kind)
 	mp:SetAttribute("RB_Size", mp.Size)
 	mp:SetAttribute("ROBLENDER", VERSION)
 	mp.Parent = workspace
+	Display.adopt(mp, Display.emOf[mp])
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
 	Selection:Set({ mp })
 	activeObj = mp
@@ -1905,6 +1919,7 @@ local function modelingTools()
 		mp:SetAttribute("RB_Size", mp.Size)
 		mp:SetAttribute("ROBLENDER", VERSION)
 		mp.Parent = workspace
+		Display.adopt(mp, Display.emOf[mp])
 		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
 		sceneAdd(mp)
 		return mp
@@ -2757,12 +2772,14 @@ setUIOn = function(on)
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1
+			view.discard = function(part) Display.free(part) end
 			local had = false
 			sceneScan()
 			for _ in pairs(scene) do had = true break end
 			if had then syncScene() frameAll() end
 		end
 		sceneScan()
+		for q in pairs(scene) do if not (editing and q == obj) then fixUnsaved(q) end end
 		view.frame.Visible = not useStudio
 		if ownView() then plugin:Activate(true) end
 		local hasApi = pcall(function() assert(AssetService.CreateAssetAsync) end)
@@ -3160,6 +3177,16 @@ RunService.Heartbeat:Connect(function()
 			if ok and changed then dirtyCage = true elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
 		end
 	end
+	-- timed save while editing in our view, so a crash loses little
+	if editing and obj and ownView() and autoSave then
+		MOD.lastAuto = MOD.lastAuto or now
+		if now - MOD.lastAuto > 90 then
+			MOD.lastAuto = now
+			if not isSaved(obj) and not saving[obj] then saveMesh(obj, true, true) end
+		end
+	else
+		MOD.lastAuto = nil
+	end
 	if editing and obj then
 		if not obj.Parent then exitEdit() return end
 		if dirtyMesh and now - lastBuild > 0.05 then
@@ -3189,5 +3216,12 @@ end)
 
 end
 window()
+
+-- after Studio opens a place: rebuild the look of ROBLENDER meshes that were never saved to Roblox
+task.delay(3, function()
+	for _, d in ipairs(workspace:GetDescendants()) do
+		if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") then fixUnsaved(d) end
+	end
+end)
 
 print(NAME .. " " .. VERSION .. " loaded - free + open source (GPL-2.0-or-later). Mesh engine converted from Blender's BMesh.")

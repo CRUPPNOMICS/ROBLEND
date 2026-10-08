@@ -9,6 +9,26 @@ local AssetService = game:GetService("AssetService")
 local BMesh = require(script.Parent.BMesh)
 local Display = {}
 local V3 = Vector3.new
+-- every EditableMesh we make, by the MeshPart showing it (so old ones can be freed - they add up fast while dragging)
+Display.emOf = setmetatable({}, { __mode = "k" })
+Display.partEm = setmetatable({}, { __mode = "k" })
+function Display.free(mp)
+	if not mp then return end
+	local em = Display.emOf[mp]
+	Display.emOf[mp] = nil
+	if em then pcall(function() em:Destroy() end) end
+	pcall(function() mp:Destroy() end)
+end
+-- a real part now shows `em` (or an uploaded mesh when em is nil): free the one it showed before
+function Display.adopt(part, em)
+	local old = Display.partEm[part]
+	Display.partEm[part] = em
+	if old and old ~= em then pcall(function() old:Destroy() end) end
+end
+local function finite(v)
+	return v.X == v.X and v.Y == v.Y and v.Z == v.Z and math.abs(v.X) < 1e6 and math.abs(v.Y) < 1e6 and math.abs(v.Z) < 1e6
+end
+Display.finite = finite
 
 -- ===== ear clipping (n-gon -> triangles), in the face's own plane =====
 local function cross2(o, a, b) return (a.X - o.X) * (b.Y - o.Y) - (a.Y - o.Y) * (b.X - o.X) end
@@ -83,6 +103,7 @@ function Display.bounds(bm)
 	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
 	local any = false
 	for v in pairs(bm.verts) do
+		if not finite(v.co) then continue end
 		lo = V3(math.min(lo.X, v.co.X), math.min(lo.Y, v.co.Y), math.min(lo.Z, v.co.Z))
 		hi = V3(math.max(hi.X, v.co.X), math.max(hi.Y, v.co.Y), math.max(hi.Z, v.co.Z))
 		any = true
@@ -114,6 +135,10 @@ function Display.build(bm, selColor, skipHidden)
 	for f in pairs(bm.faces) do
 		if skipHidden and f.hide then continue end
 		local vs = BMesh.faceVerts(f)
+		-- never hand Roblox a broken point (NaN / huge): it can take Studio down
+		local bad = false
+		for _, v in ipairs(vs) do if not finite(v.co) then bad = true break end end
+		if bad then continue end
 		local ids = {}
 		for i, v in ipairs(vs) do
 			if f.smooth then
@@ -134,9 +159,10 @@ function Display.build(bm, selColor, skipHidden)
 			end
 		end
 	end
-	if tris == 0 then return nil, c, "no faces" end
+	if tris == 0 then pcall(function() em:Destroy() end) return nil, c, "no faces" end
 	local okM, mp = pcall(function() return AssetService:CreateMeshPartAsync(Content.fromObject(em)) end)
-	if not okM then return nil, c, tostring(mp) end
+	if not okM then pcall(function() em:Destroy() end) return nil, c, tostring(mp) end
+	Display.emOf[mp] = em
 	return mp, c, nil, em
 end
 
@@ -145,8 +171,10 @@ end
 function Display.upload(bm, params)
 	local mp, c, err, em = Display.build(bm)
 	if not mp or not em then return nil, err or "no mesh" end
-	mp:Destroy()
+	Display.emOf[mp] = nil
+	pcall(function() mp:Destroy() end)
 	local ok, result, idOrErr = pcall(function() return AssetService:CreateAssetAsync(em, Enum.AssetType.Mesh, params) end)
+	pcall(function() em:Destroy() end)
 	if not ok then return nil, tostring(result), "api" end
 	if result ~= Enum.CreateAssetResult.Success then return nil, tostring(idOrErr or result) end
 	return idOrErr, nil, nil, c

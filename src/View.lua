@@ -189,9 +189,14 @@ function View:updateGrid()
 end
 
 -- ===== objects shown in the view (display copies of the real parts) =====
+-- display copies are ours: when one is replaced, free it (and its mesh) - set View.discard from outside
+function View:drop(part)
+	if not part then return end
+	if self.discard then self.discard(part) else part.Parent = nil end
+end
 function View:setObject(key, part, cf, look)
 	local old = self.objects[key]
-	if old and old ~= part then old.Parent = nil end
+	if old and old ~= part then self:drop(old) end
 	part.Anchored = true
 	part.CFrame = cf
 	if look then
@@ -206,7 +211,7 @@ function View:moveObject(key, cf) local p = self.objects[key] if p then p.CFrame
 function View:styleObject(key, transparency) local p = self.objects[key] if p then p.Transparency = transparency end end
 function View:removeObject(key)
 	local p = self.objects[key]
-	if p then p.Parent = nil end
+	if p then self:drop(p) end
 	self.objects[key] = nil
 end
 

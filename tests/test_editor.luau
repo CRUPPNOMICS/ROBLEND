@@ -671,6 +671,36 @@ check("closing ROBLENDER puts Studio's camera back where it was", function()
 	assert((real.CFrame.Position - before.Position).Magnitude < 1e-6, "back to where it was")
 	MOCK.toolbarButton.Click:Fire() beat()
 end)
+check("crash fix: dragging a bevel frees the old meshes; broken points never reach Roblox", function()
+	p4 = editCube()
+	local lo, hi = bounds(worldVerts(p4))
+	press("Two")
+	local m = edgeMid(p4, function(a, b) return near(a.Y, hi.Y) and near(b.Y, hi.Y) and near(a.Z, hi.Z) and near(b.Z, hi.Z) end)
+	mouseTo(m) click()
+	local alive0 = MOCK.emAlive
+	press("B", { "LeftControl" })
+	for i = 1, 40 do mouseXY(mouse.X + 3, mouse.Y + 2) beat() end
+	click()
+	assert(MOCK.emAlive - alive0 <= 4, "meshes kept growing: " .. (MOCK.emAlive - alive0))
+	-- a vert squashed onto its neighbour (zero-length edge), then bevel everything
+	press("One") press("A", { "LeftAlt" })
+	local vs = worldVerts(p4)
+	mouseTo(vs[1]) click()
+	press("G") type_("0") press("Return") beat()
+	press("Two") press("A", { "LeftAlt" }) press("A")
+	press("B", { "LeftControl" }) mouseXY(mouse.X + 200, mouse.Y + 150) beat() click()
+	press("Tab") beat()
+end)
+check("crash fix: a part that was never saved gets its look back from RB_Data", function()
+	headerBtn("File") menuItem("Close ROBLENDER")
+	local d = S.Selection:Get()[1] or p4
+	-- pretend Studio restarted: the in-memory mesh is gone
+	p4.Mesh = nil
+	p4:SetAttribute("RB_SavedHash", nil)
+	Display.partEm[p4] = nil
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	assert(p4.Mesh ~= nil, "look rebuilt")
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

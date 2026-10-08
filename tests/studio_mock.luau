@@ -98,7 +98,7 @@ UDim2 = {
 DockWidgetPluginGuiInfo = { new = function(...) return { ... } end }
 Content = { fromObject = function(o) return { obj = o } end, fromAssetId = function(id) return { assetId = id } end, fromUri = function(u) return { uri = u } end }
 MOCK_DEFER = {}
-task = { spawn = function(f, ...) f(...) end, wait = function() end, defer = function(f, ...) local a = { ... } table.insert(MOCK_DEFER, function() f(table.unpack(a)) end) end }
+task = { delay = function(t, f, ...) local a = { ... } table.insert(MOCK_DEFER, function() f(table.unpack(a)) end) end, spawn = function(f, ...) f(...) end, wait = function() end, defer = function(f, ...) local a = { ... } table.insert(MOCK_DEFER, function() f(table.unpack(a)) end) end }
 local enumCache = {}
 Enum = setmetatable({}, { __index = function(_, cat)
 	enumCache[cat] = enumCache[cat] or setmetatable({}, { __index = function(t, name)
@@ -270,8 +270,13 @@ local CoreGui = svc("CoreGui")
 local Asset = svc("AssetService")
 local EM = {}
 EM.__index = EM
-function Inst.CreateEditableMesh() return setmetatable({ v = {}, t = {}, c = 0, __kind = "EditableMesh" }, EM) end
-function EM:AddVertex(p) self.v[#self.v + 1] = p return #self.v end
+MOCK.emAlive = 0
+function Inst.CreateEditableMesh() MOCK.emAlive += 1 return setmetatable({ v = {}, t = {}, c = 0, __kind = "EditableMesh" }, EM) end
+function EM:AddVertex(p)
+	assert(p.X == p.X and p.Y == p.Y and p.Z == p.Z, "NaN vertex sent to EditableMesh")
+	self.v[#self.v + 1] = p
+	return #self.v
+end
 function EM:AddTriangle(a, b, c)
 	assert(self.v[a] and self.v[b] and self.v[c], "bad vert id")
 	self.t[#self.t + 1] = { a, b, c }
@@ -279,6 +284,7 @@ function EM:AddTriangle(a, b, c)
 	return #self.t
 end
 function EM:AddColor() self.c += 1 return self.c end
+function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.destroyed = true end
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
 MOCK.meshesMade = 0
 MOCK.uploads = {}
