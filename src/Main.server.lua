@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.5.1"
+local VERSION = "0.5.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -2710,8 +2710,27 @@ end
 ui = UI.new(api, CoreGui)
 pcall(function() useStudio = plugin:GetSetting("RB_StudioView") == true end)
 
+-- Studio's own camera: saved when ROBLENDER opens, held still while our 3D view covers it, put back on close
+local function saveStudioCam()
+	local cam = workspace.CurrentCamera
+	if cam then MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus } end
+end
+local function restoreStudioCam()
+	local cam, sc = workspace.CurrentCamera, MOD.savedCam
+	if cam and sc then
+		pcall(function()
+			cam.CFrame = sc.cf
+			if sc.focus then cam.Focus = sc.focus end
+		end)
+	end
+end
+MOD.holdStudioCam = function()
+	local cam, sc = workspace.CurrentCamera, MOD.savedCam
+	if cam and sc and cam.CFrame ~= sc.cf then restoreStudioCam() end
+end
 setStudioView = function(b)
 	if editing then exitEdit() end
+	if b then restoreStudioCam() MOD.savedCam = nil else saveStudioCam() end
 	if modal then finishModal(true) end
 	useStudio = b
 	pcall(function() plugin:SetSetting("RB_StudioView", b) end)
@@ -2734,6 +2753,7 @@ setUIOn = function(on)
 	ui:setOn(on)
 	pcall(function() btnMain:SetActive(on) end)
 	if on then
+		if not useStudio then saveStudioCam() end
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1
@@ -2750,6 +2770,8 @@ setUIOn = function(on)
 	else
 		if view then view:beginCage() view:endCage() end
 		plugin:Deactivate()
+		restoreStudioCam()
+		MOD.savedCam = nil
 		local n = 0
 		for q in pairs(scene) do if q.Parent and not isSaved(q) then n += 1 end end
 		if n > 0 then setStatus(("%d mesh%s not saved to Roblox yet - open ROBLENDER and use File > Save All Meshes."):format(n, n == 1 and "" or "es")) end
@@ -3131,6 +3153,7 @@ RunService.Heartbeat:Connect(function()
 	end
 	if ownView() then
 		pcall(function() if not plugin:IsActivated() then plugin:Activate(true) end end)
+		MOD.holdStudioCam()
 		if now - lastSync > 0.2 then
 			lastSync = now
 			local ok, changed = pcall(syncScene)
