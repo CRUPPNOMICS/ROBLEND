@@ -48,6 +48,12 @@ function CF.Inverse(t)
 	inv.p = -rot(inv, t.p)
 	return inv
 end
+function CF.ToOrientation(t)
+	local x = math.asin(math.clamp(-t.b.Y, -1, 1))
+	local y = math.atan2(t.b.X, t.b.Z)
+	local z = math.atan2(t.r.Y, t.u.Y)
+	return x, y, z
+end
 local I = function() return cfNew(V3(), V3(1, 0, 0), V3(0, 1, 0), V3(0, 0, 1)) end
 CFrame = {
 	identity = I(),
@@ -68,6 +74,9 @@ CFrame = {
 	fromMatrix = function(p, vx, vy, vz)
 		vz = vz or vx:Cross(vy)
 		return cfNew(p, vx, vy, vz)
+	end,
+	fromOrientation = function(x, y, z)
+		return CFrame.fromAxisAngle(V3(0, 1, 0), y) * CFrame.fromAxisAngle(V3(1, 0, 0), x) * CFrame.fromAxisAngle(V3(0, 0, 1), z)
 	end,
 	fromAxisAngle = function(axis, a)
 		axis = axis.Unit
@@ -124,7 +133,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true }
+local SIGNALS = { Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
@@ -166,6 +175,13 @@ function Inst.GetDescendants(o)
 	return out
 end
 function Inst.Destroy(o) o.Parent = nil end
+function Inst.Clone(o)
+	local c = newInst(o._p.ClassName)
+	for k, v in pairs(o._p) do if k ~= "Parent" then c._p[k] = v end end
+	for k, v in pairs(o._attr) do c._attr[k] = v end
+	for _, k in ipairs(o._kids) do local kk = k:Clone() kk.Parent = c end
+	return c
+end
 function Inst.SetAttribute(o, k, v) o._attr[k] = v end
 function Inst.GetAttribute(o, k) return o._attr[k] end
 function Inst.GetAttributes(o) return table.clone(o._attr) end
@@ -306,6 +322,10 @@ function Inst.CreateButton() local b = newInst("ToolbarButton") MOCK.toolbarButt
 function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") end
 function Inst.GetMouse() return mouse end
 function Inst.Activate(o) o._p.Active = true end
+function Inst.IsActivated(o) return o._p.Active == true end
+local settings = {}
+function Inst.GetSetting(_, k) return settings[k] end
+function Inst.SetSetting(_, k, v) settings[k] = v end
 function Inst.Deactivate(o) o._p.Active = false end
 function Inst.OpenScript(_, s) MOCK.opened[#MOCK.opened + 1] = s end
 local origIndex = Inst.__index

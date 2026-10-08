@@ -15,12 +15,13 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.2.0"
+local VERSION = "0.3.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
 local Display = require(script.Display)
 local UI = require(script.UI)
+local View = require(script.View)
 
 local Selection = game:GetService("Selection")
 local UIS = game:GetService("UserInputService")
@@ -49,6 +50,14 @@ local dirtyMesh, dirtyCage, lastBuild = false, false, 0
 local worldTris = nil    -- cache for picking
 local dataConn = nil
 local ui = nil            -- the Blender-style screen (UI.lua)
+local view = nil          -- our own 3D view (View.lua), used while the screen is open
+local uiOn = false
+local useStudio = false   -- true = edit in Studio's own 3D view instead of ours
+local shading = "solid"   -- solid / wire
+local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
+local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
+local activeObj = nil     -- Blender's "active object"
+local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
@@ -176,13 +185,15 @@ end
 
 -- ===== world helpers =====
 local function W(co) return origin * co end
-local function camera() return workspace.CurrentCamera end
+local function ownView() return uiOn and view ~= nil and not useStudio end
+local function camera() if ownView() then return view end return workspace.CurrentCamera end
 local function toScreen(wp)
 	local sp, vis = camera():WorldToViewportPoint(wp)
 	return Vector2.new(sp.X, sp.Y), vis and sp.Z > 0, sp.Z
 end
 local mouse = plugin:GetMouse()
 local function mousePos() return Vector2.new(mouse.X, mouse.Y) end
+local function getRay() if ownView() then return view:ray(mousePos()) end return mouse.UnitRay end
 
 local function buildWorldTris()
 	worldTris = {}
@@ -321,6 +332,7 @@ end
 local function pBegin() for _, p in pairs(pools) do p.n = 0 end end
 local function pEnd() for _, p in pairs(pools) do for i = p.n + 1, #p.items do p.items[i].Visible = false end end end
 local function line(a, b, col, w)
+	if ownView() then view:line(a, b, col, 1.4 * (w or 1)) return end
 	local d = b - a
 	local len = d.Magnitude
 	if len < 1e-4 then return end
@@ -334,6 +346,7 @@ local function line(a, b, col, w)
 	x.Transparency = 0
 end
 local function dot(p, col, s)
+	if ownView() then view:dot(p, col, 7 * (s or 1)) return end
 	local x = pGet(pool("SphereHandleAdornment"))
 	x.CFrame = CFrame.new(p)
 	x.Radius = (camera().CFrame.Position - p).Magnitude * 0.0045 * (s or 1)
@@ -341,8 +354,10 @@ local function dot(p, col, s)
 	x.Transparency = 0
 end
 
+local drawObjects -- object-mode outlines (set below)
 local function drawCage()
 	pBegin()
+	if view then view:beginCage() end
 	if editing and bm then
 		local many = bm.ne > 6000
 		for e in pairs(bm.edges) do
@@ -366,7 +381,27 @@ local function drawCage()
 			for _, seg in ipairs(modal.preview) do line(seg[1], seg[2], Color3.fromRGB(255, 220, 60), 2) end
 		end
 	end
+	if ownView() and drawObjects then drawObjects() end
 	pEnd()
+	if view then view:endCage() end
+end
+
+-- the mesh being edited, shown in our 3D view (selected faces tinted) - the real part is updated on commit
+local function lookOf(p)
+	local tr = 0
+	if xray then tr = 0.5 end
+	if shading == "wire" then tr = 1 end
+	return { Color = p.Color, Material = p.Material, Transparency = tr }
+end
+local function showEdit()
+	if not (ownView() and obj and bm) then return false end
+	local mp, c, err = Display.build(bm, SEL_COL)
+	if not mp then
+		view:removeObject(obj)
+		return true, err
+	end
+	view:setObject(obj, mp, origin * CFrame.new(c), lookOf(obj))
+	return true
 end
 
 -- ===== saving + undo (each change = one Studio undo step; Ctrl+Z reloads the mesh) =====
@@ -377,10 +412,11 @@ local function commit(what)
 	local val = encode(bm)
 	lastWritten = val
 	dataOf(obj).Value = val
-	local ok, _, np = applyMesh(obj, bm, editing)
+	local ok, _, np = applyMesh(obj, bm, editing and not ownView())
 	if np then obj = np end
 	origin = originOf(obj)
 	worldTris = nil
+	showEdit()
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. what) end
 	dirtyCage = true
 	lastBuild = os.clock()
@@ -425,6 +461,7 @@ local function enterEdit(p)
 	lastWritten = dataOf(p).Value
 	clearSel()
 	Selection:Set({})
+	activeObj = p
 	plugin:Activate(true)
 	watchData()
 	setMode(mode)
@@ -441,6 +478,8 @@ local function exitEdit()
 		local ok, _, np = applyMesh(obj, bm, false)
 		if np then obj = np end
 		Selection:Set({ obj })
+		activeObj = obj
+		if scene[obj] then scene[obj].data = nil end -- redraw it untinted
 	end
 	editing = false
 	if dataConn then dataConn:Disconnect() dataConn = nil end
@@ -449,7 +488,9 @@ local function exitEdit()
 	worldTris = nil
 	hover = nil
 	pBegin() pEnd()
-	plugin:Deactivate()
+	if view then view:beginCage() view:endCage() end
+	if not ownView() then plugin:Deactivate() end
+	dirtyCage = true
 	setStatus("Object mode. Click a " .. NAME .. " part and press Tab to edit it.")
 	if buttons["Edit (Tab)"] then buttons["Edit (Tab)"].BackgroundColor3 = Color3.fromRGB(58, 61, 72) end
 end
@@ -507,7 +548,8 @@ local function addShape(kind)
 	mp.Anchored = true
 	mp.Color = Color3.fromRGB(200, 200, 205)
 	mp.Material = Enum.Material.SmoothPlastic
-	local base = spawnPoint() + V3(0, 2, 0)
+	local base = ownView() and (CURSOR - V3(0, 2, 0)) or spawnPoint()
+	base += V3(0, 2, 0)
 	mp.CFrame = CFrame.new(base + c)
 	local sv = Instance.new("StringValue")
 	sv.Name = "RB_Data"
@@ -519,6 +561,7 @@ local function addShape(kind)
 	mp.Parent = workspace
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
 	Selection:Set({ mp })
+	activeObj = mp
 	setStatus("Added a " .. kind .. ". Press Tab (or Edit) to edit it.")
 end
 
@@ -561,7 +604,7 @@ local function pickEdge(mp)
 	return best
 end
 local function pickFace()
-	local r = mouse.UnitRay
+	local r = getRay()
 	local _, f = rayMesh(r.Origin, r.Direction)
 	if f then return f end
 	-- x-ray: nearest face dot on screen
@@ -620,7 +663,7 @@ local function startTransform(kind, opts)
 	local cLocal = centerOf(vs)
 	local m = mousePos()
 	modal = {
-		kind = kind, verts = vs, orig = orig, c = cLocal, cw = W(cLocal), m0 = m, ray0 = mouse.UnitRay,
+		kind = kind, verts = vs, orig = orig, c = cLocal, cw = W(cLocal), m0 = m, ray0 = getRay(),
 		axis = opts and opts.axis or nil, axisWorld = opts and opts.axisWorld or nil, num = "", what = opts and opts.what or nil,
 	}
 	local sc = toScreen(modal.cw)
@@ -628,8 +671,94 @@ local function startTransform(kind, opts)
 	setStatus(({ G = "MOVE", S = "SCALE", R = "ROTATE" })[kind] .. ": move the mouse. X / Y / Z = lock to an axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
 end
 
+-- ===== object mode: G / R / S on whole parts (our 3D view) =====
+local function selectedParts()
+	local out = {}
+	for _, p in ipairs(Selection:Get()) do if p:IsA("BasePart") then out[#out + 1] = p end end
+	return out
+end
+local function startObjTransform(kind)
+	local ps = selectedParts()
+	if #ps == 0 then setStatus("Nothing selected.") return end
+	local orig, c = {}, V3()
+	for _, p in ipairs(ps) do orig[p] = { cf = p.CFrame, size = p.Size } c += p.CFrame.Position end
+	c = c / #ps
+	local rec
+	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. kind) end)
+	modal = { kind = kind, obj = true, parts = ps, orig = orig, cw = c, cs = toScreen(c), m0 = mousePos(), ray0 = getRay(), num = "", rec = rec }
+	setStatus(({ G = "Move", S = "Resize", R = "Rotate" })[kind] .. ": move the mouse. X / Y / Z = axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
+end
+local function applyObjTransform()
+	local M = modal
+	local mp = mousePos()
+	local num = tonumber(M.num)
+	local snap = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	local axisW = M.axis and AXES[M.axis]
+	local cam = camera()
+	if M.kind == "G" then
+		local dW
+		if axisW then
+			local t = num
+			if not t then
+				local t1, t0 = axisParam(getRay(), M.cw, axisW), axisParam(M.ray0, M.cw, axisW)
+				t = (t1 and t0) and (t1 - t0) or 0
+				if snap then t = math.floor(t + 0.5) end
+			end
+			dW = axisW * t
+		else
+			local n = cam.CFrame.LookVector
+			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
+			dW = (p1 and p0) and (p1 - p0) or V3()
+			if num then dW = cam.CFrame.RightVector * num end
+			if snap then dW = V3(math.floor(dW.X + 0.5), math.floor(dW.Y + 0.5), math.floor(dW.Z + 0.5)) end
+		end
+		for p, o in pairs(M.orig) do p.CFrame = o.cf + dW end
+		M.info = ("D: %.2f  %.2f  %.2f"):format(dW.X, dW.Y, dW.Z)
+	elseif M.kind == "S" then
+		local d0 = (M.m0 - M.cs).Magnitude
+		local f = num or (d0 > 1 and (mp - M.cs).Magnitude / d0 or 1)
+		if snap and not num then f = math.floor(f * 10 + 0.5) / 10 end
+		for p, o in pairs(M.orig) do
+			local pos = o.cf.Position
+			local k = V3(f, f, f)
+			if axisW then
+				local la = o.cf:VectorToObjectSpace(axisW)
+				k = V3(1, 1, 1) + V3(math.abs(la.X), math.abs(la.Y), math.abs(la.Z)) * (f - 1)
+				pos = M.cw + (pos - M.cw) + axisW * ((pos - M.cw):Dot(axisW) * (f - 1))
+			else
+				pos = M.cw + (pos - M.cw) * f
+			end
+			p.Size = V3(math.max(0.001, o.size.X * math.abs(k.X)), math.max(0.001, o.size.Y * math.abs(k.Y)), math.max(0.001, o.size.Z * math.abs(k.Z)))
+			p.CFrame = o.cf.Rotation + pos
+		end
+		M.info = ("Scale %.3f"):format(f)
+	else
+		local a0 = math.atan2(M.m0.Y - M.cs.Y, M.m0.X - M.cs.X)
+		local a1 = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
+		local ang = num and math.rad(num) or -(a1 - a0)
+		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
+		local ax = axisW or -cam.CFrame.LookVector
+		local rot = CFrame.fromAxisAngle(ax, ang)
+		for p, o in pairs(M.orig) do p.CFrame = CFrame.new(M.cw) * rot * CFrame.new(-M.cw) * o.cf end
+		M.info = ("Rot %.1f"):format(math.deg(ang))
+	end
+	dirtyCage = true
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+end
+local function finishObjModal(M, cancel)
+	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
+	if M.rec then
+		CHS:FinishRecording(M.rec, cancel and Enum.FinishRecordingOperation.Cancel or Enum.FinishRecordingOperation.Commit)
+	elseif not cancel then
+		CHS:SetWaypoint("ROBLENDER " .. M.kind)
+	end
+	setStatus(cancel and "Cancelled." or "Done.")
+	dirtyCage = true
+end
+
 local function applyTransform()
 	local M = modal
+	if M.obj then applyObjTransform() return end
 	local mp = mousePos()
 	local num = tonumber(M.num)
 	local snap = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
@@ -640,14 +769,14 @@ local function applyTransform()
 		if axisW then
 			local t
 			if num then t = num else
-				local t1, t0 = axisParam(mouse.UnitRay, M.cw, axisW), axisParam(M.ray0, M.cw, axisW)
+				local t1, t0 = axisParam(getRay(), M.cw, axisW), axisParam(M.ray0, M.cw, axisW)
 				t = (t1 and t0) and (t1 - t0) or 0
 				if snap then t = math.floor(t + 0.5) end
 			end
 			dL = axisL * t
 		else
 			local n = camera().CFrame.LookVector
-			local p1, p0 = planeHit(mouse.UnitRay, M.cw, n), planeHit(M.ray0, M.cw, n)
+			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
 			local dW = (p1 and p0) and (p1 - p0) or V3()
 			if num then dW = camera().CFrame.RightVector * num end
 			if snap then dW = V3(math.floor(dW.X + 0.5), math.floor(dW.Y + 0.5), math.floor(dW.Z + 0.5)) end
@@ -689,6 +818,7 @@ local function finishModal(cancel)
 	local M = modal
 	if not M then return end
 	modal = nil
+	if M.obj then finishObjModal(M, cancel) return end
 	if M.kind == "G" or M.kind == "S" or M.kind == "R" then
 		if cancel then
 			for v, co in pairs(M.orig) do v.co = co end
@@ -956,10 +1086,224 @@ button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
 label("SAVING: the mesh is kept on the part and comes back when you edit it. Roblox doesn't save plugin-made meshes into the place yet - use Bake to parts (normal parts) or Export .obj (3D Importer) to keep it for good.", 10, Color3.fromRGB(255, 200, 120))
 
--- ===== the Blender-style screen (UI.lua) =====
+-- ===== the Blender-style window (UI.lua + View.lua) =====
+local function shiftDown() return UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) end
+local function selectedPart()
+	if editing and obj then return obj end
+	if activeObj and activeObj.Parent and table.find(Selection:Get(), activeObj) then return activeObj end
+	local p = Selection:Get()[1]
+	if p and p:IsA("BasePart") then return p end
+	return nil
+end
+local function record(what, fn)
+	local rec
+	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. what) end)
+	local ok, err = pcall(fn)
+	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. what) end
+	if not ok then warn(NAME .. ": " .. tostring(err)) end
+end
+
+-- ----- the scene: every ROBLENDER part, shown in our 3D view -----
+local function sceneAdd(p)
+	if p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") and not scene[p] then scene[p] = { part = p } end
+end
+local function sceneScan()
+	for _, d in ipairs(workspace:GetDescendants()) do
+		if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") then sceneAdd(d) end
+	end
+end
+pcall(function()
+	workspace.DescendantAdded:Connect(function(d)
+		if not uiOn then return end
+		if d.Name == "RB_Data" and d.Parent then sceneAdd(d.Parent) elseif d:IsA("MeshPart") then sceneAdd(d) end
+	end)
+end)
+local function featureEdges(m, all)
+	local out = {}
+	for e in pairs(m.edges) do
+		local keep = all
+		if not keep then
+			local fs = BMesh.edgeFaces(e)
+			keep = #fs ~= 2 or fs[1].no:Dot(fs[2].no) < 0.87
+		end
+		if keep then out[#out + 1] = { e.v1.co, e.v2.co } end
+	end
+	return out
+end
+local function syncScene()
+	if not ownView() then return false end
+	local changed = false
+	for p, r in pairs(scene) do
+		if not p.Parent or not p:FindFirstChild("RB_Data") then
+			view:removeObject(p)
+			scene[p] = nil
+			changed = true
+		elseif not (editing and p == obj) then
+			local data = p.RB_Data.Value
+			local look = lookOf(p)
+			if r.hidden then
+				if r.shown then view:removeObject(p) r.shown = false changed = true end
+			elseif data ~= r.data or p.Size ~= r.size or not r.shown then
+				local ok, m = pcall(loadFrom, p)
+				if ok and m then
+					local mp, c = Display.build(m)
+					if mp then
+						view:setObject(p, mp, originOf(p) * CFrame.new(c), look)
+						r.c, r.bm, r.feat, r.all, r.tris, r.shown = c, m, nil, nil, nil, true
+					else
+						view:removeObject(p)
+						r.bm, r.shown = m, false
+					end
+				end
+				r.data, r.size, r.cf, r.col, r.mat, r.tr = data, p.Size, p.CFrame, p.Color, p.Material, look.Transparency
+				changed = true
+			else
+				if p.CFrame ~= r.cf then
+					view:moveObject(p, originOf(p) * CFrame.new(r.c))
+					r.cf, r.tris = p.CFrame, nil
+					changed = true
+				end
+				if p.Color ~= r.col or p.Material ~= r.mat or look.Transparency ~= r.tr then
+					local d = view.objects[p]
+					if d then d.Color, d.Material, d.Transparency = p.Color, p.Material, look.Transparency end
+					r.col, r.mat, r.tr = p.Color, p.Material, look.Transparency
+					changed = true
+				end
+			end
+		end
+	end
+	-- the mesh being edited follows colour / x-ray / shading changes too
+	if editing and obj and view.objects[obj] then
+		local d, look = view.objects[obj], lookOf(obj)
+		d.Color, d.Material, d.Transparency = obj.Color, obj.Material, look.Transparency
+	end
+	return changed
+end
+local function objTris(r)
+	if not r.tris then
+		local o = originOf(r.part)
+		r.tris = {}
+		for _, t in ipairs(Display.triangles(r.bm)) do r.tris[#r.tris + 1] = { o * t[1], o * t[2], o * t[3] } end
+	end
+	return r.tris
+end
+local function pickObject(sp)
+	local ray = view:ray(sp)
+	local best, bt = nil, math.huge
+	for p, r in pairs(scene) do
+		if r.shown and r.bm and not (editing and p == obj) then
+			for _, t in ipairs(objTris(r)) do
+				local hit = rayTri(ray.Origin, ray.Direction, t[1], t[2], t[3])
+				if hit and hit < bt then best, bt = p, hit end
+			end
+		end
+	end
+	return best
+end
+local function selectObject(p, add)
+	if add and p then
+		local cur = Selection:Get()
+		local i = table.find(cur, p)
+		if i and activeObj == p then table.remove(cur, i) activeObj = cur[#cur]
+		elseif i then activeObj = p
+		else cur[#cur + 1] = p activeObj = p end
+		Selection:Set(cur)
+	else
+		Selection:Set(p and { p } or {})
+		activeObj = p
+	end
+	dirtyCage = true
+end
+-- selected objects get Blender's orange outline (active one lighter); wireframe shading shows every edge
+drawObjects = function()
+	local sel = {}
+	for _, p in ipairs(Selection:Get()) do sel[p] = true end
+	local budget = 5000
+	for p, r in pairs(scene) do
+		if r.shown and r.bm and not (editing and p == obj) then
+			local isSel = sel[p] and not editing
+			local list
+			if shading == "wire" then r.all = r.all or featureEdges(r.bm, true) list = r.all
+			elseif isSel then r.feat = r.feat or featureEdges(r.bm, false) list = r.feat end
+			if list then
+				local o = originOf(p)
+				local col = isSel and (p == activeObj and View.THEME.active or View.THEME.select) or Color3.new(0, 0, 0)
+				for _, e in ipairs(list) do
+					if budget <= 0 then break end
+					budget -= 1
+					line(o * e[1], o * e[2], col, isSel and 1.3 or 0.7)
+				end
+			end
+		end
+	end
+end
+local function boundsOf(points)
+	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
+	for _, q in ipairs(points) do
+		lo = V3(math.min(lo.X, q.X), math.min(lo.Y, q.Y), math.min(lo.Z, q.Z))
+		hi = V3(math.max(hi.X, q.X), math.max(hi.Y, q.Y), math.max(hi.Z, q.Z))
+	end
+	return lo, hi
+end
+local function partCorners(p, out)
+	local h = p.Size / 2
+	for _, sx in ipairs({ -1, 1 }) do for _, sy in ipairs({ -1, 1 }) do for _, sz in ipairs({ -1, 1 }) do
+		out[#out + 1] = p.CFrame * V3(h.X * sx, h.Y * sy, h.Z * sz)
+	end end end
+end
+local function frameAll()
+	if not view then return end
+	local pts = {}
+	for p, r in pairs(scene) do if p.Parent and not r.hidden then partCorners(p, pts) end end
+	if #pts == 0 then view.focus, view.dist = CURSOR, 30 view:update() else view:frameBox(boundsOf(pts)) end
+	view.viewName = nil
+	dirtyCage = true
+end
+local function frameSelected()
+	if not view then return end
+	local pts = {}
+	if editing and bm then
+		for v in pairs(bm.verts) do if v.sel then pts[#pts + 1] = W(v.co) end end
+		if #pts == 0 then for v in pairs(bm.verts) do pts[#pts + 1] = W(v.co) end end
+	else
+		for _, p in ipairs(selectedParts()) do partCorners(p, pts) end
+	end
+	if #pts == 0 then frameAll() return end
+	view:frameBox(boundsOf(pts))
+	dirtyCage = true
+end
+local function deleteObjects()
+	local ps = selectedParts()
+	if #ps == 0 then setStatus("Nothing selected.") return end
+	record("Delete", function() for _, p in ipairs(ps) do p.Parent = nil end end)
+	Selection:Set({})
+	activeObj = nil
+	dirtyCage = true
+	setStatus(("Deleted %d object%s."):format(#ps, #ps == 1 and "" or "s"))
+end
+local function duplicateObjects()
+	local ps = selectedParts()
+	if #ps == 0 then setStatus("Nothing selected.") return end
+	local copies = {}
+	record("Duplicate", function()
+		for _, p in ipairs(ps) do
+			local c = p:Clone()
+			c.Parent = p.Parent
+			copies[#copies + 1] = c
+			sceneAdd(c)
+		end
+	end)
+	Selection:Set(copies)
+	activeObj = copies[#copies]
+	startObjTransform("G")
+end
+
 local function toggleXray() xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off")) end
 local function toggleEdit()
-	if editing then exitEdit() else enterEdit(Selection:Get()[1]) end
+	if editing then exitEdit() return end
+	local p = selectedPart()
+	if not isRB(p) then setStatus("Select a " .. NAME .. " mesh first (Shift A adds one).") return end
+	enterEdit(p)
 end
 local function needEdit(fn)
 	return function()
@@ -968,48 +1312,154 @@ local function needEdit(fn)
 		fn()
 	end
 end
+local function transformTool(kind)
+	return function()
+		if modal then return end
+		if editing then startTransform(kind)
+		elseif uiOn then startObjTransform(kind)
+		else setStatus("Tab into Edit Mode on a " .. NAME .. " part first.") end
+	end
+end
 local TOOL = {
-	G = needEdit(function() startTransform("G") end),
-	R = needEdit(function() startTransform("R") end),
-	S = needEdit(function() startTransform("S") end),
+	G = transformTool("G"), R = transformTool("R"), S = transformTool("S"),
 	Extrude = needEdit(Tools.extrude), Inset = needEdit(Tools.inset), LoopCut = needEdit(Tools.loopCut),
 	Subdivide = needEdit(Tools.subdivide), Merge = needEdit(Tools.merge), MergeDist = needEdit(Tools.mergeDist),
 	Fill = needEdit(Tools.fill), Delete = needEdit(Tools.delete), Flip = needEdit(Tools.flip),
-	SelectAll = needEdit(function() clearSel() for v in pairs(bm.verts) do v.sel = true end for e in pairs(bm.edges) do e.sel = true end for f in pairs(bm.faces) do f.sel = true end flush() dirtyCage, dirtyMesh = true, true end),
-	SelectNone = needEdit(function() clearSel() flush() dirtyCage, dirtyMesh = true, true end),
-	Invert = needEdit(Tools.invert),
+	SelectAll = function()
+		if editing then clearSel() for v in pairs(bm.verts) do v.sel = true end for e in pairs(bm.edges) do e.sel = true end for f in pairs(bm.faces) do f.sel = true end flush() dirtyCage, dirtyMesh = true, true
+		else local all = {} for p, r in pairs(scene) do if p.Parent and not r.hidden then all[#all + 1] = p end end Selection:Set(all) activeObj = all[1] dirtyCage = true end
+	end,
+	SelectNone = function()
+		if editing then clearSel() flush() dirtyCage, dirtyMesh = true, true else selectObject(nil) end
+	end,
+	Invert = function()
+		if editing then Tools.invert()
+		else
+			local cur, out = {}, {}
+			for _, p in ipairs(Selection:Get()) do cur[p] = true end
+			for p, r in pairs(scene) do if p.Parent and not r.hidden and not cur[p] then out[#out + 1] = p end end
+			Selection:Set(out) activeObj = out[1] dirtyCage = true
+		end
+	end,
 	Bake = Tools.bake, Export = Tools.exportOBJ,
+	DeleteObjects = function() if not editing and not modal then deleteObjects() end end,
+	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
-local function selectedPart()
-	local p = (editing and obj) or Selection:Get()[1]
-	if p and p:IsA("BasePart") then return p end
-	return nil
-end
-local api = {}
+
+local api = { version = VERSION }
+local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus }
+	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio,
+		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
+		camCF = camera().CFrame, viewName = view and view.viewName or nil }
 	local p = selectedPart()
-	if p then st.objName = p.Name st.isRB = isRB(p) end
+	if p then
+		st.objName, st.isRB = p.Name, isRB(p)
+		st.objLoc, st.objDim = p.CFrame.Position, p.Size
+		local rx, ry, rz = p.CFrame:ToOrientation()
+		st.objRot = V3(math.deg(rx), math.deg(ry), math.deg(rz))
+		st.color, st.material = p.Color, p.Material and p.Material.Name
+		st.hidden = scene[p] ~= nil and scene[p].hidden == true
+	end
+	local m = (editing and bm) or (p and scene[p] and scene[p].bm)
+	if m then
+		local t = 0
+		for f in pairs(m.faces) do t += f.len - 2 end
+		st.meshInfo = { v = m.nv, e = m.ne, f = m.nf, t = t }
+	end
 	if editing and bm then
-		local s = { v = bm.nv, e = bm.ne, f = bm.nf, vs = 0, es = 0, fs = 0, t = 0 }
+		local s = { v = bm.nv, e = bm.ne, f = bm.nf, vs = 0, es = 0, fs = 0, t = st.meshInfo and st.meshInfo.t or 0 }
 		local sum, n = V3(), 0
 		for v in pairs(bm.verts) do if v.sel then s.vs += 1 sum += v.co n += 1 end end
 		for e in pairs(bm.edges) do if e.sel then s.es += 1 end end
-		for f in pairs(bm.faces) do s.t += f.len - 2 if f.sel then s.fs += 1 end end
+		for f in pairs(bm.faces) do if f.sel then s.fs += 1 end end
 		st.stats = s
 		if n > 0 then st.loc = W(sum / n) end
 	elseif p then
-		st.loc, st.dim = p.Position, p.Size
+		st.loc = p.CFrame.Position
 	end
 	return st
+end
+function api.outliner()
+	local list = {}
+	local sel = {}
+	for _, p in ipairs(Selection:Get()) do sel[p] = true end
+	for p, r in pairs(scene) do
+		if p.Parent then list[#list + 1] = { key = p, name = p.Name, selected = sel[p] == true or (editing and p == obj), active = p == activeObj or (editing and p == obj), hidden = r.hidden == true } end
+	end
+	table.sort(list, function(a, b) return a.name < b.name end)
+	return list
 end
 api.toggleEdit = toggleEdit
 api.toggleXray = toggleXray
 api.togglePanel = function() widget.Enabled = not widget.Enabled end
 api.setMode = function(m) if editing and not modal then setMode(m) end end
-api.add = function(kind) addShape(kind) end
+api.add = function(kind) addShape(kind) sceneAdd(Selection:Get()[1]) end
 api.tool = function(name) local f = TOOL[name] if f then f() end end
+api.mousePos = mousePos
+api.shiftDown = shiftDown
+api.selectObject = function(p, add) if editing or modal then return end selectObject(p, add) end
+api.toggleHidden = function(p)
+	p = p or selectedPart()
+	if not p or not scene[p] then return end
+	scene[p].hidden = not scene[p].hidden
+	dirtyCage = true
+end
+api.navDrag = function(kind, dx, dy)
+	if not view then return end
+	if kind == "orbit" then view:orbit(dx, dy) view.viewName = nil
+	elseif kind == "pan" then view:pan(dx, dy)
+	else view:zoom(-dy / 30) end
+	dirtyCage = true
+end
+api.viewAxis = function(name)
+	if not view then return end
+	view:viewAxis(name)
+	view.viewName = name:sub(1, 1):upper() .. name:sub(2) .. " Perspective"
+	dirtyCage = true
+end
+api.frameAll = frameAll
+api.frameSelected = frameSelected
+api.setShading = function(s) shading = s dirtyCage = true dirtyMesh = editing end
+api.undo = function() pcall(function() CHS:Undo() end) end
+api.redo = function() pcall(function() CHS:Redo() end) end
+api.close = function() setUIOn(false) end
+api.setStudioView = function(b) setStudioView(b) end
+api.rename = function(name)
+	local p = selectedPart()
+	if p then record("Rename", function() p.Name = name end) end
+end
+api.setLook = function(prop, value)
+	local p = selectedPart()
+	if not p then return end
+	record(prop, function()
+		if prop == "Material" then p.Material = Enum.Material[value] else p[prop] = value end
+	end)
+	dirtyMesh = editing
+end
+function api.setProp(key, axis, value)
+	local p = selectedPart()
+	if not p or modal then return end
+	local function with(v3) return V3(axis == "X" and value or v3.X, axis == "Y" and value or v3.Y, axis == "Z" and value or v3.Z) end
+	record(key, function()
+		if key == "loc" then
+			p.CFrame = p.CFrame.Rotation + with(p.CFrame.Position)
+		elseif key == "rot" then
+			local rx, ry, rz = p.CFrame:ToOrientation()
+			local r = with(V3(math.deg(rx), math.deg(ry), math.deg(rz)))
+			p.CFrame = CFrame.new(p.CFrame.Position) * CFrame.fromOrientation(math.rad(r.X), math.rad(r.Y), math.rad(r.Z))
+		elseif key == "dim" and value > 0 then
+			p.Size = with(p.Size)
+		end
+	end)
+	if editing and p == obj then
+		-- the edited part moved / resized: carry on from its new place
+		exitEdit()
+		enterEdit(p)
+	end
+	dirtyCage = true
+end
 function api.setField(key, axis, value)
 	if editing and bm then
 		if key ~= "loc" or modal then return end
@@ -1024,33 +1474,60 @@ function api.setField(key, axis, value)
 		commit("Move")
 		setStatus(("Moved the selection to %s = %g"):format(axis, value))
 	else
-		local p = selectedPart()
-		if not p then return end
-		local rec
-		pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. key) end)
-		if key == "loc" then
-			local q = p.Position
-			p.CFrame = p.CFrame + (V3(axis == "X" and value or q.X, axis == "Y" and value or q.Y, axis == "Z" and value or q.Z) - q)
-		elseif value > 0 then
-			local q = p.Size
-			p.Size = V3(axis == "X" and value or q.X, axis == "Y" and value or q.Y, axis == "Z" and value or q.Z)
-		end
-		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. key) end
+		api.setProp("loc", axis, value)
 	end
 end
+
 ui = UI.new(api, CoreGui)
-local uiOn = false
-local function setUIOn(on)
+pcall(function() useStudio = plugin:GetSetting("RB_StudioView") == true end)
+
+setStudioView = function(b)
+	if editing then exitEdit() end
+	if modal then finishModal(true) end
+	useStudio = b
+	pcall(function() plugin:SetSetting("RB_StudioView", b) end)
+	if view then
+		view.frame.Visible = not b
+		view:beginCage() view:endCage()
+	end
+	if uiOn then
+		if b then plugin:Deactivate() else plugin:Activate(true) end
+	end
+	dirtyCage = true
+	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLENDER 3D view.")
+end
+setUIOn = function(on)
+	if not on then
+		if modal then pcall(finishModal, true) end
+		if editing then exitEdit() end
+	end
 	uiOn = on
 	ui:setOn(on)
 	pcall(function() btnMain:SetActive(on) end)
-	if not on and editing then exitEdit() end
-	if on then setStatus("Welcome to " .. NAME .. ". Shift A = add a mesh, select one and press Tab to edit it.") end
+	if on then
+		if not view then
+			view = View.new(ui.canvas)
+			view.frame.ZIndex = 1
+			local had = false
+			sceneScan()
+			for _ in pairs(scene) do had = true break end
+			if had then syncScene() frameAll() end
+		end
+		sceneScan()
+		view.frame.Visible = not useStudio
+		if ownView() then plugin:Activate(true) end
+		setStatus("Welcome to " .. NAME .. ". Shift A = add, click a mesh + Tab = edit, MMB / RMB drag = orbit, wheel = zoom.")
+	else
+		if view then view:beginCage() view:endCage() end
+		plugin:Deactivate()
+	end
+	dirtyCage = true
 end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
 plugin.Unloading:Connect(function()
 	pcall(function() if editing then exitEdit() end end)
 	ui:destroy()
+	if view then view:destroy() end
 	cageFolder.Parent = nil
 end)
 
@@ -1058,15 +1535,15 @@ end)
 local boxGui = Instance.new("ScreenGui")
 boxGui.Name = NAME .. "_Box"
 boxGui.IgnoreGuiInset = true
-boxGui.DisplayOrder = 40
+boxGui.DisplayOrder = 60
 boxGui.Parent = CoreGui
 plugin.Unloading:Connect(function() boxGui.Parent = nil end)
 local boxFrame = Instance.new("Frame")
-boxFrame.BackgroundColor3 = Color3.fromRGB(255, 150, 40)
-boxFrame.BackgroundTransparency = 0.85
+boxFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+boxFrame.BackgroundTransparency = 0.92
 boxFrame.BorderSizePixel = 0
 boxFrame.Visible = false
-local st = Instance.new("UIStroke") st.Color = Color3.fromRGB(255, 170, 80) st.Parent = boxFrame
+local st = Instance.new("UIStroke") st.Color = Color3.fromRGB(230, 230, 230) st.Parent = boxFrame
 boxFrame.Parent = boxGui
 local down = nil
 
@@ -1076,6 +1553,21 @@ local function boxSelect(a, b, add, sub)
 	local function inside(wp)
 		local sp, vis = toScreen(wp)
 		return vis and sp.X >= lo.X and sp.X <= hi.X and sp.Y >= lo.Y and sp.Y <= hi.Y
+	end
+	if not editing then
+		-- object mode: objects whose middle is in the box
+		local cur = (add or sub) and Selection:Get() or {}
+		local set = {}
+		for _, p in ipairs(cur) do set[p] = true end
+		for p, r in pairs(scene) do
+			if r.shown and inside(p.CFrame.Position) then set[p] = not sub or nil end
+		end
+		local out = {}
+		for p in pairs(set) do out[#out + 1] = p end
+		Selection:Set(out)
+		if not set[activeObj] then activeObj = out[1] end
+		dirtyCage = true
+		return
 	end
 	if not add and not sub then clearSel() end
 	if mode == "vert" then
@@ -1099,26 +1591,32 @@ local function boxSelect(a, b, add, sub)
 end
 
 mouse.Button1Down:Connect(function()
-	if not editing then return end
-	if ui:overUI(mousePos()) then return end
+	local mp = mousePos()
+	if ui:overUI(mp) then return end
 	if modal then
-		if modal.kind == "loopcut" then updateLoopCut() end
+		if modal.kind == "loopcut" then pcall(updateLoopCut) end
 		local ok, err = pcall(finishModal, false)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
 		return
 	end
-	down = mousePos()
+	if not editing and not ownView() then return end
+	down = mp
 end)
 mouse.Button1Up:Connect(function()
-	if not editing or not down then return end
+	if uiOn then ui:mouseUp() end
+	if not down then return end
 	local a, b = down, mousePos()
 	down = nil
 	boxFrame.Visible = false
-	local shift = UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift)
+	local shift = shiftDown()
 	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
 	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
 	local ok, err = pcall(function()
 		if (b - a).Magnitude > 6 then boxSelect(a, b, shift, ctrl) return end
+		if not editing then
+			selectObject(pickObject(b), shift)
+			return
+		end
 		if alt then
 			-- loop select (edge loop through the edge under the mouse)
 			local e = pickEdge(b)
@@ -1142,10 +1640,52 @@ mouse.Button1Up:Connect(function()
 	if not ok then warn(NAME .. ": " .. tostring(err)) end
 end)
 mouse.Button2Down:Connect(function()
-	if editing and modal then pcall(finishModal, true) end
+	if modal then pcall(finishModal, true) return end
+	local mp = mousePos()
+	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true } end
+end)
+pcall(function()
+	mouse.Button2Up:Connect(function()
+		local nd = navDrag
+		if not (nd and nd.rmb) then return end
+		navDrag = nil
+		if nd.moved < 4 then
+			local ok, err = pcall(function() ui:openContextMenu(mousePos()) end)
+			if not ok then warn(NAME .. ": " .. tostring(err)) end
+		end
+	end)
+end)
+local wheelFromMouse = false
+local function wheel(steps)
+	if not ownView() or ui.menuOpen or not ui:inCanvas(mousePos()) then return end
+	view:zoom(steps)
+	dirtyCage = true
+end
+pcall(function()
+	mouse.WheelForward:Connect(function() wheelFromMouse = true wheel(1) end)
+	mouse.WheelBackward:Connect(function() wheelFromMouse = true wheel(-1) end)
 end)
 mouse.Move:Connect(function()
-	if not editing then return end
+	local mp = mousePos()
+	if uiOn then pcall(function() ui:step(mp) end) end
+	if navDrag then
+		local dx, dy = mp.X - navDrag.last.X, mp.Y - navDrag.last.Y
+		navDrag.last = mp
+		navDrag.moved += math.abs(dx) + math.abs(dy)
+		if dx ~= 0 or dy ~= 0 then api.navDrag(navDrag.kind, dx, dy) end
+		return
+	end
+	if not editing and not (modal and modal.obj) then
+		if down and ownView() then
+			local a = down
+			if (mp - a).Magnitude > 6 then
+				boxFrame.Visible = true
+				boxFrame.Position = UDim2.fromOffset(math.min(a.X, mp.X), math.min(a.Y, mp.Y))
+				boxFrame.Size = UDim2.fromOffset(math.abs(a.X - mp.X), math.abs(a.Y - mp.Y))
+			end
+		end
+		return
+	end
 	local ok, err = pcall(function()
 		if modal then
 			if modal.kind == "G" or modal.kind == "S" or modal.kind == "R" then applyTransform()
@@ -1153,16 +1693,16 @@ mouse.Move:Connect(function()
 			elseif modal.kind == "loopcut" then updateLoopCut() end
 			return
 		end
-		if not down and ui:overUI(mousePos()) then
+		if not down and ui:overUI(mp) then
 			if hover then hover = nil dirtyCage = true end
 			return
 		end
 		if down then
-			local a, b = down, mousePos()
-			if (b - a).Magnitude > 6 then
+			local a = down
+			if (mp - a).Magnitude > 6 then
 				boxFrame.Visible = true
-				boxFrame.Position = UDim2.fromOffset(math.min(a.X, b.X), math.min(a.Y, b.Y))
-				boxFrame.Size = UDim2.fromOffset(math.abs(a.X - b.X), math.abs(a.Y - b.Y))
+				boxFrame.Position = UDim2.fromOffset(math.min(a.X, mp.X), math.min(a.Y, mp.Y))
+				boxFrame.Size = UDim2.fromOffset(math.abs(a.X - mp.X), math.abs(a.Y - mp.Y))
 			end
 			return
 		end
@@ -1173,21 +1713,79 @@ mouse.Move:Connect(function()
 end)
 
 -- ===== keys =====
+local DIGITS = { Zero = "0", One = "1", Two = "2", Three = "3", Four = "4", Five = "5", Six = "6", Seven = "7", Eight = "8", Nine = "9",
+	KeypadZero = "0", KeypadOne = "1", KeypadTwo = "2", KeypadThree = "3", KeypadFour = "4", KeypadFive = "5", KeypadSix = "6", KeypadSeven = "7", KeypadEight = "8", KeypadNine = "9",
+	Period = ".", KeypadPeriod = ".", Minus = "-", KeypadMinus = "-" }
+local function modalKey(k)
+	if k == Enum.KeyCode.Escape then finishModal(true) return end
+	if k == Enum.KeyCode.Return or k == Enum.KeyCode.KeypadEnter then
+		if modal.kind == "loopcut" then updateLoopCut() end
+		finishModal(false)
+		return
+	end
+	if modal.kind == "G" or modal.kind == "S" or modal.kind == "R" then
+		if k == Enum.KeyCode.X or k == Enum.KeyCode.Y or k == Enum.KeyCode.Z then
+			local a = k.Name
+			modal.axisWorld = nil
+			if modal.axis == a then modal.axis = nil else modal.axis = a end
+			applyTransform()
+			return
+		end
+	end
+	local ch = DIGITS[k.Name]
+	if ch then modal.num = (modal.num or "") .. ch
+	elseif k == Enum.KeyCode.Backspace then modal.num = (modal.num or ""):sub(1, -2)
+	else return end
+	if modal.kind == "inset" then updateInset() elseif modal.kind ~= "loopcut" then applyTransform() end
+end
+local function navKey(k, ctrl)
+	if not ownView() then return false end
+	local n = k.Name
+	if n == "KeypadOne" then api.viewAxis(ctrl and "back" or "front")
+	elseif n == "KeypadThree" then api.viewAxis(ctrl and "left" or "right")
+	elseif n == "KeypadSeven" then api.viewAxis(ctrl and "bottom" or "top")
+	elseif n == "KeypadPeriod" then frameSelected()
+	elseif n == "Home" then frameAll()
+	elseif n == "KeypadPlus" then view:zoom(1) dirtyCage = true
+	elseif n == "KeypadMinus" then view:zoom(-1) dirtyCage = true
+	else return false end
+	return true
+end
+local function objectKey(k, shift, ctrl, alt)
+	if not ownView() then return end
+	if k == Enum.KeyCode.G and not ctrl then startObjTransform("G")
+	elseif k == Enum.KeyCode.R and not ctrl then startObjTransform("R")
+	elseif k == Enum.KeyCode.S and not ctrl then startObjTransform("S")
+	elseif (k == Enum.KeyCode.X or k == Enum.KeyCode.Delete) and not ctrl then deleteObjects()
+	elseif k == Enum.KeyCode.D and shift then duplicateObjects()
+	elseif k == Enum.KeyCode.A and alt then TOOL.SelectNone()
+	elseif k == Enum.KeyCode.A and not ctrl then TOOL.SelectAll()
+	elseif k == Enum.KeyCode.I and ctrl then TOOL.Invert()
+	elseif k == Enum.KeyCode.Z and alt then toggleXray()
+	elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
+	end
+end
 UIS.InputBegan:Connect(function(input, gp)
 	if UIS:GetFocusedTextBox() then return end
+	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	local shift = shiftDown()
+	if input.UserInputType == Enum.UserInputType.MouseButton3 then
+		local mp = mousePos()
+		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0 } end
+		return
+	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
-	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
 	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
-	local shift = UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift)
 	if uiOn and ui.menuOpen then
 		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return
 	end
 	if k == Enum.KeyCode.Tab and not ctrl and not alt then
 		if modal then return end
-		if editing then exitEdit() elseif isRB(Selection:Get()[1]) then enterEdit(Selection:Get()[1])
-		elseif uiOn then setStatus("Select a " .. NAME .. " mesh first (Shift A adds one).") end
+		if editing then exitEdit()
+		elseif uiOn then toggleEdit()
+		elseif isRB(Selection:Get()[1]) then enterEdit(Selection:Get()[1]) end
 		return
 	end
 	if uiOn and not modal and not ctrl and not alt then
@@ -1200,32 +1798,11 @@ UIS.InputBegan:Connect(function(input, gp)
 		if not ok then warn(NAME .. ": " .. tostring(used)) return end
 		if used then return end
 	end
-	if not editing then return end
 	local ok, err = pcall(function()
-		if modal then
-			if k == Enum.KeyCode.Escape then finishModal(true) return end
-			if k == Enum.KeyCode.Return or k == Enum.KeyCode.KeypadEnter then
-				if modal.kind == "loopcut" then updateLoopCut() end
-				finishModal(false) return
-			end
-			if modal.kind == "G" or modal.kind == "S" or modal.kind == "R" then
-				if k == Enum.KeyCode.X or k == Enum.KeyCode.Y or k == Enum.KeyCode.Z then
-					local a = k.Name
-					modal.axisWorld = nil
-					if modal.axis == a then modal.axis = nil else modal.axis = a end
-					applyTransform()
-					return
-				end
-			end
-			-- typed numbers
-			local digits = { Zero = "0", One = "1", Two = "2", Three = "3", Four = "4", Five = "5", Six = "6", Seven = "7", Eight = "8", Nine = "9",
-				KeypadZero = "0", KeypadOne = "1", KeypadTwo = "2", KeypadThree = "3", KeypadFour = "4", KeypadFive = "5", KeypadSix = "6", KeypadSeven = "7", KeypadEight = "8", KeypadNine = "9",
-				Period = ".", KeypadPeriod = ".", Minus = "-", KeypadMinus = "-" }
-			local ch = digits[k.Name]
-			if ch then modal.num = (modal.num or "") .. ch
-			elseif k == Enum.KeyCode.Backspace then modal.num = (modal.num or ""):sub(1, -2)
-			else return end
-			if modal.kind == "inset" then updateInset() elseif modal.kind ~= "loopcut" then applyTransform() end
+		if modal then modalKey(k) return end
+		if navKey(k, ctrl) then return end
+		if not editing then
+			if uiOn then objectKey(k, shift, ctrl, alt) end
 			return
 		end
 		if k == Enum.KeyCode.One then setMode("vert")
@@ -1243,38 +1820,69 @@ UIS.InputBegan:Connect(function(input, gp)
 		elseif k == Enum.KeyCode.X or k == Enum.KeyCode.Delete then Tools.delete()
 		elseif k == Enum.KeyCode.M then Tools.merge()
 		elseif k == Enum.KeyCode.F then Tools.fill()
-		elseif k == Enum.KeyCode.Z and alt then xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off"))
+		elseif k == Enum.KeyCode.Z and alt then toggleXray()
+		elseif k == Enum.KeyCode.Z and shift and uiOn then api.setShading(shading == "wire" and "solid" or "wire")
 		end
 	end)
 	if not ok then warn(NAME .. ": " .. tostring(err)) setStatus("Error: " .. tostring(err)) end
 end)
+pcall(function()
+	UIS.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton3 then
+			if navDrag and not navDrag.rmb then navDrag = nil end
+		elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if uiOn then ui:mouseUp() end
+		end
+	end)
+	UIS.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseWheel and not wheelFromMouse then
+			wheel(input.Position.Z > 0 and 1 or -1)
+		end
+	end)
+end)
 
--- ===== keep the look up to date (mesh rebuilt at most ~20 times a second while dragging) =====
+-- ===== keep everything up to date (the edited mesh is rebuilt at most ~20 times a second) =====
 local lastCam = nil
-local lastUI = 0
+local lastUI, lastSync = 0, 0
 RunService.Heartbeat:Connect(function()
-	if uiOn and os.clock() - lastUI > 0.1 then
-		lastUI = os.clock()
+	local now = os.clock()
+	if uiOn and now - lastUI > 0.1 then
+		lastUI = now
 		local ok, err = pcall(function() ui:refresh() end)
 		if not ok then warn(NAME .. " UI: " .. tostring(err)) end
 	end
-	if not editing or not obj then return end
-	if not obj.Parent then exitEdit() return end
-	local now = os.clock()
-	if dirtyMesh and now - lastBuild > 0.05 then
-		dirtyMesh = false
-		lastBuild = now
-		local ok, err, np = applyMesh(obj, bm, true)
-		if np then obj = np end
-		if ok then origin = originOf(obj) else setStatus("Mesh: " .. tostring(err)) end
-		worldTris = nil
-		dirtyCage = true
+	if ownView() then
+		pcall(function() if not plugin:IsActivated() then plugin:Activate(true) end end)
+		if now - lastSync > 0.2 then
+			lastSync = now
+			local ok, changed = pcall(syncScene)
+			if ok and changed then dirtyCage = true elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
+		end
 	end
-	local cf = camera().CFrame
-	if dirtyCage or cf ~= lastCam then
-		lastCam = cf
-		dirtyCage = false
-		drawCage()
+	if editing and obj then
+		if not obj.Parent then exitEdit() return end
+		if dirtyMesh and now - lastBuild > 0.05 then
+			dirtyMesh = false
+			lastBuild = now
+			if ownView() then
+				local _, err = showEdit()
+				if err then setStatus("Mesh: " .. tostring(err)) end
+			else
+				local ok, err, np = applyMesh(obj, bm, true)
+				if np then obj = np end
+				if ok then origin = originOf(obj) else setStatus("Mesh: " .. tostring(err)) end
+			end
+			worldTris = nil
+			dirtyCage = true
+		end
+	end
+	if editing or ownView() then
+		local cf = camera().CFrame
+		if dirtyCage or cf ~= lastCam then
+			lastCam = cf
+			dirtyCage = false
+			drawCage()
+		end
 	end
 end)
 

@@ -22,14 +22,34 @@ Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow M
 
 ## Use
 
-1. Click the **ROBLENDER** button in the Plugins tab. The 3D view turns into a Blender-style screen with:
-   - a header: mode dropdown, View / Select / Add / Mesh menus, vertex / edge / face buttons, X-Ray
-   - a tool strip down the left
-   - the N sidebar, where you can type locations and sizes
-   - stats in the top-left
-   - a hint bar along the bottom
-2. Press **Shift A** to add a mesh. Select it and press **Tab** for Edit Mode.
-3. Click the button again to close the screen.
+Click the **ROBLENDER** button in the Plugins tab. A Blender-style window opens over Studio:
+
+| Part of the window | What's in it |
+|---|---|
+| Top bar | File, Edit and Help menus. The Layout tab is Object Mode and the Modeling tab is Edit Mode. |
+| 3D view | ROBLENDER's own 3D view: Blender's grey background, the grid and axis lines. |
+| 3D view header | Mode dropdown; View, Select, Add and Object / Mesh / Vertex / Edge / Face menus; X-Ray; Wireframe and Solid. |
+| Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
+| Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
+| Outliner | Every ROBLENDER mesh in the place. Click a row to select it; the eye hides or shows it. |
+| Properties | Object tab: name, location, rotation, size. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
+| Status bar | Mouse hints and the last message. |
+
+**Getting around the 3D view**
+
+| Action | How |
+|---|---|
+| Orbit | Drag with the middle mouse button or the right mouse button. |
+| Pan | Hold Shift and drag. |
+| Zoom | Mouse wheel. |
+| Snap to a view | Numpad 1, 3 or 7 (add Ctrl for the opposite side). |
+| Frame selected | Numpad . |
+| Frame everything | Home |
+| Context menu | Right-click without dragging. |
+
+Object Mode keys: G, R and S move, rotate and scale whole parts. X deletes. Shift D duplicates. A, Alt A and Ctrl I select all, none and invert.
+
+The 3D view only shows ROBLENDER meshes. To edit in Studio's own 3D view instead, use **Edit > Use Studio's 3D View**.
 
 | Key | What it does |
 |---|---|
@@ -65,7 +85,8 @@ Roblox doesn't yet save meshes that a plugin makes into the place file. To keep 
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
-| `src/UI.lua` | The Blender-style screen: header, menus, tool strip, sidebar, status bar. |
+| `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
+| `src/View.lua` | ROBLENDER's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
 
