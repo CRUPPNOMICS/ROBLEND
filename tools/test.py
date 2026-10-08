@@ -1,0 +1,31 @@
+"""Run the tests with the Luau CLI: engine tests (BMesh + Ops) and the editor smoke test (Main in a fake Studio).
+usage: python3 tools/test.py [path-to-luau]"""
+import pathlib, subprocess, sys
+root = pathlib.Path(__file__).resolve().parent.parent
+luau = sys.argv[1] if len(sys.argv) > 1 else 'luau'
+rd = lambda p: (root / p).read_text()
+
+
+def mod(name, text):
+    text = text.replace('require(script.Parent.BMesh)', 'BMesh')
+    return f'{name} = (function()\n{text}\nend)()\n'
+
+
+def run(tag, src):
+    out = root / f'tests/_run_{tag}.luau'
+    out.write_text(src)
+    r = subprocess.run([luau, str(out)], capture_output=True, text=True)
+    print(f'--- {tag}\n' + r.stdout + r.stderr)
+    return r.returncode
+
+
+engine = rd('tests/mock.luau') + mod('BMesh', rd('src/BMesh.lua')) + mod('Ops', rd('src/Ops.lua')) + rd('tests/test_engine.luau')
+main = rd('src/Main.server.lua')
+for a, b in [('require(script.BMesh)', 'BMesh'), ('require(script.Ops)', 'Ops'), ('require(script.Display)', 'Display'),
+             ('os.clock()', 'MOCK.t'), ('local function setStatus(t) status.Text = t end', 'local function setStatus(t) status.Text = t MOCK.status = t end')]:
+    assert a in main, a
+    main = main.replace(a, b)
+editor = (rd('tests/mock.luau') + rd('tests/studio_mock.luau') + 'MOCK.t = 0\n' + mod('BMesh', rd('src/BMesh.lua')) + mod('Ops', rd('src/Ops.lua'))
+          + mod('Display', rd('src/Display.lua')) + 'do\n' + main + '\nend\n' + rd('tests/test_editor.luau'))
+rc = run('engine', engine) | run('editor', editor)
+sys.exit(rc)
