@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.5.3"
+local VERSION = "0.6.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1513,7 +1513,8 @@ local function modelingTools()
 		local sn = snapshot()
 		local cLocal = opts.center or selCenterLocal()
 		local cw = W(cLocal)
-		local M = { kind = "param", name = opts.name, what = opts.what, cw = cw, cs = toScreen(cw), m0 = mousePos(), num = "", releaseConfirm = opts.releaseConfirm, acc = 0 }
+		local M = { kind = "param", name = opts.name, what = opts.what, cw = cw, cs = toScreen(cw), m0 = mousePos(), num = "", releaseConfirm = opts.releaseConfirm, acc = 0,
+			onWheel = opts.onWheel, onKey = opts.onKey }
 		local lastA = nil
 		M.update = function()
 			local mp = mousePos()
@@ -1547,7 +1548,7 @@ local function modelingTools()
 			worldTris = nil
 			dirtyMesh, dirtyCage = true, true
 			local shown = (typeof(v) == "number") and (opts.mode == "angle" and ("%.1f deg"):format(math.deg(v)) or ("%.3f"):format(v)) or ""
-			setStatus(("%s  %s%s   drag / type a value, click or Enter = done, Esc = cancel"):format(opts.name, shown, M.num ~= "" and ("  [" .. M.num .. "]") or ""))
+			setStatus(("%s  %s%s%s   drag / type a value, click or Enter = done, Esc = cancel"):format(opts.name, shown, M.num ~= "" and ("  [" .. M.num .. "]") or "", opts.info and ("   " .. opts.info()) or ""))
 		end
 		M.finish = function(cancel)
 			if cancel and not opts.commitOnCancel then
@@ -1587,11 +1588,25 @@ local function modelingTools()
 		local vertexOnly = (opts and opts.vertex) or mode == "vert"
 		if not vertexOnly and not next(MT.selEdges(bm)) then setStatus("Pick edges to bevel.") return end
 		if vertexOnly and not next(MT.selVerts(bm)) then setStatus("Pick verts to bevel.") return end
-		startParam({ name = vertexOnly and "Bevel Vertices" or "Bevel", mode = "dist", releaseConfirm = opts and opts.release, fn = function(d)
-			if d < 1e-3 then return end
-			local nb = MT.bevel(bm, d, vertexOnly)
-			if nb then bm = nb setMode("face") end
-		end })
+		MOD.bevelSegs = MOD.bevelSegs or 1
+		local function seg(stepsUp)
+			MOD.bevelSegs = math.clamp(MOD.bevelSegs + stepsUp, 1, 32)
+			return true
+		end
+		startParam({ name = vertexOnly and "Bevel Vertices" or "Bevel", mode = "dist", releaseConfirm = opts and opts.release,
+			info = function() return vertexOnly and "" or ("Segments %d (wheel / PageUp / PageDown)"):format(MOD.bevelSegs) end,
+			onWheel = function(steps) if not vertexOnly then seg(steps > 0 and 1 or -1) end end,
+			onKey = function(k)
+				if vertexOnly then return false end
+				if k == Enum.KeyCode.PageUp then return seg(1) end
+				if k == Enum.KeyCode.PageDown then return seg(-1) end
+				return false
+			end,
+			fn = function(d)
+				if d < 1e-3 then return end
+				local nb = MT.bevel(bm, d, vertexOnly, MOD.bevelSegs)
+				if nb then bm = nb setMode("face") end
+			end })
 	end
 	function T.spin(opts)
 		local c, ax = cursorLocal(), viewLocal(camera().CFrame.LookVector)
@@ -1644,7 +1659,7 @@ local function modelingTools()
 	-- edge / vertex slide: every selected vert runs along the un-selected edge that best matches the drag
 	function T.slide(opts)
 		local single = opts and opts.vertex
-		startParam({ name = single and "Vertex Slide" or "Edge Slide", mode = "vec", releaseConfirm = opts and opts.release, fn = function(D)
+		startParam({ name = (opts and opts.name) or (single and "Vertex Slide" or "Edge Slide"), mode = "vec", releaseConfirm = opts and opts.release, commitOnCancel = opts and opts.commitOnCancel, fn = function(D)
 			if D.Magnitude < 3 then return end
 			local dir = D.Unit
 			for v in pairs(selVertsSet()) do
@@ -2005,6 +2020,50 @@ local function modelingTools()
 		end
 	end
 
+	-- ----- loop cut and slide (Ctrl R / the Loop Cut tool): wheel = number of cuts, then slide -----
+	MOD.loopCuts = 1
+	local function ringLines(e)
+		local out = {}
+		for _, seg in ipairs(MT.ringCuts(bm, e, MOD.loopCuts)) do out[#out + 1] = { W(seg[1]), W(seg[2]) } end
+		return out
+	end
+	local function cutAndSlide(e, release)
+		local made = MT.loopCutN(bm, e, MOD.loopCuts)
+		MT.clearSel(bm)
+		setMode("edge")
+		for x in pairs(made) do if bm.edges[x] then x.sel = true x.v1.sel = true x.v2.sel = true end end
+		flush()
+		changed()
+		MOD.preview = nil
+		T.slide({ name = "Loop Cut and Slide", release = release, commitOnCancel = true })
+	end
+	function T.loopCutModal()
+		if not editing or modal then return end
+		local M = { kind = "loopcut2", num = "" }
+		M.update = function()
+			M.edge = pickEdge(mousePos())
+			M.lines = M.edge and ringLines(M.edge) or nil
+			dirtyCage = true
+			setStatus(("Loop Cut: %d cut%s (wheel / PageUp / PageDown), click = cut + slide, Esc = cancel"):format(MOD.loopCuts, MOD.loopCuts == 1 and "" or "s"))
+		end
+		M.onWheel = function(steps) MOD.loopCuts = math.clamp(MOD.loopCuts + (steps > 0 and 1 or -1), 1, 64) end
+		M.onKey = function(k)
+			if k == Enum.KeyCode.PageUp then MOD.loopCuts = math.min(64, MOD.loopCuts + 1) return true end
+			if k == Enum.KeyCode.PageDown then MOD.loopCuts = math.max(1, MOD.loopCuts - 1) return true end
+			return false
+		end
+		M.click = function()
+			M.update()
+			local e = M.edge
+			modal = nil
+			if e then cutAndSlide(e, false) else setStatus("Loop Cut: point at an edge.") end
+		end
+		M.finish = function(cancel) setStatus(cancel and "Loop cut cancelled." or "Loop cut: point at an edge and click.") end
+		modal = M
+		M.update()
+	end
+	MOD.cutAndSlide = cutAndSlide
+
 	-- ----- loop cut tool preview -----
 	local function ringPreview(e)
 		local ring = Ops.edgeRing(bm, e)
@@ -2056,15 +2115,7 @@ local function modelingTools()
 		if t == "polybuild" then T.polyBuild(mp, ctrl, shift) return true end
 		if t == "loopcut" then
 			local e = pickEdge(mp)
-			if e then
-				local newEdges = Ops.loopCut(bm, e, 0.5)
-				clearSel()
-				setMode("edge")
-				for ne in pairs(newEdges) do ne.sel = true end
-				flush()
-				changed("Loop cut")
-				MOD.preview = nil
-			end
+			if e then cutAndSlide(e, true) end
 			return true
 		end
 		if t == "knife" then
@@ -2072,29 +2123,38 @@ local function modelingTools()
 			if modal and modal.click then modal.click() end
 			return true
 		end
-		local hasSel
-		if editing then hasSel = #selectedVertsList() > 0 else hasSel = #Selection:Get() > 0 end
+		-- drag tools (like Blender): a plain click still selects; a DRAG that starts on the selection uses the tool
+		-- (Move / Transform also grab whatever is under the mouse). A drag that starts anywhere else box-selects.
+		local hit
+		if editing then hit = pickAny() else hit = pickObject(mp) end
+		local onSel
+		if editing then onSel = hit ~= nil and hit.sel == true
+		else onSel = hit ~= nil and table.find(Selection:Get(), hit) ~= nil end
 		if t == "move" or t == "transform" then
-			local hit
-			if editing then hit = pickAny() else hit = pickObject(mp) end
-			if hit then
-				if editing then
-					if not hit.sel then clearSel() toggle(hit, true) flush() end
-					startTransform("G", { releaseConfirm = true })
-				else
-					if not table.find(Selection:Get(), hit) then selectObject(hit, false) end
-					startObjTransform("G")
-					if modal then modal.releaseConfirm = true end
-				end
-				return true
-			end
-			return false
+			if hit then MOD.pending = { tool = t, mp = mp, hit = hit, onSel = onSel } end
+		elseif onSel then
+			MOD.pending = { tool = t, mp = mp, hit = hit, onSel = true }
 		end
-		if not hasSel then return false end
+		return false
+	end
+	-- the drag passed the threshold: run the pending tool (confirms when the mouse is let go)
+	local function startPending(pd)
+		local t = pd.tool
+		if t == "move" or t == "transform" then
+			if editing then
+				if not pd.onSel then clearSel() toggle(pd.hit, true) flush() end
+				startTransform("G", { releaseConfirm = true })
+			else
+				if not pd.onSel then selectObject(pd.hit, false) end
+				startObjTransform("G")
+				if modal then modal.releaseConfirm = true end
+			end
+			return
+		end
 		if t == "rotate" or t == "scale" then
 			local k = t == "rotate" and "R" or "S"
 			if editing then startTransform(k, { releaseConfirm = true }) else startObjTransform(k) if modal then modal.releaseConfirm = true end end
-			return true
+			return
 		end
 		local rel = { release = true }
 		if t == "extrude" then Tools.extrude() if modal then modal.releaseConfirm = true end
@@ -2113,11 +2173,17 @@ local function modelingTools()
 		elseif t == "tosphere" then T.toSphere(rel)
 		elseif t == "rip" then T.rip(rel)
 		elseif t == "ripedge" then T.ripEdge(rel)
-		else return false end
-		return true
+		end
 	end
 	function MOD.move(mp)
 		local t = MOD.effectiveTool()
+		if MOD.pending and (mp - MOD.pending.mp).Magnitude > 5 then
+			local pd = MOD.pending
+			MOD.pending = nil
+			startPending(pd)
+			if modal and modal.update then modal.update() elseif modal and (modal.kind == "G" or modal.kind == "R" or modal.kind == "S") then applyTransform() end
+			return "drag"
+		end
 		if MOD.measure and MOD.measure.dragging then MOD.measure.b = snapPoint(mp) dirtyCage = true return true end
 		if MOD.drawing then
 			if (mp - MOD.lastAnn).Magnitude > 4 then
@@ -2131,12 +2197,14 @@ local function modelingTools()
 		if MOD.bisectFrom then MOD.bisectTo = mp dirtyCage = true return true end
 		if t == "loopcut" and editing and not modal then
 			local e = pickEdge(mp)
-			MOD.preview = e and ringPreview(e) or nil
+			MOD.preview = e and ringLines(e) or nil
+			MOD.previewEdge = e
 			dirtyCage = true
 		end
 		return false
 	end
 	function MOD.release(mp)
+		MOD.pending = nil
 		if MOD.pendingCursor then MOD.pendingCursor = nil MOD.placeCursor(mp) return true end
 		if MOD.measure and MOD.measure.dragging then
 			MOD.measure.dragging = false
@@ -2203,6 +2271,9 @@ local function modelingTools()
 			local lo, hi = modal.box()
 			local c = boxCorners(lo, hi)
 			for _, e in ipairs(BOX_EDGES) do line(c[e[1]], c[e[2]], Color3.new(1, 1, 1), 1.4) end
+		end
+		if modal and modal.kind == "loopcut2" and modal.lines then
+			for _, sg in ipairs(modal.lines) do line(sg[1], sg[2], Color3.fromRGB(255, 220, 60), 2) end
 		end
 		-- loop cut tool preview
 		if MOD.preview and not modal then
@@ -2431,6 +2502,7 @@ local function modelingTools()
 	function MOD.editKey(k, shift, ctrl, alt)
 		local K = Enum.KeyCode
 		local function menu(name) ui:openNamedMenu(name, mousePos()) return true end
+		if k == K.R and ctrl then T.loopCutModal() return true end
 		if k == K.B and ctrl and shift then O.BevelVerts() return true end
 		if k == K.B and ctrl then O.Bevel() return true end
 		if k == K.K and not ctrl then O.Knife() return true end
@@ -2467,6 +2539,10 @@ local function modelingTools()
 	end
 	-- keys inside a running G (GG = edge slide) and the wheel (proportional size)
 	function MOD.modalKey(k)
+		if modal and modal.onKey and modal.onKey(k) then
+			if modal.update then modal.update() end
+			return true
+		end
 		if k == Enum.KeyCode.G and modal and modal.kind == "G" and not modal.obj and not modal.axis and modal.num == "" then
 			finishModal(true)
 			T.slide()
@@ -2475,6 +2551,18 @@ local function modelingTools()
 		return false
 	end
 	function MOD.wheel(steps)
+		if modal and modal.onWheel then
+			modal.onWheel(steps)
+			if modal.update then modal.update() end
+			return true
+		end
+		if not modal and editing and MOD.effectiveTool() == "loopcut" then
+			MOD.loopCuts = math.clamp(MOD.loopCuts + (steps > 0 and 1 or -1), 1, 64)
+			if MOD.previewEdge and bm.edges[MOD.previewEdge] then MOD.preview = ringLines(MOD.previewEdge) end
+			setStatus(("Loop Cut: %d cut%s"):format(MOD.loopCuts, MOD.loopCuts == 1 and "" or "s"))
+			dirtyCage = true
+			return true
+		end
 		if modal and modal.propWeights then
 			EDIT.propR = math.clamp(EDIT.propR * (steps > 0 and 0.9 or 1.1), 0.05, 1000)
 			modal.propWeights()
@@ -2564,6 +2652,7 @@ local TOOL = {
 	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
+TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
 local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
 for name, fn in pairs(MOD.ops) do
 	if not TOOL[name] or name == "Duplicate" then
@@ -2927,9 +3016,13 @@ mouse.Button1Up:Connect(function()
 			end
 		else
 			local x = pickAny()
-			if x then
+			if x and ctrl and MOD.lastPick and MOD.lastPick ~= x and (MOD.lastPick.co ~= nil) == (x.co ~= nil) and (MOD.lastPick.len ~= nil) == (x.len ~= nil) then
+				-- Ctrl click: the shortest path from the last picked element (Blender's Pick Shortest Path)
+				if not MT.shortestPath(bm, MOD.lastPick, x, mode) then setStatus("No path between those.") end
+			elseif x then
 				if shift then toggle(x) else clearSel() toggle(x, true) end
 			elseif not shift then clearSel() end
+			if x then MOD.lastPick = x end
 			flush()
 		end
 		dirtyCage, dirtyMesh = true, true
@@ -2956,7 +3049,7 @@ pcall(function()
 end)
 local wheelFromMouse = false
 local function wheel(steps)
-	if modal and MOD.wheel(steps) then return end
+	if (editing or modal) and MOD.wheel(steps) then return end
 	if not ownView() or ui.menuOpen or not ui:inCanvas(mousePos()) then return end
 	view:zoom(steps)
 	dirtyCage = true
@@ -2982,7 +3075,9 @@ mouse.Move:Connect(function()
 	end
 	do
 		local ok, used = pcall(MOD.move, mp)
-		if not ok then warn(NAME .. ": " .. tostring(used)) elseif used then return end
+		if not ok then warn(NAME .. ": " .. tostring(used))
+		elseif used == "drag" then down = nil boxFrame.Visible = false return
+		elseif used then return end
 	end
 	if not editing and not (modal and modal.obj) then
 		if down and ownView() then

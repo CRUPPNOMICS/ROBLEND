@@ -285,5 +285,42 @@ check2("hide / reveal, mirror, smooth flag + sharp saved", function()
 	eq(sh, 1, "sharp kept")
 end)
 
+check2("bevel with segments: a round edge, watertight", function()
+	local bm = cube()
+	edgeWhere(bm, function(a, b) return a.Y > 0 and b.Y > 0 and a.Z > 0 and b.Z > 0 end).sel = true
+	local nb = MT.bevel(bm, 0.4, false, 3)
+	nb:validate()
+	eq(nb.nf, 9, "faces") eq(nb.nv, 14, "verts")
+	closed(nb) outward(nb)
+	-- the middle profile points sit on a circle round the rounded edge's axis
+	local all = cube()
+	for e in pairs(all.edges) do e.sel = true end
+	local r = MT.bevel(all, 0.3, false, 2)
+	r:validate()
+	closed(r)
+end)
+check2("loop cut with 3 cuts + ring preview + shortest path", function()
+	local bm = cube()
+	local e0 = edgeWhere(bm, function(a, b) return math.abs(a.Y - b.Y) > 1 and a.X > 0 and a.Z > 0 end)
+	local lines = MT.ringCuts(bm, e0, 2)
+	eq(#lines, 8, "2 cuts round 4 faces")
+	local made = MT.loopCutN(bm, e0, 3)
+	bm:validate()
+	eq(bm.nf, 18, "faces") closed(bm)
+	local ys = {}
+	for v in pairs(bm.verts) do ys[math.floor(v.co.Y * 1000 + 0.5)] = true end
+	local n = 0 for _ in pairs(ys) do n += 1 end
+	eq(n, 5, "evenly spaced levels")
+	local g = BMesh.new()
+	Ops.grid(g, 4, 4, 4)
+	local a, b
+	for v in pairs(g.verts) do
+		if v.co.X < -1.9 and v.co.Z < -1.9 then a = v end
+		if v.co.X > 1.9 and v.co.Z > 1.9 then b = v end
+	end
+	assert(MT.shortestPath(g, a, b, "vert"), "path found")
+	local c = 0 for v in pairs(g.verts) do if v.sel then c += 1 end end
+	eq(c, 9, "corner to corner is 9 verts")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

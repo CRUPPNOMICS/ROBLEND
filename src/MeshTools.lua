@@ -168,7 +168,8 @@ MT.selectFace = selectFace
 --   none beveled (side faces)  -> the corner splits into the two slide points
 -- Where 3+ beveled edges meet, the hole is closed with a vertex cap polygon.
 -- Vertex bevel: every edge at a selected vert gets a slide point, the vert becomes a cap face.
-function MT.bevel(bm, offset, vertexOnly)
+function MT.bevel(bm, offset, vertexOnly, segments)
+	segments = vertexOnly and 1 or math.clamp(math.floor(segments or 1), 1, 32)
 	local spec = MT.toSpec(bm)
 	local vi = spec.vi
 	local SE, BV = {}, {}
@@ -239,7 +240,45 @@ function MT.bevel(bm, offset, vertexOnly)
 		f.v = list
 		f.sel = false
 	end
-	-- band faces along beveled edges: quad (B1, A1, A2, B2)
+	-- profiles (segments > 1): the curve across a band's end from p to q, bulging toward the old corner C.
+	-- A rational quadratic Bezier with weight sin(theta / 2) is a true circular arc (Blender's default profile 0.5).
+	local profiles = {}
+	local function profile(p, q, C)
+		if segments <= 1 or p == q then return {} end
+		local key = p .. ":" .. q
+		if profiles[key] then return profiles[key] end
+		local rk = q .. ":" .. p
+		if profiles[rk] then
+			local r = {}
+			for i = #profiles[rk], 1, -1 do r[#r + 1] = profiles[rk][i] end
+			return r
+		end
+		local P, Q = spec.verts[p].co, spec.verts[q].co
+		local a, b = P - C, Q - C
+		local w = 0.7071
+		if a.Magnitude > 1e-6 and b.Magnitude > 1e-6 then
+			w = math.sin(math.acos(math.clamp(a.Unit:Dot(b.Unit), -1, 1)) / 2)
+		end
+		local mids = {}
+		for k = 1, segments - 1 do
+			local t = k / segments
+			local b0, b1, b2 = (1 - t) ^ 2, 2 * (1 - t) * t * w, t ^ 2
+			mids[k] = MT.addVert(spec, (P * b0 + C * b1 + Q * b2) / (b0 + b1 + b2), true)
+		end
+		profiles[key] = mids
+		return mids
+	end
+	local function run(p, q, C)
+		local r = { p }
+		if p == q then
+			for _ = 1, segments do r[#r + 1] = p end
+			return r
+		end
+		for _, k in ipairs(profile(p, q, C)) do r[#r + 1] = k end
+		r[#r + 1] = q
+		return r
+	end
+	-- band faces along beveled edges: quad (B1, A1, A2, B2), or a strip of `segments` quads
 	local newFaces = {}
 	for e in pairs(SE) do
 		local fs = BMesh.edgeFaces(e)
@@ -251,9 +290,17 @@ function MT.bevel(bm, offset, vertexOnly)
 		local A2, B2 = cornerPts[f2][a], cornerPts[f2][b]
 		-- the point of a corner that sits next to this edge
 		local function near(pts, side) return side == "first" and pts[1] or pts[#pts] end
-		local quad = { near(B1, "first"), near(A1, "last"), near(A2, "first"), near(B2, "last") }
-		spec.faces[#spec.faces + 1] = { v = quad, sel = true }
-		newFaces[#newFaces + 1] = spec.faces[#spec.faces]
+		local pB1, pA1, pA2, pB2 = near(B1, "first"), near(A1, "last"), near(A2, "first"), near(B2, "last")
+		if segments <= 1 then
+			spec.faces[#spec.faces + 1] = { v = { pB1, pA1, pA2, pB2 }, sel = true }
+			newFaces[#newFaces + 1] = spec.faces[#spec.faces]
+		else
+			local ra, rb = run(pA1, pA2, a.co), run(pB1, pB2, b.co)
+			for k = 1, segments do
+				spec.faces[#spec.faces + 1] = { v = { rb[k], ra[k], ra[k + 1], rb[k + 1] }, sel = true }
+				newFaces[#newFaces + 1] = spec.faces[#spec.faces]
+			end
+		end
 	end
 	-- vertex caps
 	for v in pairs(BV) do
@@ -284,10 +331,139 @@ function MT.bevel(bm, offset, vertexOnly)
 			end
 		end
 	end
+	-- every other face that runs straight across a band's end gets the profile points put in (stays watertight)
+	if segments > 1 then
+		for _, f in ipairs(spec.faces) do
+			local out, n = {}, #f.v
+			for i = 1, n do
+				local p, q = f.v[i], f.v[i % n + 1]
+				out[#out + 1] = p
+				local mids = profiles[p .. ":" .. q]
+				if mids then
+					for _, k in ipairs(mids) do out[#out + 1] = k end
+				else
+					local r = profiles[q .. ":" .. p]
+					if r then for j = #r, 1, -1 do out[#out + 1] = r[j] end end
+				end
+			end
+			f.v = out
+		end
+	end
 	for k in pairs(BV) do spec.verts[vi[k]].dead = true end
 	local nb = MT.fromSpec(spec)
 	for f in pairs(nb.faces) do if f.sel then selectFace(f) end end
 	return nb
+end
+
+-- ===== loop cut with several cuts (Ctrl R + wheel): cut the ring of e0 n times, evenly =====
+function MT.loopCutN(bm, e0, n)
+	n = math.max(1, math.floor(n or 1))
+	local a, b = e0.v1, e0.v2
+	local cur = a
+	local all = {}
+	for i = 1, n do
+		local e = BMesh.edgeExists(cur, b)
+		if not e then break end
+		local t = 1 / (n - i + 2)
+		if e.v1 ~= cur then t = 1 - t end
+		local made = Ops.loopCut(bm, e, t)
+		for x in pairs(made or {}) do all[x] = true end
+		-- the new vert on this edge: joined to both cur and b
+		local nxt
+		for _, ed in ipairs(BMesh.vertEdges(cur)) do
+			local o = BMesh.otherVert(ed, cur)
+			if o ~= b and BMesh.edgeExists(o, b) and math.abs((o.co - cur.co).Magnitude + (b.co - o.co).Magnitude - (b.co - cur.co).Magnitude) < 1e-4 then nxt = o end
+		end
+		if not nxt then break end
+		cur = nxt
+	end
+	return all
+end
+-- the ring preview for n cuts: segments across each ring face (world points are made by the caller)
+function MT.ringCuts(bm, e0, n)
+	local ring = Ops.edgeRing(bm, e0)
+	if #ring == 0 then return {} end
+	-- orient every ring edge the same way as the one before it (a_i joins a_i+1)
+	local ends = {}
+	for i, r in ipairs(ring) do
+		local x, y = r.v1, r.v2
+		if i > 1 then
+			local pa = ends[i - 1][1]
+			if not BMesh.edgeExists(pa, x) and (BMesh.edgeExists(pa, y) or (pa.co - y.co).Magnitude < (pa.co - x.co).Magnitude) then x, y = y, x end
+		end
+		ends[i] = { x, y }
+	end
+	local closed = false
+	if #ring > 2 and BMesh.edgeFaceCount(ring[1]) == 2 then
+		local fs1 = {}
+		for _, f in ipairs(BMesh.edgeFaces(ring[1])) do fs1[f] = true end
+		for _, f in ipairs(BMesh.edgeFaces(ring[#ring])) do if fs1[f] then closed = true end end
+	end
+	local lines = {}
+	for k = 1, n do
+		local f = k / (n + 1)
+		local pts = {}
+		for i, en in ipairs(ends) do pts[i] = en[1].co:Lerp(en[2].co, f) end
+		for i = 1, #pts - 1 do lines[#lines + 1] = { pts[i], pts[i + 1] } end
+		if closed then lines[#lines + 1] = { pts[#pts], pts[1] } end
+	end
+	return lines
+end
+
+-- ===== Ctrl click: select the shortest path from the last picked element (editmesh_path.cc idea) =====
+function MT.shortestPath(bm, a, b, mode)
+	if mode == "face" then
+		local dist, prev, done = { [a] = 0 }, {}, {}
+		while true do
+			local best, bd
+			for f, d in pairs(dist) do if not done[f] and (not bd or d < bd) then best, bd = f, d end end
+			if not best or best == b then break end
+			done[best] = true
+			local c = BMesh.faceCenter(best)
+			for _, l in ipairs(BMesh.faceLoops(best)) do
+				for _, g in ipairs(BMesh.edgeFaces(l.e)) do
+					if g ~= best and not g.hide then
+						local nd = bd + (BMesh.faceCenter(g) - c).Magnitude
+						if not dist[g] or nd < dist[g] then dist[g], prev[g] = nd, best end
+					end
+				end
+			end
+		end
+		if not dist[b] then return false end
+		local x = b
+		while x do selectFace(x) x = prev[x] end
+		return true
+	end
+	-- verts (edges: from an end of a to the nearer end of b)
+	local va = a.co and a or a.v1
+	local targets = b.co and { [b] = true } or { [b.v1] = true, [b.v2] = true }
+	local dist, prev, done = { [va] = 0 }, {}, {}
+	local hit
+	while true do
+		local best, bd
+		for v, d in pairs(dist) do if not done[v] and (not bd or d < bd) then best, bd = v, d end end
+		if not best then break end
+		if targets[best] then hit = best break end
+		done[best] = true
+		for _, e in ipairs(BMesh.vertEdges(best)) do
+			local o = BMesh.otherVert(e, best)
+			if not e.hide then
+				local nd = bd + (o.co - best.co).Magnitude
+				if not dist[o] or nd < dist[o] then dist[o], prev[o] = nd, best end
+			end
+		end
+	end
+	if not hit then return false end
+	local x = hit
+	while x do
+		x.sel = true
+		local p = prev[x]
+		if p then local e = BMesh.edgeExists(x, p) if e then e.sel = true end end
+		x = p
+	end
+	if b.v1 then b.sel = true b.v1.sel = true b.v2.sel = true end
+	if a.v1 then a.sel = true a.v1.sel = true a.v2.sel = true end
+	return true
 end
 
 -- ===== knife: cut along a chain of points (each on a vert or an edge), splitting the faces between them =====

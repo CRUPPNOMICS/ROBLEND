@@ -37,7 +37,7 @@ Click the **ROBLENDER** button in the Plugins tab. A Blender-style window opens 
 
 **The Modeling tab (Edit Mode)**
 
-The tool strip has Blender's Edit Mode tools. Click a tool, then drag in the 3D view to use it. Right-click a tool with a small corner mark to pick the other tools in its group.
+The tool strip has Blender's Edit Mode tools. Click a tool, then **drag on the selection** to use it. A plain click still selects, and a drag that starts anywhere else box-selects, like Blender. Right-click a tool with a small corner mark to pick the other tools in its group.
 
 | Group | Tools |
 |---|---|
@@ -63,7 +63,9 @@ The header also has toggles for snapping, proportional editing (O; the mouse whe
 
 | Keys | What they do |
 |---|---|
-| Ctrl B, Ctrl Shift B | Bevel edges, bevel vertices |
+| Ctrl B, Ctrl Shift B | Bevel edges, bevel vertices (while bevelling, the mouse wheel or PageUp/PageDown changes the number of segments, for rounded edges) |
+| Ctrl R | Loop cut and slide (the mouse wheel changes the number of cuts; click to cut, then slide; Esc keeps the cut centred) |
+| Ctrl click | Select the shortest path from the last element you picked |
 | K | Knife |
 | V, Alt D | Rip, rip and extend |
 | Y | Split |
