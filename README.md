@@ -32,7 +32,7 @@ Click the **ROBLENDER** button in the Plugins tab. A Blender-style window opens 
 | Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
 | Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
 | Outliner | Every ROBLENDER mesh in the place. Click a row to select it; the eye hides or shows it. |
-| Properties | Object tab: name, location, rotation, size. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
+| Properties | Object tab: name, location, rotation, size. Modifiers tab (wrench): the modifier stack. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
 | Status bar | Mouse hints and the last message. |
 
 **The Modeling tab (Edit Mode)**
@@ -145,6 +145,28 @@ ROBLENDER saves each mesh to Roblox as a real **Mesh asset**, using `AssetServic
 - Bake to Parts: builds a copy out of wedge parts.
 - Export .obj: bring the file in with the 3D Importer.
 
+**Modifiers (Properties > wrench tab)**
+
+Modifiers change how a mesh looks without touching your edits, like Blender's. Click **Add Modifier**:
+
+| Modifier | What it does | Settings |
+|---|---|---|
+| Array | Repeats the mesh in a row | Count, axis, relative offset |
+| Bevel | Rounds every edge sharper than the angle | Amount, segments, angle |
+| Mirror | Copies the mesh across its own X / Y / Z, welding the middle | Axis, merge, distance |
+| Solidify | Gives a flat surface thickness | Thickness, offset |
+| Subdivision Surface | Catmull-Clark smoothing | Levels (0 to 4) |
+| Smooth | Relaxes the shape | Factor, repeat |
+
+- Each modifier panel has: the eye (on or off), the Edit Mode toggle, move up / down, **Apply** (makes it real geometry) and **X** (removes it).
+- The stack runs top to bottom. It is stored on the part (`RB_Mods`), and saving uploads the result.
+- Roblox allows 20,000 triangles per mesh, so Subdivision stops a level early if the next one would go over.
+
+**Handy shortcuts in Edit Mode**
+- Ctrl + right-click: extrude the selection to the mouse, or add a vertex there when nothing is selected.
+- Shift R: repeat the last operator (also in the Edit menu).
+- Auto Merge (the header button next to Mirror X): after a move, vertices that land on each other are welded.
+
 ## What's in it
 
 | Path | What it holds |
@@ -152,6 +174,7 @@ ROBLENDER saves each mesh to Roblox as a real **Mesh asset**, using `AssetServic
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/MeshTools.lua` | The Modeling tab's operators: bevel, knife, bisect, spin, smooth, rip, split, dissolve, bridge, poke, triangulate, solidify, hull, symmetrize, normals, selection tools. |
+| `src/Modifiers.lua` | The modifier stack: Mirror, Subdivision Surface, Solidify, Array, Bevel, Smooth, and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/View.lua` | ROBLENDER's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |

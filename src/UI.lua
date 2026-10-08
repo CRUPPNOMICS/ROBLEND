@@ -197,6 +197,10 @@ local function icon(parent, kind, col, size)
 		seg(box, 2, 2, 8, 9, col) seg(box, 14, 2, 8, 9, col) seg(box, 8, 9, 8, 15, col) seg(box, 4, 2, 9, 7, rgb(0xffa030))
 	elseif kind == "ripedge" then
 		seg(box, 2, 14, 8, 8, col) seg(box, 8, 8, 14, 14, col) seg(box, 8, 8, 8, 2, rgb(0xffa030), 2)
+	elseif kind == "wrench" then
+		seg(box, 2.5, 13.5, 9, 7, T.iconModifier, 3) ring(box, 11, 5, 3.5, T.iconModifier, false) rect(box, 11, 1, 4, 4, T.props or rgb(0x303030), true)
+	elseif kind == "automerge" then
+		ring(box, 4, 8, 2.5, col, true) ring(box, 12, 8, 2.5, col, false) seg(box, 6.5, 8, 9.5, 8, col) seg(box, 9.5, 8, 8, 6.5, col) seg(box, 9.5, 8, 8, 9.5, col)
 	elseif kind == "magnet" then
 		seg(box, 4, 3, 4, 10, col, 3) seg(box, 12, 3, 12, 10, col, 3) ring(box, 8, 10, 4, col, false) rect(box, 2, 2, 4, 3, rgb(0xff4040), true) rect(box, 10, 2, 4, 3, rgb(0xff4040), true)
 	elseif kind == "prop" then
@@ -316,6 +320,11 @@ function UI:buildTopBar()
 		{ "Undo", "Ctrl Z", function() api.undo() end },
 		{ "Redo", "Ctrl Y", function() api.redo() end },
 		"-",
+		(function()
+			local st = api.state()
+			return { "Repeat Last" .. (st.lastOp and (": " .. st.lastOp:gsub("(%l)(%u)", "%1 %2")) or ""), "Shift R", (st.editing and st.lastOp) and function() api.repeatLast() end or nil }
+		end)(),
+		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
 	} end)
 	menu("Help", function() return self:helpItems() end)
@@ -394,12 +403,13 @@ function UI:buildView()
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
 	self.uvMenuBtn = pd("UV", function() return { { "UV editing comes in a later ROBLENDER version", "", nil } } end)
 	-- right side: X-ray + shading
-	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(250, HDR_H) }, hdr)
+	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(280, HDR_H) }, hdr)
 	hlist(right, 1, Enum.HorizontalAlignment.Right)
 	self.toggleBtns = {}
 	for i, tg in ipairs({ { "snap", "magnet", "Snap", "Snap during transform (Ctrl does the opposite)", "" },
 		{ "prop", "prop", "Proportional Editing", "Nearby geometry follows the selection (mouse wheel = size while moving)", "O" },
-		{ "mirrorX", nil, "Mirror X", "Edit both sides of the mesh at once (its own X axis)", "" } }) do
+		{ "mirrorX", nil, "Mirror X", "Edit both sides of the mesh at once (its own X axis)", "" },
+		{ "autoMerge", "automerge", "Auto Merge Vertices", "After moving, vertices that end up on top of each other are welded", "" } }) do
 		local b = self:btn(right, { LayoutOrder = -10 + i, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular, Text = tg[2] and "" or "X", Font = FONT_B }, function() api.toggleEdit2(tg[1]) end, "toggle")
 		corner(b, 4)
 		if tg[2] then icon(b, tg[2]) end
@@ -640,7 +650,7 @@ function UI:buildProperties()
 	vlist(tabs, 2)
 	make("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 3) }, tabs)
 	self.propTabs = {}
-	for i, t in ipairs({ { "object", "object", "Object", "Object properties" }, { "data", "meshdata", "Data", "Mesh data" }, { "material", "material", "Material", "Material properties" }, { "export", "export", "Output", "Bake / export" } }) do
+	for i, t in ipairs({ { "object", "object", "Object", "Object properties" }, { "modifiers", "wrench", "Modifiers", "Modifier properties: non-destructive mirror, subdivision, array..." }, { "data", "meshdata", "Data", "Mesh data" }, { "material", "material", "Material", "Material properties" }, { "export", "export", "Output", "Bake / export" } }) do
 		local b = self:btn(tabs, { LayoutOrder = i, Size = UDim2.fromOffset(25, 25), BackgroundColor3 = T.tabInner }, function() self.propTab = t[1] self:buildPropContent() end, "tab")
 		corner(b, 4)
 		icon(b, t[2])
@@ -699,6 +709,116 @@ local MATERIALS = { "SmoothPlastic", "Plastic", "Metal", "DiamondPlate", "Foil",
 	"Granite", "Marble", "Slate", "Pebble", "Sand", "Grass", "Ice", "Glass", "Neon", "Fabric" }
 local SWATCHES = { 0xcccccc, 0xffffff, 0x6e6e6e, 0x1e1e1e, 0xc42b2b, 0xe8822e, 0xf2cd37, 0x5ba84a, 0x2b86c4, 0x6a4bc4, 0xd96ab8, 0x8a5a36 }
 
+-- ===== Properties > Modifiers (Blender's modifier stack panels) =====
+-- a row of small toggle buttons: items = { {text, on, fn, tip}, ... }
+function UI:toggleRow(parent, order, text, items)
+	local row = make("Frame", { LayoutOrder = order, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20) }, parent)
+	label(row, { Size = UDim2.new(0.38, -6, 1, 0), Text = text, TextXAlignment = Enum.TextXAlignment.Right })
+	local box = make("Frame", { Position = UDim2.new(0.38, 0, 0, 0), Size = UDim2.new(0.62, 0, 1, 0), BackgroundTransparency = 1 }, row)
+	hlist(box, 1)
+	for i, it in ipairs(items) do
+		local b = self:btn(box, { LayoutOrder = i, Size = UDim2.new(1 / #items, -1, 1, 0), BackgroundColor3 = it[2] and T.blue or T.regular, Text = it[1] }, function() self:safe(it[3]) end, "regular")
+		corner(b, 4)
+		if it[4] then self:tip(b, it[1], it[4]) end
+	end
+	return row
+end
+
+local MOD_FIELDS = {
+	mirror = function(self, b, i, m, api, num)
+		self:toggleRow(b, 2, "Axis", {
+			{ "X", m.x == true, function() api.modToggle(i, "x") end }, { "Y", m.y == true, function() api.modToggle(i, "y") end }, { "Z", m.z == true, function() api.modToggle(i, "z") end } })
+		self:toggleRow(b, 3, "Merge", { { m.merge ~= false and "On" or "Off", m.merge ~= false, function() api.modToggle(i, "merge") end, "Weld the vertices that sit on the mirror plane" } })
+		num(4, "Distance", "mergeDist", 0, 10)
+	end,
+	subsurf = function(self, b, i, m, api, num)
+		num(2, "Levels Viewport", "levels", 0, 4, true)
+		label(b, { LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Catmull-Clark. Each level = 4x the faces (Roblox limit: 20,000 triangles)." })
+	end,
+	solidify = function(self, b, i, m, api, num)
+		num(2, "Thickness", "thickness", -100, 100)
+		num(3, "Offset", "offset", -1, 1)
+	end,
+	array = function(self, b, i, m, api, num)
+		num(2, "Count", "count", 1, 64, true)
+		local ax = m.axis or "X"
+		self:toggleRow(b, 3, "Axis", {
+			{ "X", ax == "X", function() api.modSet(i, "axis", "X") end }, { "Y", ax == "Y", function() api.modSet(i, "axis", "Y") end }, { "Z", ax == "Z", function() api.modSet(i, "axis", "Z") end } })
+		num(4, "Relative Offset", "relative", -100, 100)
+	end,
+	bevel = function(self, b, i, m, api, num)
+		num(2, "Amount", "amount", 0, 100)
+		num(3, "Segments", "segments", 1, 32, true)
+		num(4, "Angle", "angle", 0, 180)
+	end,
+	smooth = function(self, b, i, m, api, num)
+		num(2, "Factor", "factor", -2, 2)
+		num(3, "Repeat", "repeat", 0, 50, true)
+	end,
+}
+
+function UI:modifierItems()
+	local api = self.api
+	local items, group = {}, nil
+	for _, ty in ipairs(api.modTypes or {}) do
+		if ty.group ~= group then
+			group = ty.group
+			if #items > 0 then items[#items + 1] = "-" end
+			items[#items + 1] = { header = group }
+		end
+		items[#items + 1] = { ty.name, "", function() api.modAdd(ty.id) self:buildPropContent() end, icon = "wrench" }
+	end
+	return items
+end
+
+function UI:buildModifiers(s)
+	local api = self.api
+	if not s.isRB then
+		label(self.propScroll, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Modifiers work on ROBLENDER meshes. Add one with Shift A." })
+		return
+	end
+	self:wideButton(self.propScroll, 1, "Add Modifier   v", function(btn) self:openMenu(self:modifierItems(), btn, "Add Modifier") end)
+	local list = s.mods or {}
+	if #list == 0 then
+		label(self.propScroll, { LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+			Text = "No modifiers. They change how the mesh looks without touching your edits: Mirror one half, Subdivide to smooth it, Array to repeat it. Apply one to make it real geometry." })
+	end
+	for i, m in ipairs(list) do
+		local key = "mod" .. i .. (m.type or "")
+		if self.panelsOpen[key] == nil then self.panelsOpen[key] = true end
+		self:panel(1 + i, key, (m.name or m.type or "?") .. (m.on == false and "   (off)" or ""), function(b)
+			-- control row: show in viewport, show in edit mode, move up / down, apply, remove
+			local ctl = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
+			hlist(ctl, 2)
+			local function small(order, text, w, on, fn, tipT, tipD, ic)
+				local bt = self:btn(ctl, { LayoutOrder = order, Size = UDim2.fromOffset(w, 20), BackgroundColor3 = on and T.blue or T.regular, Text = ic and "" or text }, function() self:safe(fn) end, "regular")
+				corner(bt, 4)
+				if ic then icon(bt, ic) end
+				if tipT then self:tip(bt, tipT, tipD) end
+				return bt
+			end
+			small(1, "", 24, m.on ~= false, function() api.modToggle(i, "on") end, "Realtime", "Show the modifier (in the view, the part and saves)", m.on ~= false and "eye" or "eyeoff")
+			small(2, "", 24, m.edit ~= false, function() api.modToggle(i, "edit") end, "Edit Mode", "Show the modifier while in Edit Mode", "mesh")
+			small(3, "^", 20, false, function() api.modMove(i, -1) end, "Move Up", "Run this modifier earlier")
+			small(4, "v", 20, false, function() api.modMove(i, 1) end, "Move Down", "Run this modifier later")
+			small(5, "Apply", 46, false, function() api.modApply(i) end, "Apply", "Make the modifier's result real geometry (Ctrl A)")
+			small(6, "X", 22, false, function() api.modRemove(i) end, "Delete", "Remove the modifier")
+			local function num(order, text, field, lo, hi, int)
+				self:numField(b, order, text, "p_m" .. i .. field, function(st)
+					local mm = st.mods and st.mods[i]
+					return mm and tonumber(mm[field])
+				end, function(v)
+					v = math.clamp(v, lo, hi)
+					if int then v = math.floor(v + 0.5) end
+					api.modSet(i, field, v)
+				end)
+			end
+			local f = MOD_FIELDS[m.type]
+			if f then f(self, b, i, m, api, num) end
+		end)
+	end
+end
+
 function UI:buildPropContent()
 	local api = self.api
 	for _, c in ipairs(self.propScroll:GetChildren()) do if c:IsA("GuiObject") then c.Parent = nil end end
@@ -708,7 +828,7 @@ function UI:buildPropContent()
 	-- name row
 	local top = make("Frame", { LayoutOrder = 0, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, self.propScroll)
 	local icf = make("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(20, 22) }, top)
-	icon(icf, tab == "object" and "object" or tab == "data" and "meshdata" or tab == "material" and "material" or "export")
+	icon(icf, tab == "object" and "object" or tab == "modifiers" and "wrench" or tab == "data" and "meshdata" or tab == "material" and "material" or "export")
 	if tab == "object" and s.objName then
 		local nb = make("TextBox", { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(1, -24, 1, 0), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12, TextColor3 = T.text, Text = s.objName, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, top)
 		corner(nb, 4)
@@ -734,6 +854,8 @@ function UI:buildPropContent()
 		self:panel(2, "vis", "Visibility", function(b)
 			self:wideButton(b, 1, s.hidden and "Show in Viewports" or "Hide in Viewports", function() api.toggleHidden(nil) self:buildPropContent() end)
 		end)
+	elseif tab == "modifiers" then
+		self:buildModifiers(s)
 	elseif tab == "data" then
 		self:panel(1, "mesh", "Mesh", function(b)
 			local st = s.meshInfo or {}
@@ -1193,6 +1315,7 @@ function UI:helpItems()
 		{ "Edit / Object Mode", "Tab" }, { "Vertex / Edge / Face", "1  2  3" }, { "Select / Extend / Box", "Click  Shift  Drag" },
 		{ "Select Loop", "Alt Click" }, { "All / None / Invert", "A  Alt A  Ctrl I" }, { "Move / Rotate / Scale", "G  R  S" },
 		{ "Axis / Snap / Value", "X Y Z  Ctrl  0-9" }, { "Extrude / Inset", "E  I" }, { "Loop Cut", "Ctrl R" },
+		{ "Extrude to Mouse", "Ctrl RMB" }, { "Repeat Last", "Shift R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },
@@ -1346,7 +1469,7 @@ function UI:refresh(force)
 		self.base[b] = (t == self.propTab) and T.tabSel or T.tabInner
 		if not self.hover[b] then b.BackgroundColor3 = self.base[b] end
 	end
-	local propKey = tostring(s.objName) .. "|" .. tostring(s.saved) .. tostring(s.saving) .. tostring(s.assetId) .. tostring(s.autoSave)
+	local propKey = tostring(s.objName) .. "|" .. tostring(s.modsKey) .. "|" .. tostring(s.editing) .. "|" .. tostring(s.saved) .. tostring(s.saving) .. tostring(s.assetId) .. tostring(s.autoSave)
 	if propKey ~= self.lastPropKey then self.lastPropKey = propKey self:buildPropContent() end
 	for _, f in pairs(self.fields) do
 		if not f.box:IsFocused() then

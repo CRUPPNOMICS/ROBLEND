@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.6.0"
+local VERSION = "0.7.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -23,6 +23,7 @@ local Display = require(script.Display)
 local UI = require(script.UI)
 local View = require(script.View)
 local MT = require(script.MeshTools)
+local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
 local UIS = game:GetService("UserInputService")
@@ -60,7 +61,7 @@ local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false } -- header toggles: proportional, X mirror, snapping
+local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false } -- header toggles: proportional, X mirror, snapping
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
@@ -137,6 +138,43 @@ local function dataOf(p) return p:FindFirstChild("RB_Data") end
 
 local function encode(b) return HttpService:JSONEncode(b:toData()) end
 
+-- ===== modifier stack (StringValue RB_Mods = JSON list, see Modifiers.lua) =====
+local function modsStr(p) local s = p and p:FindFirstChild("RB_Mods") return s and s:IsA("StringValue") and s.Value or "" end
+local function modsOf(p)
+	local s = modsStr(p)
+	if s == "" then return {} end
+	local ok, l = pcall(function() return HttpService:JSONDecode(s) end)
+	return (ok and type(l) == "table") and l or {}
+end
+local function setMods(p, list)
+	local s = p:FindFirstChild("RB_Mods")
+	if #list == 0 then if s then s.Parent = nil end return end
+	if not s then
+		s = Instance.new("StringValue")
+		s.Name = "RB_Mods"
+		s.Parent = p
+	end
+	s.Value = HttpService:JSONEncode(list)
+end
+-- the mesh as it looks with its modifiers (inEdit: only the ones shown in Edit Mode)
+local function evaluated(p, m, inEdit)
+	local list = modsOf(p)
+	if #list == 0 then return m end
+	if inEdit then
+		local l2 = {}
+		for _, md in ipairs(list) do if md.edit ~= false then l2[#l2 + 1] = md end end
+		list = l2
+	end
+	local ok, r = pcall(Mods.evaluate, m, list)
+	return ok and r or m
+end
+-- what a save covers: the mesh + its modifiers
+local function saveKey(p)
+	local d, s = p.RB_Data.Value, modsStr(p)
+	if s == "" then return d end
+	return d .. "|" .. s
+end
+
 local function loadFrom(p)
 	local d = HttpService:JSONDecode(dataOf(p).Value)
 	local m = BMesh.fromData(d)
@@ -165,7 +203,7 @@ end
 local function ownView() return uiOn and view ~= nil and not useStudio end
 local applyBuilt
 local function applyMesh(p, b, tint)
-	local mp, c, err = Display.build(b, tint and SEL_COL or nil, tint)
+	local mp, c, err = Display.build(evaluated(p, b, tint), tint and SEL_COL or nil, tint)
 	if not mp then return false, err end
 	return applyBuilt(p, mp, c)
 end
@@ -206,7 +244,7 @@ local function dataHash(str)
 end
 local function isSaved(p)
 	local d = p and p:FindFirstChild("RB_Data")
-	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(d.Value)
+	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(saveKey(p))
 end
 local function saveMesh(p, quiet, silent)
 	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
@@ -214,8 +252,8 @@ local function saveMesh(p, quiet, silent)
 	task.spawn(function()
 		local ok, err = pcall(function()
 			if not silent then setStatus("Saving " .. p.Name .. " to Roblox...") end
-			local data = p.RB_Data.Value
-			local m = loadFrom(p)
+			local data = saveKey(p)
+			local m = evaluated(p, (loadFrom(p)))
 			local params = { Name = p.Name, Description = "Made with ROBLENDER (free, open source mesh editor)" }
 			pcall(function()
 				if game.CreatorType == Enum.CreatorType.Group and game.CreatorId > 0 then
@@ -234,7 +272,7 @@ local function saveMesh(p, quiet, silent)
 				setStatus(("Uploaded %s as rbxassetid://%s but Roblox hasn't made it ready yet (%s). Save again in a minute."):format(p.Name, tostring(id), tostring(lerr)))
 				return
 			end
-			if p.Parent and not (editing and p == obj and not ownView()) and p.RB_Data.Value == data then
+			if p.Parent and not (editing and p == obj and not ownView()) and saveKey(p) == data then
 				local rec
 				pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER save") end)
 				applyBuilt(p, real, c)
@@ -266,7 +304,7 @@ local function restoreSaved(p)
 	task.spawn(function()
 		local real = Display.fromAsset(id)
 		if real and p.Parent and not (editing and p == obj) and isSaved(p) then
-			local c = Display.bounds(loadFrom(p))
+			local c = Display.bounds(evaluated(p, (loadFrom(p))))
 			applyBuilt(p, real, c)
 		elseif real then
 			real:Destroy()
@@ -487,7 +525,7 @@ local function lookOf(p)
 end
 local function showEdit()
 	if not (ownView() and obj and bm) then return false end
-	local mp, c, err = Display.build(bm, SEL_COL, true)
+	local mp, c, err = Display.build(evaluated(obj, bm, true), SEL_COL, true)
 	if not mp then
 		view:removeObject(obj)
 		return true, err
@@ -980,8 +1018,13 @@ local function finishModal(cancel)
 			bm:normalsUpdate()
 			if M.what then commit(M.what) setStatus(M.what .. " (not moved).") else dirtyMesh, dirtyCage = true, true setStatus("Cancelled.") end
 		else
+			local merged = 0
+			if EDIT.autoMerge then
+				local nb, n = Mods.mergeDoubles(bm, 0.001)
+				if n > 0 then bm, merged = nb, n worldTris = nil hover = nil dirtyMesh = true end
+			end
 			commit(M.what or ({ G = "Move", S = "Scale", R = "Rotate" })[M.kind])
-			setStatus((M.what or "Done") .. ".")
+			setStatus((M.what or "Done") .. (merged > 0 and (" - Auto Merge welded " .. merged .. " vert" .. (merged == 1 and "" or "s")) or "") .. ".")
 		end
 	elseif M.kind == "inset" then
 		if cancel then
@@ -1179,7 +1222,7 @@ end
 function Tools.bake()
 	local p = (editing and obj) or Selection:Get()[1]
 	if not isRB(p) then setStatus("Pick a " .. NAME .. " part to bake.") return end
-	local m = bm or loadFrom(p)
+	local m = evaluated(p, (p == obj and bm) or (loadFrom(p)))
 	local o = (p == obj) and origin or originOf(p)
 	setStatus("Baking to parts...")
 	local rec
@@ -1193,7 +1236,7 @@ end
 function Tools.exportOBJ()
 	local p = (editing and obj) or Selection:Get()[1]
 	if not isRB(p) then setStatus("Pick a " .. NAME .. " part to export.") return end
-	local m = bm or loadFrom(p)
+	local m = evaluated(p, (p == obj and bm) or (loadFrom(p)))
 	local ms = Instance.new("ModuleScript")
 	ms.Name = p.Name .. "_obj"
 	ms.Source = "--[==[ Copy everything between the brackets into a text file and save it as .obj\n" .. Display.toOBJ(m, p.Name) .. "\n]==]\nreturn nil"
@@ -1296,12 +1339,12 @@ local function syncScene()
 			scene[p] = nil
 			changed = true
 		elseif not (editing and p == obj) then
-			local data = p.RB_Data.Value
+			local data, ms = p.RB_Data.Value, modsStr(p)
 			local look = lookOf(p)
 			if r.hidden then
 				if r.shown then view:removeObject(p) r.shown = false changed = true end
-			elseif data ~= r.data or p.Size ~= r.size or not r.shown then
-				local ok, m = pcall(loadFrom, p)
+			elseif data ~= r.data or ms ~= r.mods or p.Size ~= r.size or not r.shown then
+				local ok, m = pcall(function() return evaluated(p, (loadFrom(p))) end)
 				if ok and m then
 					local mp, c = Display.build(m)
 					if mp then
@@ -1312,7 +1355,7 @@ local function syncScene()
 						r.bm, r.shown = m, false
 					end
 				end
-				r.data, r.size, r.cf, r.col, r.mat, r.tr = data, p.Size, p.CFrame, p.Color, p.Material, look.Transparency
+				r.data, r.mods, r.size, r.cf, r.col, r.mat, r.tr = data, ms, p.Size, p.CFrame, p.Color, p.Material, look.Transparency
 				changed = true
 			else
 				if p.CFrame ~= r.cf then
@@ -2495,6 +2538,68 @@ local function modelingTools()
 	O.ExtrudeIndividual = function() T.extrudeIndividual() end
 	O.ExtrudeEdges = function() setMode("edge") Tools.extrude() end
 	O.ExtrudeVerts = function() setMode("vert") Tools.extrude() end
+	-- Ctrl + right click (Blender's Extrude to Mouse): extrude the selection to the mouse, or add a vertex there
+	O.ExtrudeToMouse = function()
+		local ray = getRay()
+		local look = camera().CFrame.LookVector
+		local vs = MT.selVerts(bm)
+		if next(vs) then
+			local cw = W(selCenterLocal())
+			local hit = planeHit(ray, cw, look)
+			if not hit then return end
+			local delta = origin:VectorToObjectSpace(hit - cw)
+			local fs, nfs = selSet("face")
+			local es, nes = selSet("edge")
+			if mode == "face" and nfs > 0 then
+				local _, nf = Ops.extrudeFaceRegion(bm, fs)
+				clearSel()
+				for f in pairs(nf) do f.sel = true end
+				flush()
+			elseif mode ~= "vert" and nes > 0 then
+				local nv = Ops.extrudeEdges(bm, es)
+				clearSel()
+				for v in pairs(nv) do v.sel = true end
+				for e in pairs(bm.edges) do e.sel = e.v1.sel and e.v2.sel end
+			else
+				local nv = Ops.extrudeVerts(bm, vs)
+				clearSel()
+				for v in pairs(nv) do v.sel = true end
+				for e in pairs(bm.edges) do e.sel = e.v1.sel and e.v2.sel end
+			end
+			for v in pairs(MT.selVerts(bm)) do v.co += delta end
+			bm:normalsUpdate()
+			changed("Extrude to Mouse")
+			setStatus("Extruded to the mouse (Ctrl + right click).")
+		else
+			local hit = planeHit(ray, CURSOR, look)
+			if not hit then return end
+			local v = bm:vertCreate(origin:PointToObjectSpace(hit))
+			v.sel = true
+			changed("Add Vertex")
+			setStatus("Added a vertex. Ctrl + right click again to extrude to the mouse.")
+		end
+	end
+	-- remember the last operator for Shift R (Repeat Last)
+	MOD.opDepth = 0
+	for name, fn in pairs(O) do
+		local wrapped
+		wrapped = function(...)
+			if MOD.opDepth == 0 then MOD.lastOp = { name = name, fn = wrapped } end
+			MOD.opDepth += 1
+			local r = table.pack(pcall(fn, ...))
+			MOD.opDepth -= 1
+			if not r[1] then error(r[2], 0) end
+			return table.unpack(r, 2, r.n)
+		end
+		O[name] = wrapped
+	end
+	function MOD.repeatLast()
+		local op = MOD.lastOp
+		if not op then setStatus("Nothing to repeat yet.") return end
+		op.fn()
+		setStatus("Repeat Last: " .. op.name:gsub("(%l)(%u)", "%1 %2") .. ".")
+	end
+	function MOD.remember(name, fn) MOD.lastOp = { name = name, fn = fn } end
 	MOD.ops = O
 	MOD.T = T
 
@@ -2503,6 +2608,7 @@ local function modelingTools()
 		local K = Enum.KeyCode
 		local function menu(name) ui:openNamedMenu(name, mousePos()) return true end
 		if k == K.R and ctrl then T.loopCutModal() return true end
+		if k == K.R and shift and not alt then MOD.repeatLast() return true end
 		if k == K.B and ctrl and shift then O.BevelVerts() return true end
 		if k == K.B and ctrl then O.Bevel() return true end
 		if k == K.K and not ctrl then O.Knife() return true end
@@ -2670,7 +2776,8 @@ function api.state()
 	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame, viewName = view and view.viewName or nil,
-		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX }
+		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
+		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
 	if p then
 		st.objName, st.isRB = p.Name, isRB(p)
@@ -2680,6 +2787,8 @@ function api.state()
 		st.color, st.material = p.Color, p.Material and p.Material.Name
 		st.hidden = scene[p] ~= nil and scene[p].hidden == true
 		if isRB(p) then
+			st.modsKey = modsStr(p)
+			st.mods = modsOf(p)
 			st.saved = isSaved(p)
 			st.assetId = p:GetAttribute("RB_AssetId")
 			st.saving = saving[p] == true
@@ -2718,9 +2827,107 @@ api.toggleEdit = toggleEdit
 api.setTool = function(name) MOD.setTool(name) end
 api.toggleEdit2 = function(key)
 	EDIT[key] = not EDIT[key]
-	setStatus(({ snap = "Snapping", prop = "Proportional editing", mirrorX = "X mirror" })[key] .. (EDIT[key] and " on." or " off."))
+	setStatus(({ snap = "Snapping", prop = "Proportional editing", mirrorX = "X mirror", autoMerge = "Auto Merge Vertices" })[key] .. (EDIT[key] and " on." or " off."))
 end
 api.toggleXray = toggleXray
+
+-- ----- modifiers (Properties > Modifiers) -----
+local function modTarget() local p = selectedPart() if isRB(p) then return p end return nil end
+-- the real part / our view catch up with a modifier change
+local function modsChanged(p)
+	if editing and p == obj then
+		dirtyMesh = true
+		if not ownView() then
+			local _, _, np = applyMesh(obj, bm, true)
+			if np then obj = np end
+			origin = originOf(obj)
+		end
+	else
+		local ok, m = pcall(loadFrom, p)
+		if ok and m then applyMesh(p, m, false) end
+		if scene[p] then scene[p].data = nil end
+		-- save it a few seconds after the last change (not on every click: uploads are rate limited)
+		if autoSave then MOD.modSave = MOD.modSave or {} MOD.modSave[p] = os.clock() end
+	end
+	dirtyCage = true
+end
+api.mods = function()
+	local p = modTarget()
+	if not p then return nil end
+	return modsOf(p), p
+end
+api.modTypes = Mods.TYPES
+api.repeatLast = function() if editing and not modal then MOD.repeatLast() end end
+local function modEdit(what, fn)
+	local p = modTarget()
+	if not p then setStatus("Pick a " .. NAME .. " part first.") return end
+	local list = modsOf(p)
+	local msg
+	record(what, function()
+		msg = fn(list, p)
+		setMods(p, list)
+		modsChanged(p)
+	end)
+	if msg then setStatus(msg) end
+end
+api.modAdd = function(id)
+	local t = Mods.BY_ID[id]
+	if not t then return end
+	modEdit("add " .. t.name, function(list)
+		local m = Mods.new(id)
+		m.name = t.name
+		list[#list + 1] = m
+		return "Added " .. t.name .. " modifier."
+	end)
+end
+api.modSet = function(i, key, value)
+	modEdit("modifier", function(list) if list[i] then list[i][key] = value end end)
+end
+api.modToggle = function(i, key)
+	modEdit("modifier", function(list)
+		if list[i] then
+			local cur = list[i][key]
+			if cur == nil then cur = key == "on" or key == "edit" end
+			list[i][key] = not cur
+		end
+	end)
+end
+api.modRemove = function(i)
+	modEdit("remove modifier", function(list) local m = table.remove(list, i) return m and ("Removed " .. (m.name or m.type) .. ".") end)
+end
+api.modMove = function(i, d)
+	modEdit("move modifier", function(list)
+		local j = i + d
+		if list[i] and list[j] then list[i], list[j] = list[j], list[i] end
+	end)
+end
+api.modApply = function(i)
+	local p = modTarget()
+	if not p then return end
+	local list = modsOf(p)
+	local m = list[i]
+	if not m then return end
+	if editing and p ~= obj then return end
+	local base = (editing and p == obj) and bm or loadFrom(p)
+	local one = table.clone(m)
+	one.on = true
+	local ok, res = pcall(Mods.evaluate, base, { one })
+	if not ok or not res then setStatus("Couldn't apply: " .. tostring(res)) return end
+	if res == base then res = MT.fromSpec(MT.toSpec(base)) end
+	record("apply " .. (m.name or m.type), function()
+		table.remove(list, i)
+		setMods(p, list)
+		local val = encode(res)
+		if editing and p == obj then
+			bm = res
+			lastWritten = val
+			worldTris = nil
+		end
+		dataOf(p).Value = val
+		modsChanged(p)
+	end)
+	setStatus("Applied " .. (m.name or m.type) .. (i > 1 and " (it wasn't first in the stack, so the result may differ)." or "."))
+end
 api.togglePanel = function() widget.Enabled = not widget.Enabled end
 api.setMode = function(m) if editing and not modal then setMode(m) end end
 api.add = function(kind) addShape(kind) sceneAdd(Selection:Get()[1]) end
@@ -3032,6 +3239,11 @@ end)
 mouse.Button2Down:Connect(function()
 	if modal then pcall(finishModal, true) return end
 	local mp = mousePos()
+	if editing and ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
+		local ok, err = pcall(MOD.ops.ExtrudeToMouse)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
 	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true } end
 end)
 pcall(function()
@@ -3227,8 +3439,8 @@ UIS.InputBegan:Connect(function(input, gp)
 		elseif k == Enum.KeyCode.S and not ctrl then startTransform("S")
 		elseif k == Enum.KeyCode.R and ctrl then Tools.loopCut()
 		elseif k == Enum.KeyCode.R then startTransform("R")
-		elseif k == Enum.KeyCode.E then Tools.extrude()
-		elseif k == Enum.KeyCode.I then Tools.inset()
+		elseif k == Enum.KeyCode.E then Tools.extrude() MOD.remember("Extrude", Tools.extrude)
+		elseif k == Enum.KeyCode.I then Tools.inset() MOD.remember("Inset", Tools.inset)
 		elseif k == Enum.KeyCode.X or k == Enum.KeyCode.Delete then Tools.delete()
 		elseif k == Enum.KeyCode.M then Tools.merge()
 		elseif k == Enum.KeyCode.F then Tools.fill()
@@ -3282,8 +3494,18 @@ RunService.Heartbeat:Connect(function()
 	else
 		MOD.lastAuto = nil
 	end
+	if MOD.modSave then
+		for p, t0 in pairs(MOD.modSave) do
+			if now - t0 > 4 then
+				MOD.modSave[p] = nil
+				if p.Parent and not (editing and p == obj) and isRB(p) and not isSaved(p) then saveMesh(p, true, true) end
+			end
+		end
+	end
 	if editing and obj then
 		if not obj.Parent then exitEdit() return end
+		local ms = modsStr(obj)
+		if ms ~= MOD.modsSeen then MOD.modsSeen = ms dirtyMesh = true end
 		if dirtyMesh and now - lastBuild > 0.05 then
 			dirtyMesh = false
 			lastBuild = now

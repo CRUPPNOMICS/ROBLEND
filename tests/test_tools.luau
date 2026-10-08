@@ -322,5 +322,80 @@ check2("loop cut with 3 cuts + ring preview + shortest path", function()
 	local c = 0 for v in pairs(g.verts) do if v.sel then c += 1 end end
 	eq(c, 9, "corner to corner is 9 verts")
 end)
+
+-- ===== modifiers (Modifiers.lua) =====
+check2("mirror modifier (half cube -> closed cube)", function()
+	local bm = BMesh.new()
+	-- an open half cube on +X: delete the -X face of a cube shifted so its -X side sits on the plane
+	Ops.cube(bm, 2)
+	for v in pairs(bm.verts) do v.co = v.co + Vector3.new(1, 0, 0) end
+	local kill
+	for f in pairs(bm.faces) do BMesh.faceNormalUpdate(f) if f.no.X < -0.9 then kill = f end end
+	bm:faceKill(kill)
+	local out = Mods.evaluate(bm, { Mods.new("mirror") })
+	out:validate()
+	eq(out.nf, 10, "faces") eq(out.nv, 12, "verts")
+	closed(out) outward(out)
+	eq(bm.nf, 5, "base untouched")
+end)
+check2("subsurf cube: level 1 = 24 quads, level 2 = 96", function()
+	local m = Mods.new("subsurf")
+	local out = Mods.evaluate(cube(), { m })
+	out:validate()
+	eq(out.nf, 24, "faces") eq(out.nv, 26, "verts")
+	closed(out) outward(out)
+	-- corners pull in (Catmull-Clark shrinks a cube)
+	for v in pairs(out.verts) do assert(v.co.Magnitude < 1.74, "inside the cage") end
+	m.levels = 2
+	out = Mods.evaluate(cube(), { m })
+	eq(out.nf, 96, "level 2") closed(out)
+end)
+check2("solidify a plane = closed 6-face slab", function()
+	local bm = BMesh.new() Ops.plane(bm, 2)
+	local out = Mods.evaluate(bm, { Mods.new("solidify") })
+	out:validate()
+	eq(out.nf, 6, "faces") closed(out)
+	local lo, hi = math.huge, -math.huge
+	for v in pairs(out.verts) do lo = math.min(lo, v.co.Y) hi = math.max(hi, v.co.Y) end
+	assert(math.abs(hi - lo - 0.2) < 1e-3, "0.2 thick, got " .. (hi - lo))
+end)
+check2("array of 3 cubes along X + toggled off", function()
+	local m = Mods.new("array")
+	local out = Mods.evaluate(cube(), { m })
+	eq(out.nf, 18, "faces") eq(out.nv, 24, "verts")
+	local hx = -math.huge
+	for v in pairs(out.verts) do hx = math.max(hx, v.co.X) end
+	assert(math.abs(hx - 5) < 1e-4, "last copy ends at x = 5")
+	m.on = false
+	local base = cube()
+	assert(Mods.evaluate(base, { m }) == base, "disabled stack returns the base")
+	assert(not Mods.active({ m }), "nothing active")
+end)
+check2("bevel modifier rounds every cube edge", function()
+	local m = Mods.new("bevel")
+	m.segments = 1
+	local out = Mods.evaluate(cube(), { m })
+	out:validate()
+	eq(out.nf, 26, "faces") closed(out) outward(out)
+	m.segments = 3
+	out = Mods.evaluate(cube(), { m })
+	out:validate() closed(out)
+	assert(out.nf > 26, "more segments, more faces")
+end)
+check2("stack: mirror -> subsurf -> smooth, base unchanged", function()
+	local bm = cube()
+	local out = Mods.evaluate(bm, { Mods.new("array"), Mods.new("subsurf"), Mods.new("smooth") })
+	out:validate() closed(out)
+	eq(out.nf, 72, "3 cubes x 24") eq(bm.nf, 6, "base")
+end)
+check2("merge doubles welds two touching cubes' shared corners", function()
+	local bm = cube()
+	local out = Mods.evaluate(bm, { Mods.new("array") })
+	local nb, n = Mods.mergeDoubles(out, 0.001)
+	eq(n, 8, "merged") nb:validate()
+	eq(nb.nv, 16, "verts")
+	local same, k = Mods.mergeDoubles(cube(), 0.001)
+	eq(k, 0, "nothing to merge")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end
