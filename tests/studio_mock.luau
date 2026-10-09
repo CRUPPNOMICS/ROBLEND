@@ -380,6 +380,9 @@ mouse.X, mouse.Y = 600, 400
 MOCK.mouse = mouse
 function Inst.CreateToolbar() return newInst("Toolbar") end
 MOCK.actions = {}
+-- Studio's ribbon tool (its 1 2 3 4 keys change it)
+function Inst.GetSelectedRibbonTool() return MOCK.ribbonTool or Enum.RibbonTool.None end
+function Inst.SelectRibbonTool(_, t) MOCK.ribbonTool = t end
 function Inst.CreatePluginAction(_, id, text) local a = newInst("PluginAction") a.Name = id a.Text = text MOCK.actions[id] = a return a end
 function Inst.CreateButton() local b = newInst("ToolbarButton") MOCK.toolbarButton = b return b end
 function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") end

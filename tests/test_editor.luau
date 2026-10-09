@@ -1754,6 +1754,30 @@ check("ROBLEND holds the keyboard so Studio's 1 2 3 4 / Ctrl D etc. don't fire; 
 	local p = editCube()
 	press("Three") beat()
 	eq(MOCK.api.state().mode, "face", "3 still works")
+	-- Studio's own 1 2 3 4 keys: Studio switches its ribbon tool (and deactivates the plugin) instead of
+	-- sending the key; ROBLEND turns that back into the key and stays in Edit Mode
+	press("One") beat()
+	MOCK.ribbonTool = Enum.RibbonTool.Scale
+	plugin.Deactivation:Fire()
+	beat()
+	assert(inEdit(), "still in Edit Mode")
+	eq(MOCK.api.state().mode, "face", "Studio's 3 = face select")
+	eq(MOCK.ribbonTool, Enum.RibbonTool.None, "Studio's tool put back to none")
+	MOCK.ribbonTool = Enum.RibbonTool.Move
+	beat()
+	eq(MOCK.api.state().mode, "edge", "Studio's 2 = edge select")
+	-- a digit typed into a move: G Z then Studio's 2
+	press("A") beat()
+	local before = worldVerts(p)
+	press("G") press("Z")
+	MOCK.ribbonTool = Enum.RibbonTool.Move
+	beat()
+	press("Return") beat()
+	local after = worldVerts(p)
+	local _, hi0 = bounds(before)
+	local _, hi1 = bounds(after)
+	assert(math.abs(hi1.Z - hi0.Z - 2) < 1e-3, "moved 2 along Z: " .. tostring(hi1.Z - hi0.Z))
+	press("Three") beat()
 	-- the Customize Shortcuts commands (for keys Studio keeps for itself)
 	MOCK.actions.ROBLEND_EdgeSelect.Triggered:Fire() beat()
 	eq(MOCK.api.state().mode, "edge", "ROBLEND: Edge Select command")

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.3"
+local VERSION = "0.21.4"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -767,7 +767,8 @@ local function exitEdit()
 	if buttons["Edit (Tab)"] then buttons["Edit (Tab)"].BackgroundColor3 = Color3.fromRGB(58, 61, 72) end
 end
 
-plugin.Deactivation:Connect(function() if editing then exitEdit() end end)
+-- (in our own 3D view Studio's 1 2 3 4 tool keys also deactivate the plugin: those are caught below, so stay in Edit Mode)
+plugin.Deactivation:Connect(function() if editing and not (uiOn and ownView()) then exitEdit() end end)
 
 -- ===== adding shapes =====
 local function spawnPoint()
@@ -4384,8 +4385,35 @@ end)
 -- ===== keep everything up to date (the edited mesh is rebuilt at most ~20 times a second) =====
 local lastCam = nil
 local lastUI, lastSync = 0, 0
+-- Studio keeps the number-row 1 2 3 4 for its Select / Move / Scale / Rotate tools, so ROBLEND never sees those
+-- key presses. It does see the tool change, though: turn that back into the key (1 2 3 = point / edge / face
+-- select, or a digit typed into G / S / R) and put Studio's tool back to none, so nobody has to change settings
+local RIBBON_KEYS = { Select = "One", Move = "Two", Scale = "Three", Rotate = "Four" }
+local function ribbonKey(name)
+	local k = Enum.KeyCode[name]
+	if modal then
+		if not MOD.modalKey(k) then modalKey(k) end
+		return
+	end
+	if UVE.open and UVE.hover then return end
+	if editing and not paintMode then
+		if name == "One" then setMode("vert") elseif name == "Two" then setMode("edge") elseif name == "Three" then setMode("face") end
+	end
+end
+local function catchRibbonTool()
+	local okT, tool = pcall(function() return plugin:GetSelectedRibbonTool() end)
+	if not okT or tool == nil or tool == Enum.RibbonTool.None then return end
+	pcall(function() plugin:SelectRibbonTool(Enum.RibbonTool.None, UDim2.new()) end)
+	local key = RIBBON_KEYS[tool.Name]
+	if key then
+		if KC.showKeys then print(("%s key: %s  (from Studio's %s tool key)"):format(NAME, key, tool.Name)) end
+		local ok, err = pcall(ribbonKey, key)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+	end
+end
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
+	if uiOn and ownView() then catchRibbonTool() end
 	if uiOn and now - lastUI > 0.1 then
 		lastUI = now
 		local ok, err = pcall(function() ui:refresh() end)

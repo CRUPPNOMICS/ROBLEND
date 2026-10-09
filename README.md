@@ -24,7 +24,7 @@ Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow M
 
 **Studio's shortcuts:** while your mouse is in the ROBLEND window, Studio's own shortcuts (the 1 2 3 4 build tools, Ctrl D, Delete...) are blocked so ROBLEND's keys work like Blender's. Ctrl Z / Ctrl Y still undo and redo. Edit > Block Studio Shortcuts turns this off.
 
-Studio keeps its own **1 2 3 4** (build tools) before plugins see them. To use the number row for point / edge / face select, open *File > Advanced > Customize Shortcuts*, search **ROBLEND**, and give **ROBLEND: Vertex Select** the 1 key, **Edge Select** 2 and **Face Select** 3 (Studio asks to take them off its own tools). Help > Show Key Presses prints every key ROBLEND receives in the Output window.
+Studio keeps its own **1 2 3 4** (its build tools) before plugins see them, so ROBLEND watches for Studio's tool changing instead and turns it back into the key: 1 2 3 still switch point / edge / face select, and digits still work in G / S / R. Nothing to set up. (The commands ROBLEND: Vertex / Edge / Face Select are also in *File > Advanced > Customize Shortcuts* if you'd rather bind other keys.) Help > Show Key Presses prints every key ROBLEND receives in the Output window.
 
 **New to it?** The first time you open ROBLEND a tutorial starts: short cards that wait for you to do each step (add a cube, Tab into Edit Mode, extrude, inset, loop cut, a modifier, saving). Help > Tutorial runs it again.
 
