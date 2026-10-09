@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.5"
+local VERSION = "0.22.6"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1192,7 +1192,9 @@ end
 local function finishObjModal(M, cancel)
 	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
 	if M.rec then
-		CHS:FinishRecording(M.rec, cancel and Enum.FinishRecordingOperation.Cancel or Enum.FinishRecordingOperation.Commit)
+		-- (cancelling: the parts are already put back above. Studio's own "Cancel" puts them back too, but later -
+		-- it could undo a move started straight after Esc - so the recording just closes, with nothing changed)
+		CHS:FinishRecording(M.rec, Enum.FinishRecordingOperation.Commit)
 	elseif not cancel then
 		CHS:SetWaypoint("ROBLEND " .. M.kind)
 	end
@@ -4893,13 +4895,20 @@ function AutoTest.run(C, api, only)
 	T("objgrs", function()
 		local p = addObj("Cube")
 		local p0 = p.CFrame.Position
-		key("G") glide(mid(), mid() + V2(80, 0))
+		move(mid()) key("G") glide(mid(), mid() + V2(80, 0))
 		check((p.CFrame.Position - p0).Magnitude > 0.05, "G didn't move the cube")
 		key("Escape")
 		check((p.CFrame.Position - p0).Magnitude < 1e-3, "Esc didn't put it back")
-		key("G") key("X") glide(mid(), mid() + V2(80, 60)) click(nil)
+		move(mid()) key("G")
+		local why = "after G: " .. tostring(C.get().modal and C.get().modal.kind)
+		key("X")
+		why ..= ", axis " .. tostring(C.get().modal and C.get().modal.axis)
+		glide(mid(), mid() + V2(80, 60))
+		why ..= ", moved before the click " .. tostring(p.CFrame.Position - p0)
+		click(nil)
+		beat(3)
 		local d = p.CFrame.Position - p0
-		check(math.abs(d.X) > 0.05 and near(d.Y, 0) and near(d.Z, 0), "G X should move along X only, moved " .. tostring(d) .. " (view looks along " .. tostring(api.camera().CFrame.LookVector) .. ")")
+		check(math.abs(d.X) > 0.05 and near(d.Y, 0) and near(d.Z, 0), "G X should move along X only, moved " .. tostring(d) .. " (" .. why .. ")")
 		local r0 = p.CFrame.Rotation
 		key("R") glide(mid(), mid() + V2(150, 0)) click(nil)
 		check(p.CFrame.Rotation ~= r0, "R didn't rotate")

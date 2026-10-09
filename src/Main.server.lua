@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.5"
+local VERSION = "0.22.6"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1192,7 +1192,9 @@ end
 local function finishObjModal(M, cancel)
 	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
 	if M.rec then
-		CHS:FinishRecording(M.rec, cancel and Enum.FinishRecordingOperation.Cancel or Enum.FinishRecordingOperation.Commit)
+		-- (cancelling: the parts are already put back above. Studio's own "Cancel" puts them back too, but later -
+		-- it could undo a move started straight after Esc - so the recording just closes, with nothing changed)
+		CHS:FinishRecording(M.rec, Enum.FinishRecordingOperation.Commit)
 	elseif not cancel then
 		CHS:SetWaypoint("ROBLEND " .. M.kind)
 	end
