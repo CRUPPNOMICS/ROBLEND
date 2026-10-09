@@ -284,6 +284,8 @@ function EM:AddTriangle(a, b, c)
 	return #self.t
 end
 function EM:AddColor() self.c += 1 return self.c end
+function EM:AddUV(p) assert(p.X == p.X and p.Y == p.Y, "NaN uv") self.uv = self.uv or {} self.uv[#self.uv + 1] = p return #self.uv end
+function EM:SetFaceUVs(f, ids) assert(self.t[f] and #ids == 3, "face uvs") for _, i in ipairs(ids) do assert(self.uv[i], "bad uv id") end self.fuv = (self.fuv or 0) + 1 end
 function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.destroyed = true end
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
 MOCK.meshesMade = 0

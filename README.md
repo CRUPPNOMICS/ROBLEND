@@ -151,7 +151,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 
 | Modifier | What it does | Settings |
 |---|---|---|
-| Array | Repeats the mesh in a row | Count, axis, relative offset |
+| Array | Repeats the mesh in a row | Count, axis, relative offset, constant offset, merge |
 | Bevel | Rounds every edge sharper than the angle | Amount, segments, angle |
 | Decimate (Planar) | Joins faces that are flatter than the angle into bigger ones | Angle limit |
 | Mirror | Copies the mesh across its own X / Y / Z, welding the middle | Axis, merge, distance |
@@ -191,6 +191,14 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - Shift E toggles an edge crease: Subdivision Surface keeps creased edges sharp. Creases show magenta, seams red, sharp edges cyan.
 - Shift Ctrl M: Select Mirror (X). Shift L: deselect linked. Alt F: fill with triangles. Shift Alt F: beautify. Alt P: poke. Shift V: vertex slide. Ctrl Delete: dissolve.
 - Alt M: Split menu. Alt N: Normals menu. Shift Ctrl N: recalculate inside. Z: shading menu.
+
+- Ctrl + right-drag: lasso select (Shift Ctrl + right-drag deselects). A Ctrl + right *click* still extrudes to the mouse.
+- Snapping (magnet button, Shift Tab): the small arrow next to it picks Increment (whole studs), Vertex or Face.
+
+**Textures and UVs**
+- U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
+- Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
+- Saving uploads the UVs with the mesh.
 
 **View**
 - Numpad 5 switches perspective / orthographic. Numpad 1 / 3 / 7 go orthographic and orbiting goes back to perspective (Blender's Auto Perspective).

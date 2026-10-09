@@ -116,8 +116,63 @@ end
 -- (every face gets its own corners). selColor: tint for selected faces (edit mode)
 -- smooth faces share their corners (so the normals blend); flat faces get their own. skipHidden: leave out
 -- faces hidden with H (the edit view only)
-function Display.build(bm, selColor, skipHidden)
+-- ===== UVs (Blender's UV > Cube / Cylinder / Sphere Projection, uvproject.cc), worked out from the
+-- positions every time the mesh is built, so they follow your edits. Roblox textures: V goes down the image.
+-- uv = { mode = "box" | "boxfit" | "cylinder" | "sphere" | "top", scale = studs per texture repeat }
+Display.UV_MODES = {
+	{ "box", "Cube Projection (tiled)" }, { "boxfit", "Cube Projection (fit)" }, { "cylinder", "Cylinder Projection" },
+	{ "sphere", "Sphere Projection" }, { "top", "Project from Top" },
+}
+local function uvAt(uv, co, n, lo, size)
+	local mode, s = uv.mode, math.max(uv.scale or 4, 1e-3)
+	local rel = co - lo
+	local function fit(a, b) return Vector2.new(a, 1 - b) end
+	if mode == "box" or mode == "boxfit" then
+		local ax, ay, az = math.abs(n.X), math.abs(n.Y), math.abs(n.Z)
+		local u, v, du, dv
+		if ax >= ay and ax >= az then u, v, du, dv = (n.X >= 0 and -rel.Z or rel.Z), rel.Y, size.Z, size.Y
+			if n.X >= 0 then u += size.Z end
+		elseif ay >= az then u, v, du, dv = rel.X, (n.Y >= 0 and -rel.Z or rel.Z), size.X, size.Z
+			if n.Y >= 0 then v += size.Z end
+		else u, v, du, dv = (n.Z >= 0 and rel.X or -rel.X), rel.Y, size.X, size.Y
+			if n.Z < 0 then u += size.X end
+		end
+		if mode == "boxfit" then return fit(u / math.max(du, 1e-6), v / math.max(dv, 1e-6)) end
+		return Vector2.new(u / s, -v / s)
+	elseif mode == "cylinder" or mode == "sphere" then
+		local c = lo + size / 2
+		local d = co - c
+		local u = (math.atan2(d.X, d.Z) / (2 * math.pi)) + 0.5
+		if mode == "cylinder" then return fit(u, rel.Y / math.max(size.Y, 1e-6)) end
+		local r = d.Magnitude
+		local v = r > 1e-9 and (1 - math.acos(math.clamp(d.Y / r, -1, 1)) / math.pi) or 0.5
+		return fit(u, v)
+	else -- top
+		return fit(rel.X / math.max(size.X, 1e-6), 1 - rel.Z / math.max(size.Z, 1e-6))
+	end
+end
+-- the UVs of one face's corners (wrap-around fixed for cylinder / sphere so a face never spans the whole image)
+function Display.faceUVs(uv, vs, n, lo, size)
+	local out = {}
+	for i, v in ipairs(vs) do out[i] = uvAt(uv, v.co, n, lo, size) end
+	if uv.mode == "cylinder" or uv.mode == "sphere" then
+		local mn, mx = math.huge, -math.huge
+		for _, p in ipairs(out) do mn = math.min(mn, p.X) mx = math.max(mx, p.X) end
+		if mx - mn > 0.5 then
+			for i, p in ipairs(out) do if p.X < 0.5 then out[i] = Vector2.new(p.X + 1, p.Y) end end
+		end
+	end
+	return out
+end
+
+function Display.build(bm, selColor, skipHidden, uv)
 	local c = Display.bounds(bm)
+	local lo, size
+	if uv and uv.mode then
+		local _, sz = Display.bounds(bm)
+		size = sz
+		lo = c - sz / 2
+	end
 	-- Roblox limit: 20,000 triangles / 60,000 verts per EditableMesh
 	local nt, nvx = 0, 0
 	for f in pairs(bm.faces) do nt += f.len - 2 nvx += f.len end
@@ -148,9 +203,17 @@ function Display.build(bm, selColor, skipHidden)
 				ids[i] = em:AddVertex(v.co - c)
 			end
 		end
+		local uvids
+		if lo then
+			uvids = {}
+			pcall(function()
+				for i, p in ipairs(Display.faceUVs(uv, vs, f.no, lo, size)) do uvids[i] = em:AddUV(p) end
+			end)
+		end
 		for _, t in ipairs(Display.triangulate(vs, f.no)) do
 			local fid = em:AddTriangle(ids[t[1]], ids[t[2]], ids[t[3]])
 			tris += 1
+			if uvids and uvids[t[3]] then pcall(function() em:SetFaceUVs(fid, { uvids[t[1]], uvids[t[2]], uvids[t[3]] }) end) end
 			if white then
 				pcall(function()
 					local col = (sel and f.sel) and sel or white
@@ -168,8 +231,8 @@ end
 
 -- ===== save: upload the mesh as a real Roblox Mesh asset (AssetService:CreateAssetAsync, local plugins,
 -- Studio beta "CreateAssetAsync Luau API"). Returns id, err, errKind ("api" = the API isn't available), centre
-function Display.upload(bm, params)
-	local mp, c, err, em = Display.build(bm)
+function Display.upload(bm, params, uv)
+	local mp, c, err, em = Display.build(bm, nil, nil, uv)
 	if not mp or not em then return nil, err or "no mesh" end
 	Display.emOf[mp] = nil
 	pcall(function() mp:Destroy() end)

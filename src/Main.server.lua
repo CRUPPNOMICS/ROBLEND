@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.10.0"
+local VERSION = "0.11.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -61,7 +61,7 @@ local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set" }
+local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment" }
 -- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
 local FALLOFF = {
 	Smooth = function(t) return t * t * (3 - 2 * t) end,
@@ -73,6 +73,7 @@ local FALLOFF = {
 	Constant = function() return 1 end,
 	Random = function(t) return t * math.random() end,
 }
+local snapTargetLocal
 local FALLOFF_ORDER = { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "Linear", "Constant", "Random" } -- header toggles: proportional, X mirror, snapping
 
 -- ===== UI =====
@@ -180,11 +181,22 @@ local function evaluated(p, m, inEdit)
 	local ok, r = pcall(Mods.evaluate, m, list)
 	return ok and r or m
 end
--- what a save covers: the mesh + its modifiers
+-- UVs (U menu): worked out at build time from the part's RB_UVMode / RB_UVScale
+local function uvOf(p)
+	local m = p and p:GetAttribute("RB_UVMode")
+	if not m or m == "" then return nil end
+	return { mode = m, scale = p:GetAttribute("RB_UVScale") or 4 }
+end
+local function uvKey(p)
+	local u = uvOf(p)
+	return u and (u.mode .. ":" .. tostring(u.scale)) or ""
+end
+-- what a save covers: the mesh + its modifiers + its UVs
 local function saveKey(p)
 	local d, s = p.RB_Data.Value, modsStr(p)
-	if s == "" then return d end
-	return d .. "|" .. s
+	local u = uvKey(p)
+	if s == "" and u == "" then return d end
+	return d .. "|" .. s .. (u ~= "" and ("|uv:" .. u) or "")
 end
 
 local function loadFrom(p)
@@ -215,7 +227,7 @@ end
 local function ownView() return uiOn and view ~= nil and not useStudio end
 local applyBuilt
 local function applyMesh(p, b, tint)
-	local mp, c, err = Display.build(evaluated(p, b, tint), tint and SEL_COL or nil, tint)
+	local mp, c, err = Display.build(evaluated(p, b, tint), tint and SEL_COL or nil, tint, uvOf(p))
 	if not mp then return false, err end
 	return applyBuilt(p, mp, c)
 end
@@ -226,6 +238,7 @@ applyBuilt = function(p, mp, c)
 	if not ok then
 		-- older Studio: swap the part out for the new one
 		mp.Name, mp.Color, mp.Material, mp.Anchored = p.Name, p.Color, p.Material, p.Anchored
+		pcall(function() mp.TextureID = p.TextureID end)
 		for _, ch in ipairs(p:GetChildren()) do ch.Parent = mp end
 		for k, v in pairs(p:GetAttributes()) do mp:SetAttribute(k, v) end
 		mp.Parent = p.Parent
@@ -273,7 +286,7 @@ local function saveMesh(p, quiet, silent)
 					params.CreatorType = Enum.AssetCreatorType.Group
 				end
 			end)
-			local id, uerr, kind, c = Display.upload(m, params)
+			local id, uerr, kind, c = Display.upload(m, params, uvOf(p))
 			if not id then
 				setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
 				return
@@ -535,11 +548,13 @@ local function lookOf(p)
 	local tr = 0
 	if xray then tr = 0.5 end
 	if shading == "wire" then tr = 1 end
-	return { Color = p.Color, Material = p.Material, Transparency = tr }
+	local tex
+	pcall(function() tex = p.TextureID end)
+	return { Color = p.Color, Material = p.Material, Transparency = tr, TextureID = tex }
 end
 local function showEdit()
 	if not (ownView() and obj and bm) then return false end
-	local mp, c, err = Display.build(evaluated(obj, bm, true), SEL_COL, true)
+	local mp, c, err = Display.build(evaluated(obj, bm, true), SEL_COL, true, uvOf(obj))
 	if not mp then
 		view:removeObject(obj)
 		return true, err
@@ -948,6 +963,44 @@ local function finishObjModal(M, cancel)
 	dirtyCage = true
 end
 
+-- Snap to Vertex / Face (Blender's snap targets): where the selection's middle goes, in mesh space, or nil
+snapTargetLocal = function(M)
+	local moving = {}
+	for _, v in ipairs(M.verts) do moving[v] = true end
+	local mp = mousePos()
+	if EDIT.snapTarget == "Vertex" then
+		local best, bd = nil, 30
+		for v in pairs(bm.verts) do
+			if not moving[v] and not v.hide then
+				local sp, vis = toScreen(W(v.co))
+				if vis then
+					local d = (sp - mp).Magnitude
+					if d < bd then best, bd = v, d end
+				end
+			end
+		end
+		return best and best.co or nil
+	elseif EDIT.snapTarget == "Face" then
+		local ray = getRay()
+		local bt, bp
+		for f in pairs(bm.faces) do
+			if not f.hide then
+				local vs = BMesh.faceVerts(f)
+				local still = true
+				for _, v in ipairs(vs) do if moving[v] then still = false break end end
+				if still then
+					for _, tri in ipairs(Display.triangulate(vs, f.no)) do
+						local a, b, c = W(vs[tri[1]].co), W(vs[tri[2]].co), W(vs[tri[3]].co)
+						local hit = rayTri(ray.Origin, ray.Direction, a, b, c)
+						if hit and (not bt or hit < bt) then bt, bp = hit, ray.Origin + ray.Direction * hit end
+					end
+				end
+			end
+		end
+		return bp and origin:PointToObjectSpace(bp) or nil
+	end
+	return nil
+end
 local function applyTransform()
 	local M = modal
 	if M.obj then applyObjTransform() return end
@@ -971,8 +1024,13 @@ local function applyTransform()
 			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
 			local dW = (p1 and p0) and (p1 - p0) or V3()
 			if num then dW = camera().CFrame.RightVector * num end
-			if snap then dW = V3(math.floor(dW.X + 0.5), math.floor(dW.Y + 0.5), math.floor(dW.Z + 0.5)) end
-			dL = origin:VectorToObjectSpace(dW)
+			local target = (snap and not num and EDIT.snapTarget ~= "Increment") and snapTargetLocal(M) or nil
+			if target then
+				dL = target - M.c
+			else
+				if snap then dW = V3(math.floor(dW.X + 0.5), math.floor(dW.Y + 0.5), math.floor(dW.Z + 0.5)) end
+				dL = origin:VectorToObjectSpace(dW)
+			end
 		end
 		for _, v in ipairs(M.verts) do v.co = M.orig[v] + dL end
 		for v, w in pairs(M.prop or {}) do v.co = M.orig[v] + dL * w end
@@ -1361,14 +1419,14 @@ local function syncScene()
 			scene[p] = nil
 			changed = true
 		elseif not (editing and p == obj) then
-			local data, ms = p.RB_Data.Value, modsStr(p)
+			local data, ms = p.RB_Data.Value, modsStr(p) .. uvKey(p)
 			local look = lookOf(p)
 			if r.hidden or r.localOut then
 				if r.shown then view:removeObject(p) r.shown = false changed = true end
 			elseif data ~= r.data or ms ~= r.mods or p.Size ~= r.size or not r.shown then
 				local ok, m = pcall(function() return evaluated(p, (loadFrom(p))) end)
 				if ok and m then
-					local mp, c = Display.build(m)
+					local mp, c = Display.build(m, nil, nil, uvOf(p))
 					if mp then
 						view:setObject(p, mp, originOf(p) * CFrame.new(c), look)
 						r.c, r.bm, r.feat, r.all, r.tris, r.shown = c, m, nil, nil, nil, true
@@ -1385,10 +1443,13 @@ local function syncScene()
 					r.cf, r.tris = p.CFrame, nil
 					changed = true
 				end
-				if p.Color ~= r.col or p.Material ~= r.mat or look.Transparency ~= r.tr then
+				if p.Color ~= r.col or p.Material ~= r.mat or look.Transparency ~= r.tr or look.TextureID ~= r.tex then
 					local d = view.objects[p]
-					if d then d.Color, d.Material, d.Transparency = p.Color, p.Material, look.Transparency end
-					r.col, r.mat, r.tr = p.Color, p.Material, look.Transparency
+					if d then
+						d.Color, d.Material, d.Transparency = p.Color, p.Material, look.Transparency
+						pcall(function() d.TextureID = look.TextureID or "" end)
+					end
+					r.col, r.mat, r.tr, r.tex = p.Color, p.Material, look.Transparency, look.TextureID
 					changed = true
 				end
 			end
@@ -2980,6 +3041,7 @@ local function modelingTools()
 		if k == K.V and shift and not ctrl and not alt then O.VertexSlide() return true end
 		if k == K.Delete and ctrl then O.Dissolve() return true end
 		if k == K.Z and not ctrl and not shift and not alt then return menu("shading") end
+		if k == K.U and not ctrl and not shift and not alt then return menu("uv") end
 		if k == K.P and not ctrl then return menu("separate") end
 		local LEVEL = { [K.Zero] = 0, [K.One] = 1, [K.Two] = 2, [K.Three] = 3, [K.Four] = 4, [K.Five] = 5 }
 		if ctrl and LEVEL[k] then MOD.subdivSet(LEVEL[k]) return true end
@@ -3176,7 +3238,7 @@ function api.state()
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
-		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode,
+		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode, snapTarget = EDIT.snapTarget,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
 	if p then
@@ -3187,7 +3249,9 @@ function api.state()
 		st.color, st.material = p.Color, p.Material and p.Material.Name
 		st.hidden = scene[p] ~= nil and scene[p].hidden == true
 		if isRB(p) then
-			st.modsKey = modsStr(p)
+			st.uv = uvOf(p)
+			pcall(function() st.texture = p.TextureID end)
+			st.modsKey = modsStr(p) .. uvKey(p) .. tostring(st.texture)
 			st.mods = modsOf(p)
 			st.saved = isSaved(p)
 			st.assetId = p:GetAttribute("RB_AssetId")
@@ -3292,7 +3356,33 @@ api.setFalloff = function(name)
 	if FALLOFF[name] then EDIT.propFalloff = name EDIT.prop = true setStatus("Proportional falloff: " .. name .. " (proportional editing on).") end
 end
 api.setBoxMode = function(m) EDIT.boxMode = m end
+api.setSnapTarget = function(m) EDIT.snapTarget = m EDIT.snap = true setStatus("Snap to " .. m .. " (snapping on).") end
 api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
+-- U menu / Material > Texture: UV projection + the image
+api.uvModes = Display.UV_MODES
+api.setUV = function(mode, scale)
+	local p = modTarget()
+	if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
+	record("UV", function()
+		if mode ~= nil then p:SetAttribute("RB_UVMode", mode ~= "" and mode or nil) end
+		if scale then p:SetAttribute("RB_UVScale", math.max(scale, 0.01)) end
+		modsChanged(p)
+	end)
+	local u = uvOf(p)
+	setStatus(u and ("UVs: " .. u.mode .. (u.mode == "box" and (" (repeats every %g studs)"):format(u.scale) or "") .. ". Set a texture in Material > Texture.") or "UVs cleared.")
+end
+api.setTexture = function(id)
+	local p = modTarget()
+	if not p then return end
+	id = tostring(id or "")
+	if id:match("^%d+$") then id = "rbxassetid://" .. id end
+	record("Texture", function()
+		pcall(function() p.TextureID = id end)
+		if id ~= "" and not uvOf(p) then p:SetAttribute("RB_UVMode", "boxfit") modsChanged(p) end
+	end)
+	dirtyCage = true
+	setStatus(id ~= "" and ("Texture set: " .. id .. (uvOf(p) and "" or "")) or "Texture cleared.")
+end
 api.join = joinObjects
 local function modEdit(what, fn)
 	local p = modTarget()
@@ -3551,12 +3641,11 @@ local st = Instance.new("UIStroke") st.Color = Color3.fromRGB(230, 230, 230) st.
 boxFrame.Parent = boxGui
 local down = nil
 
-local function boxSelect(a, b, add, sub)
-	local lo = Vector2.new(math.min(a.X, b.X), math.min(a.Y, b.Y))
-	local hi = Vector2.new(math.max(a.X, b.X), math.max(a.Y, b.Y))
+-- select what's inside a screen region (box or lasso): inScreen(sp) -> bool
+local function regionSelect(inScreen, add, sub)
 	local function inside(wp)
 		local sp, vis = toScreen(wp)
-		return vis and sp.X >= lo.X and sp.X <= hi.X and sp.Y >= lo.Y and sp.Y <= hi.Y
+		return vis and inScreen(sp)
 	end
 	if not editing then
 		-- object mode: objects whose middle is in the box
@@ -3606,6 +3695,64 @@ local function boxSelect(a, b, add, sub)
 	end
 	flush()
 	dirtyCage, dirtyMesh = true, true
+end
+local function boxSelect(a, b, add, sub)
+	local lo = Vector2.new(math.min(a.X, b.X), math.min(a.Y, b.Y))
+	local hi = Vector2.new(math.max(a.X, b.X), math.max(a.Y, b.Y))
+	regionSelect(function(sp) return sp.X >= lo.X and sp.X <= hi.X and sp.Y >= lo.Y and sp.Y <= hi.Y end, add, sub)
+end
+-- Ctrl + right drag (Blender's Lasso Select; Shift Ctrl + right drag deselects). A Ctrl + right click still extrudes to the mouse.
+local lasso = nil
+local lassoLines = {}
+local function drawLasso()
+	local pts = lasso and lasso.pts or {}
+	for i = 1, math.max(#pts, #lassoLines) do
+		local a, b = pts[i], pts[i % #pts + 1]
+		local ln = lassoLines[i]
+		if a and b and #pts > 1 then
+			if not ln then
+				ln = Instance.new("Frame")
+				ln.BorderSizePixel = 0
+				ln.BackgroundColor3 = Color3.fromRGB(235, 235, 235)
+				ln.AnchorPoint = Vector2.new(0.5, 0.5)
+				ln.Parent = boxGui
+				lassoLines[i] = ln
+			end
+			local d = b - a
+			ln.Visible = true
+			ln.Position = UDim2.fromOffset((a.X + b.X) / 2, (a.Y + b.Y) / 2)
+			ln.Size = UDim2.fromOffset(d.Magnitude, 1)
+			ln.Rotation = math.deg(math.atan2(d.Y, d.X))
+		elseif ln then
+			ln.Visible = false
+		end
+	end
+end
+local function inPolygon(pts, p)
+	local inside = false
+	local j = #pts
+	for i = 1, #pts do
+		local a, b = pts[i], pts[j]
+		if (a.Y > p.Y) ~= (b.Y > p.Y) and p.X < (b.X - a.X) * (p.Y - a.Y) / (b.Y - a.Y) + a.X then inside = not inside end
+		j = i
+	end
+	return inside
+end
+local function finishLasso()
+	local L = lasso
+	lasso = nil
+	drawLasso()
+	if not L then return end
+	if L.len < 8 or #L.pts < 3 then
+		if editing then
+			local ok, err = pcall(MOD.ops.ExtrudeToMouse)
+			if not ok then warn(NAME .. ": " .. tostring(err)) end
+		end
+		return
+	end
+	local ok, err = pcall(regionSelect, function(sp) return inPolygon(L.pts, sp) end, false, L.sub)
+	if not ok then warn(NAME .. ": " .. tostring(err)) end
+	setStatus(L.sub and "Lasso: deselected." or "Lasso: selected.")
 end
 
 mouse.Button1Down:Connect(function()
@@ -3703,15 +3850,15 @@ end)
 mouse.Button2Down:Connect(function()
 	if modal then pcall(finishModal, true) return end
 	local mp = mousePos()
-	if editing and ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
-		local ok, err = pcall(MOD.ops.ExtrudeToMouse)
-		if not ok then warn(NAME .. ": " .. tostring(err)) end
+	if ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
+		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
 		return
 	end
 	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true } end
 end)
 pcall(function()
 	mouse.Button2Up:Connect(function()
+		if lasso then finishLasso() return end
 		local nd = navDrag
 		if not (nd and nd.rmb) then return end
 		navDrag = nil
@@ -3737,6 +3884,12 @@ end)
 mouse.Move:Connect(function()
 	local mp = mousePos()
 	if uiOn then pcall(function() ui:step(mp) end) end
+	if lasso then
+		local last = lasso.pts[#lasso.pts]
+		local d = (mp - last).Magnitude
+		if d >= 3 then lasso.pts[#lasso.pts + 1] = mp lasso.len += d drawLasso() end
+		return
+	end
 	if navDrag then
 		local dx, dy = mp.X - navDrag.last.X, mp.Y - navDrag.last.Y
 		navDrag.last = mp
@@ -3882,6 +4035,11 @@ UIS.InputBegan:Connect(function(input, gp)
 		return
 	end
 	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
+	if k == Enum.KeyCode.Tab and shift and not ctrl and not alt and uiOn then
+		EDIT.snap = not EDIT.snap
+		setStatus("Snapping " .. (EDIT.snap and ("on (" .. EDIT.snapTarget .. ")") or "off") .. ".")
+		return
+	end
 	if k == Enum.KeyCode.Tab and not ctrl and not alt then
 		if modal then return end
 		if editing then exitEdit()

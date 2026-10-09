@@ -411,7 +411,7 @@ function UI:buildView()
 	self.vertMenuBtn = pd("Vertex", function() return self:vertexMenu() end)
 	self.edgeMenuBtn = pd("Edge", function() return self:edgeMenu() end)
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
-	self.uvMenuBtn = pd("UV", function() return { { "UV editing comes in a later ROBLENDER version", "", nil } } end)
+	self.uvMenuBtn = pd("UV", function() return self:uvItems() end)
 	-- right side: X-ray + shading
 	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(420, HDR_H) }, hdr)
 	hlist(right, 1, Enum.HorizontalAlignment.Right)
@@ -426,6 +426,15 @@ function UI:buildView()
 		self:tip(b, tg[3], tg[4], tg[5])
 		self.toggleBtns[tg[1]] = b
 	end
+	-- snap target dropdown (just after the snap button)
+	self.snapTargetBtn = self:btn(right, { LayoutOrder = -20 + 1 * 2 + 1, Size = UDim2.fromOffset(16, 20), BackgroundColor3 = T.regular, Text = "v", TextSize = 10 }, function(b)
+		local st = api.state()
+		local items = { { header = "Snap To" } }
+		for _, n in ipairs({ "Increment", "Vertex", "Face" }) do items[#items + 1] = { n, "", function() api.setSnapTarget(n) end, check = st.snapTarget == n } end
+		self:openMenu(items, b)
+	end, "toggle")
+	corner(self.snapTargetBtn, 4)
+	self:tip(self.snapTargetBtn, "Snap To", "Increment (whole studs), Vertex or Face. Shift Tab turns snapping on / off")
 	-- proportional falloff dropdown (just after the proportional button)
 	self.falloffBtn = self:btn(right, { LayoutOrder = -20 + 2 * 2 + 1, Size = UDim2.fromOffset(16, 20), BackgroundColor3 = T.regular, Text = "v", TextSize = 10 }, function(b)
 		local st = api.state()
@@ -777,6 +786,8 @@ local MOD_FIELDS = {
 		self:toggleRow(b, 3, "Axis", {
 			{ "X", ax == "X", function() api.modSet(i, "axis", "X") end }, { "Y", ax == "Y", function() api.modSet(i, "axis", "Y") end }, { "Z", ax == "Z", function() api.modSet(i, "axis", "Z") end } })
 		num(4, "Relative Offset", "relative", -100, 100)
+		num(5, "Constant Offset", "constant", -10000, 10000)
+		self:toggleRow(b, 6, "Merge", { { m.merge and "On" or "Off", m.merge == true, function() api.modToggle(i, "merge") end, "Weld the copies where they touch" } })
 	end,
 	bevel = function(self, b, i, m, api, num)
 		num(2, "Amount", "amount", 0, 100)
@@ -951,6 +962,27 @@ function UI:buildPropContent()
 			label(b, { LayoutOrder = 12, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "These work in Edit Mode (Tab)." })
 		end)
 	elseif tab == "material" then
+		if self.panelsOpen.texture == nil then self.panelsOpen.texture = true end
+		self:panel(2, "texture", "Texture", function(b)
+			local r = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
+			label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Image", TextXAlignment = Enum.TextXAlignment.Right })
+			local tb = make("TextBox", { Name = "RB_Texture", Position = UDim2.new(0.38, 0, 0, 0), Size = UDim2.new(0.62, 0, 1, 0), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 11,
+				TextColor3 = T.text, Text = s.texture or "", PlaceholderText = "rbxassetid://... or the number", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd }, r)
+			corner(tb, 4)
+			make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, tb)
+			tb.FocusLost:Connect(function() self:safe(function() api.setTexture(tb.Text) end) self:buildPropContent() end)
+			local cur = s.uv and s.uv.mode or ""
+			local items = {}
+			for _, m in ipairs({ { "box", "Box" }, { "boxfit", "Fit" }, { "cylinder", "Cyl" }, { "sphere", "Sph" }, { "top", "Top" } }) do
+				items[#items + 1] = { m[2], cur == m[1], function() api.setUV(m[1]) end }
+			end
+			self:toggleRow(b, 2, "UV", items)
+			if cur == "box" then
+				self:numField(b, 3, "Tile Size", "p_uvscale", function(st) return st.uv and st.uv.scale end, function(v) api.setUV(nil, v) end)
+			end
+			label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "UVs are worked out from the shape every time it changes. Box = repeats every Tile Size studs, Fit = one image per side. Upload an image (Asset Manager) and paste its id." })
+		end)
 		self:panel(1, "surface", "Surface", function(b)
 			label(b, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 16), Text = "Base Color", TextColor3 = T.textDim })
 			local g = make("Frame", { LayoutOrder = 2, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 44) }, b)
@@ -1198,6 +1230,17 @@ function UI:objectMenu()
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
+end
+function UI:uvItems()
+	local api = self.api
+	local s = api.state()
+	local cur = s.uv and s.uv.mode
+	local items = { { header = "Unwrap (follows your edits)" } }
+	for _, m in ipairs(api.uvModes or {}) do items[#items + 1] = { m[2], "", function() api.setUV(m[1]) end, check = cur == m[1] } end
+	items[#items + 1] = "-"
+	items[#items + 1] = { "Clear UVs", "", function() api.setUV("") end }
+	items[#items + 1] = { "Texture and tile size: Properties > Material", "", nil }
+	return items
 end
 function UI:shadingItems()
 	local api = self.api
@@ -1451,6 +1494,7 @@ function UI:openNamedMenu(name, at)
 		snap = function() return self:snapItems(), "Snap" end,
 		separate = function() return self:separateItems(), "Separate" end,
 		similar = function() return self:similarItems(), "Select Similar" end,
+		uv = function() return self:uvItems(), "UV Mapping" end,
 		shading = function() return self:shadingItems(), "Shading" end,
 		apply = function() return self:applyItems(), "Apply" end,
 		origin = function() return self:originItems(), "Set Origin" end,
@@ -1554,6 +1598,7 @@ function UI:helpItems()
 		{ "Search every menu", "F3" }, { "Loop / Ring select", "Double click / Ctrl Alt click" }, { "Edge Crease", "Shift E" },
 		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
 		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
+		{ "Lasso select / deselect", "Ctrl RMB drag / Shift Ctrl RMB drag" }, { "Snapping on / off", "Shift Tab" }, { "UV menu", "U" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },

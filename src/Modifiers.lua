@@ -33,7 +33,7 @@ local V3 = Vector3.new
 
 -- types, Blender's names, default settings (in Blender's Add Modifier menu order)
 Mods.TYPES = {
-	{ id = "array", name = "Array", group = "Generate", defaults = { count = 3, axis = "X", relative = 1 } },
+	{ id = "array", name = "Array", group = "Generate", defaults = { count = 3, axis = "X", relative = 1, constant = 0, merge = false } },
 	{ id = "bevel", name = "Bevel", group = "Generate", defaults = { amount = 0.2, segments = 2, angle = 30 } },
 	{ id = "mirror", name = "Mirror", group = "Generate", defaults = { x = true, y = false, z = false, merge = true, mergeDist = 0.001 } },
 	{ id = "solidify", name = "Solidify", group = "Generate", defaults = { thickness = 0.2, offset = -1 } },
@@ -201,7 +201,8 @@ function Mods.array(bm, m)
 		hi = hi and V3(math.max(hi.X, v.co.X), math.max(hi.Y, v.co.Y), math.max(hi.Z, v.co.Z)) or v.co
 	end
 	if not lo then return bm end
-	local step = axis * ((hi - lo):Dot(axis) * (m.relative or 1))
+	-- relative offset (times the mesh's size) + constant offset (studs), like Blender's two offset options
+	local step = axis * ((hi - lo):Dot(axis) * (m.relative or 1) + (m.constant or 0))
 	local spec = MT.toSpec(bm)
 	local nv, nf, ne = #spec.verts, #spec.faces, #spec.edges
 	for c = 1, count - 1 do
@@ -221,7 +222,9 @@ function Mods.array(bm, m)
 			spec.edges[#spec.edges + 1] = { e[1] + base, e[2] + base, sel = e.sel }
 		end
 	end
-	return (MT.fromSpec(spec))
+	local out = MT.fromSpec(spec)
+	if m.merge then out = Mods.mergeDoubles(out, 0.01) end
+	return out
 end
 
 -- ===== Bevel (angle limit): round every edge sharper than `angle` degrees =====

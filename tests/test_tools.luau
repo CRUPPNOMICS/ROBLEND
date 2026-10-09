@@ -542,5 +542,15 @@ check2("select mirror (X)", function()
 	assert(not v0.sel, "moved off")
 	for v in pairs(bm.verts) do if v.sel then assert(v.co.X < 0 and v.co.Y > 0, "the -X twin") end end
 end)
+check2("array: constant offset + merge welds touching copies", function()
+	local m = Mods.new("array")
+	m.merge = true
+	local out = Mods.evaluate(cube(), { m })
+	eq(out.nv, 16, "welded where the copies touch")
+	m.merge, m.relative, m.constant = false, 0, 3
+	out = Mods.evaluate(cube(), { m })
+	local hx = -math.huge for v in pairs(out.verts) do hx = math.max(hx, v.co.X) end
+	assert(math.abs(hx - 7) < 1e-4, "2 copies 3 studs apart: " .. hx)
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

@@ -220,6 +220,7 @@ function View:setObject(key, part, cf, look)
 		part.Color = look.Color or part.Color
 		part.Material = look.Material or part.Material
 		part.Transparency = look.Transparency or 0
+		if look.TextureID then pcall(function() part.TextureID = look.TextureID end) end
 	end
 	part.Parent = self.sceneFolder
 	self.objects[key] = part

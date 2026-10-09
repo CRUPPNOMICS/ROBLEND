@@ -1137,6 +1137,62 @@ check("Object: H / Shift H / Alt H, Alt G / Alt R, Numpad / local view, Z and Ct
 	assert(hasText("Rotation"), "Ctrl A = apply menu")
 	press("Escape") beat()
 end)
+check("UVs + texture: box projection on the part, texture id, upload carries UVs", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local c = S.Selection:Get()[1]
+	beat()
+	eq(c.Mesh.fuv, nil, "no UVs yet")
+	MOCK.api.setUV("box") beat()
+	eq(c.Mesh.fuv, 12, "every triangle has UVs")
+	propTab(4)
+	local tb = find("TextBox", function(d) return d.Name == "RB_Texture" end)
+	assert(tb, "texture box in the Material tab")
+	tb.Text = "1234567" tb.FocusLost:Fire(true) beat()
+	eq(c.TextureID, "rbxassetid://1234567", "texture set")
+	textBtn("Fit") beat()
+	eq(c:GetAttribute("RB_UVMode"), "boxfit", "fit mode")
+	for _, p in ipairs(c.Mesh.uv) do assert(p.X >= -1e-6 and p.X <= 1 + 1e-6 and p.Y >= -1e-6 and p.Y <= 1 + 1e-6, "fit UVs stay in 0..1") end
+	local n0 = #MOCK.uploads
+	for _ = 1, 50 do beat() end
+	assert(#MOCK.uploads > n0, "saved after the change")
+	eq(MOCK.uploads[#MOCK.uploads].em.fuv, 12, "upload has UVs")
+	propTab(1)
+end)
+check("Ctrl right-drag lasso selects; snap to Vertex", function()
+	p4 = editCube()
+	press("One") press("A", { "LeftAlt" }) beat()
+	local vs = worldVerts(p4)
+	table.sort(vs, function(x, y) return (x - cam.CFrame.Position).Magnitude < (y - cam.CFrame.Position).Magnitude end)
+	mouseTo(vs[1])
+	local x, y = mouse.X, mouse.Y
+	MOCK.held.LeftControl = true
+	mouse.Button2Down:Fire()
+	for i = 0, 12 do local a = i / 12 * 2 * math.pi mouseXY(x + 15 * math.cos(a), y + 15 * math.sin(a)) end
+	mouse.Button2Up:Fire()
+	MOCK.held.LeftControl = nil
+	beat()
+	eq(MOCK.api.state().stats.vs, 1, "lasso picked the one vert")
+	eq(counts(p4), 8, "no extrude on a drag")
+	-- snap that vert onto another one
+	MOCK.api.setSnapTarget("Vertex")
+	press("G")
+	mouseTo(vs[2]) beat()
+	click()
+	local d = data(p4)
+	local seen, dup = {}, false
+	for i = 1, #d.v, 3 do
+		local k = d.v[i] .. "," .. d.v[i + 1] .. "," .. d.v[i + 2]
+		if seen[k] then dup = true end
+		seen[k] = true
+	end
+	assert(dup, "the vert landed exactly on another one")
+	MOCK.api.setSnapTarget("Increment")
+	press("Tab", { "LeftShift" })
+	eq(MOCK.api.state().snap, false, "Shift Tab turned snapping off")
+	press("Tab") beat()
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()
