@@ -228,6 +228,7 @@ local UIS = svc("UserInputService")
 UIS._sig.InputBegan = Signal.new()
 SIGNALS.InputBegan = true
 function Inst.IsKeyDown(_, k) return held[k.Name] == true end
+function Inst.GetKeysPressed() local o = {} for k, v in pairs(MOCK.held) do if v then o[#o + 1] = { KeyCode = Enum.KeyCode[k] } end end return o end
 function Inst.GetFocusedTextBox() return MOCK.focused end
 -- (only ROBLEND's invisible keyboard box keeps focus in the fake; other boxes are driven by their events)
 function Inst.CaptureFocus(o) if o._p.Name == "RB_KeyCapture" then MOCK.focused = o MOCK.captures = (MOCK.captures or 0) + 1 end end

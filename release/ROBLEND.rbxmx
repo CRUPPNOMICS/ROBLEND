@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.6"
+local VERSION = "0.21.7"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -6496,12 +6496,22 @@ function KeyCapture.new(C)
 			if b.Text == "" then return end
 			b.Text = ""
 			local at = C.clock()
+			-- a key held down repeats its letter without a new key press: that's fine
+			local held = false
+			pcall(function() held = #C.UIS:GetKeysPressed() > 0 end)
+			if held then return end
 			task.delay(0.2, function()
 				if K.enabled and not K.failed and K.lastKey < at - 0.5 then
-					-- Studio isn't sending key presses to plugins while the box has focus: stop blocking
-					K.failed = true
-					K.release()
-					C.setStatus("Couldn't block Studio's shortcuts on this Studio version, so they're back on (keys still work in ROBLEND).")
+					-- typing that never reached ROBLEND: three times close together means Studio isn't passing
+					-- keys through while the box has focus, so stop blocking
+					K.misses = (K.misses or 0) + 1
+					if K.misses >= 3 and at - (K.firstMiss or at) < 10 then
+						K.failed = true
+						K.release()
+						C.setStatus("Couldn't block Studio's shortcuts on this Studio version, so they're back on (keys still work in ROBLEND).")
+					elseif K.misses == 1 or at - (K.firstMiss or at) >= 10 then
+						K.misses, K.firstMiss = 1, at
+					end
 				end
 			end)
 		end)

@@ -1810,10 +1810,18 @@ check("ROBLEND holds the keyboard so Studio's 1 2 3 4 / Ctrl D etc. don't fire; 
 	eq(MOCK.focused, nil, "stays off")
 	headerBtn("Edit") menuItem("Block Studio Shortcuts")
 	eq(MOCK.focused, KC.box, "on again")
-	-- if Studio doesn't pass keys while the box has focus, it switches itself off
+	-- a held key repeating its letter is fine
 	MOCK.t += 2
-	KC.box.Text = "q"
-	beat() beat() beat()
+	MOCK.held.KeypadSix = true
+	for _ = 1, 5 do KC.box.Text = "6" beat() end
+	MOCK.held.KeypadSix = nil
+	assert(not KC.failed and MOCK.focused == KC.box, "key repeat doesn't switch it off")
+	-- one stray letter doesn't either
+	MOCK.t += 2
+	KC.box.Text = "q" beat() beat() beat()
+	assert(not KC.failed, "one miss is not enough")
+	-- if Studio doesn't pass keys while the box has focus (three misses), it switches itself off
+	for _ = 1, 2 do MOCK.t += 1 KC.box.Text = "q" beat() beat() beat() end
 	assert(KC.failed and MOCK.focused == nil, "gave up safely")
 	assert(MOCK.status:find("Couldn't block", 1, true), MOCK.status)
 	assert(not MOCK.api.state().blockKeys, "shows as off")
