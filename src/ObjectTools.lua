@@ -159,7 +159,7 @@ function ObjectTools.new(C)
 		record(what == "loc" and "Clear Location" or "Clear Rotation", function()
 			for _, p in ipairs(ps) do
 				local o = originOf(p)
-				local newO = (what == "loc") and o.Rotation or CFrame.new(o.Position)
+				local newO = (what == "loc") and (o.Rotation + (C.home and C.home() or V3())) or CFrame.new(o.Position)
 				p.CFrame = newO * CFrame.new(p:GetAttribute("RB_Center") or V3())
 			end
 		end)

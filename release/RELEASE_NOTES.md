@@ -1,4 +1,4 @@
-# ROBLEND 0.22.9
+# ROBLEND 0.23.0
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.23.0 - the workshop:** ROBLEND now works 10,000 studs under your map, so models never get mixed up with it. **Import** (Studio's Plugins tab, ROBLEND's top bar or File menu) sends the selected parts / models down - normal parts become ROBLEND meshes - and remembers where they came from; **Export** sends them back to exactly that spot (new work goes where Studio's camera is looking). **Back to Studio** closes ROBLEND with Studio's camera where you left it. Tab on a part up on the map brings it down too. Properties show locations from the workshop's middle. Turn it off with Edit > Workshop Under the Map.
 
 **0.22.9:** Fixed: a shape could stay drawn in ROBLEND's view after its part was gone (and couldn't be clicked or deleted); such leftovers are now cleared straight away.
 

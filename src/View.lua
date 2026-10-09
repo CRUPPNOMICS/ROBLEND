@@ -172,8 +172,10 @@ function View:updateGrid()
 	local cx = math.floor(self.focus.X / spacing + 0.5) * spacing
 	local cz = math.floor(self.focus.Z / spacing + 0.5) * spacing
 	local thick = math.clamp(self.dist * 0.0012, 0.004, 50)
-	if spacing == g.spacing and cx == g.cx and cz == g.cz and math.abs(thick - g.thick) < thick * 0.15 then return end
-	g.spacing, g.cx, g.cz, g.thick = spacing, cx, cz, thick
+	-- the floor's height (ROBLEND's workshop is far under the map)
+	local fy = self.floorY or 0
+	if spacing == g.spacing and cx == g.cx and cz == g.cz and fy == g.fy and math.abs(thick - g.thick) < thick * 0.15 then return end
+	g.spacing, g.cx, g.cz, g.thick, g.fy = spacing, cx, cz, thick, fy
 	local len = spacing * N * 2
 	local th = View.THEME
 	local i = 0
@@ -196,12 +198,12 @@ function View:updateGrid()
 		local fade = 0.45 + 0.5 * (math.abs(k) / N)
 		local z = cz + k * spacing
 		local x = cx + k * spacing
-		if math.abs(z) > spacing * 0.01 then put(V3(cx, 0, z), true, th.grid, fade, thick) end
-		if math.abs(x) > spacing * 0.01 then put(V3(x, 0, cz), false, th.grid, fade, thick) end
+		if math.abs(z) > spacing * 0.01 then put(V3(cx, fy, z), true, th.grid, fade, thick) end
+		if math.abs(x) > spacing * 0.01 then put(V3(x, fy, cz), false, th.grid, fade, thick) end
 	end
 	-- the two floor axes (Roblox: X red, Z blue; Y is up)
-	put(V3(cx, 0, 0), true, lerpC(th.grid, th.xaxis, 0.75), 0.1, thick * 1.6)
-	put(V3(0, 0, cz), false, lerpC(th.grid, th.zaxis, 0.75), 0.1, thick * 1.6)
+	put(V3(cx, fy, 0), true, lerpC(th.grid, th.xaxis, 0.75), 0.1, thick * 1.6)
+	put(V3(0, fy, cz), false, lerpC(th.grid, th.zaxis, 0.75), 0.1, thick * 1.6)
 	for j = i + 1, #g.lines do g.lines[j].Transparency = 1 end
 end
 

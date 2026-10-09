@@ -248,7 +248,7 @@ function AutoTest.run(C, api, only)
 		click(nil)
 		beat(3)
 		local d = p.CFrame.Position - p0
-		check(math.abs(d.X) > 0.05 and near(d.Y, 0) and near(d.Z, 0), "G X should move along X only, moved " .. tostring(d) .. " (" .. why .. ")")
+		check(math.abs(d.X) > 0.05 and near(d.Y, 0, 0.01) and near(d.Z, 0, 0.01), "G X should move along X only, moved " .. tostring(d) .. " (" .. why .. ")")
 		local r0 = p.CFrame.Rotation
 		key("R") glide(mid(), mid() + V2(150, 0)) click(nil)
 		check(p.CFrame.Rotation ~= r0, "R didn't rotate")
@@ -513,7 +513,7 @@ function AutoTest.run(C, api, only)
 		H.tool("CursorToSel") beat()
 		check((C.get().cursor - W(sum(true))).Magnitude < 1e-2, "Cursor to Selected")
 		H.tool("CursorToOrigin") beat()
-		check(C.get().cursor.Magnitude < 1e-3, "Cursor to World Origin")
+		check((C.get().cursor - api.home()).Magnitude < 1e-3, "Cursor to World Origin (the workshop's middle)")
 	end)
 	T("deforms", function()
 		edit("Cube", "vert", "all")
@@ -531,7 +531,19 @@ function AutoTest.run(C, api, only)
 		end
 	end)
 	T("slide", function()
-		edit("Cylinder", "edge", "edge")
+		edit("Cylinder", "edge", "none")
+		-- a side edge facing the camera (one on the edge of the outline barely moves on screen)
+		local best, bd
+		local toCam = (camPos() - W(V3())).Unit
+		for e in pairs(bm().edges) do
+			local d = e.v1.co - e.v2.co
+			if math.abs(d.X) < 1e-3 and math.abs(d.Z) < 1e-3 then
+				local m = (e.v1.co + e.v2.co) / 2
+				local f = C.get().origin:VectorToWorldSpace(V3(m.X, 0, m.Z).Unit):Dot(toCam)
+				if not bd or f > bd then best, bd = e, f end
+			end
+		end
+		C.clearSel() best.sel = true best.v1.sel = true best.v2.sel = true C.flush() C.dirtyMesh() beat()
 		local s0 = sig()
 		local n0 = nv()
 		key("G") key("G")

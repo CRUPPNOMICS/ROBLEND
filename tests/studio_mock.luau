@@ -173,6 +173,39 @@ function Inst.IsA(o, c)
 	return false
 end
 function Inst.FindFirstChild(o, n) for _, c in ipairs(o._kids) do if c._p.Name == n then return c end end return nil end
+function Inst.IsDescendantOf(o, a) local p = o._p.Parent while p do if p == a then return true end p = p._p.Parent end return false end
+function Inst.FindFirstChildWhichIsA(o, c, deep)
+	for _, k in ipairs(deep and o:GetDescendants() or o._kids) do if k:IsA(c) then return k end end
+	return nil
+end
+-- pivots (parts: their CFrame; models: their PrimaryPart's or the first part's, moving every part)
+function Inst.GetPivot(o)
+	if o._p.ClassName == "Model" then
+		local pp = o._p.PrimaryPart or o:FindFirstChildWhichIsA("BasePart", true)
+		return pp and pp.CFrame or CFrame.new()
+	end
+	return o._p.CFrame or CFrame.new()
+end
+function Inst.PivotTo(o, cf)
+	if o._p.ClassName == "Model" then
+		local d = cf * o:GetPivot():Inverse()
+		for _, k in ipairs(o:GetDescendants()) do if k:IsA("BasePart") then k.CFrame = d * k.CFrame end end
+	else
+		o.CFrame = cf
+	end
+end
+function Inst.GetBoundingBox(o)
+	local lo, hi
+	for _, k in ipairs(o:GetDescendants()) do
+		if k:IsA("BasePart") then
+			local p, h = k.CFrame.Position, k.Size / 2
+			lo = lo and Vector3.new(math.min(lo.X, p.X - h.X), math.min(lo.Y, p.Y - h.Y), math.min(lo.Z, p.Z - h.Z)) or p - h
+			hi = hi and Vector3.new(math.max(hi.X, p.X + h.X), math.max(hi.Y, p.Y + h.Y), math.max(hi.Z, p.Z + h.Z)) or p + h
+		end
+	end
+	lo, hi = lo or Vector3.new(), hi or Vector3.new()
+	return CFrame.new((lo + hi) / 2), hi - lo
+end
 function Inst.FindFirstChildOfClass(o, n) for _, c in ipairs(o._kids) do if c._p.ClassName == n then return c end end return nil end
 function Inst.GetChildren(o) return table.clone(o._kids) end
 function Inst.GetDescendants(o)
@@ -230,6 +263,7 @@ function Inst.WorldToViewportPoint(c, wp)
 	return V3(x, y, z), x >= 0 and y >= 0 and x <= c.ViewportSize.X and y <= c.ViewportSize.Y
 end
 function Inst.Raycast() return nil end
+RaycastParams = { new = function() return {} end }
 
 local held = {}
 MOCK.held = held
@@ -413,12 +447,18 @@ MOCK.actions = {}
 function Inst.GetSelectedRibbonTool() return MOCK.ribbonTool or Enum.RibbonTool.None end
 function Inst.SelectRibbonTool(_, t) MOCK.ribbonTool = t end
 function Inst.CreatePluginAction(_, id, text) local a = newInst("PluginAction") a.Name = id a.Text = text MOCK.actions[id] = a return a end
-function Inst.CreateButton() local b = newInst("ToolbarButton") MOCK.toolbarButton = b return b end
+function Inst.CreateButton(_, id)
+	local b = newInst("ToolbarButton")
+	MOCK.toolbarButtons = MOCK.toolbarButtons or {}
+	MOCK.toolbarButtons[id] = b
+	if not MOCK.toolbarButton then MOCK.toolbarButton = b end
+	return b
+end
 function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") end
 function Inst.GetMouse() return mouse end
 function Inst.Activate(o) o._p.Active = true end
 function Inst.IsActivated(o) return o._p.Active == true end
-local settings = { RB_TutorialSeen = true } -- (the first-run tutorial is tested on its own)
+local settings = { RB_TutorialSeen = true, RB_Workshop = false } -- (the first-run tutorial is tested on its own; the workshop has its own tests)
 function Inst.GetSetting(_, k) return settings[k] end
 function Inst.SetSetting(_, k, v) settings[k] = v end
 function Inst.Deactivate(o) o._p.Active = false end

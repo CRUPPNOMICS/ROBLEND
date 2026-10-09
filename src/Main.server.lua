@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.9"
+local VERSION = "0.23.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -78,7 +78,20 @@ local shading = "solid"   -- solid / wire
 local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLEND parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
-local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
+-- the workshop: ROBLEND's work happens 10,000 studs under the map, so models don't get mixed up with it.
+-- Import sends Studio parts down, Export sends them back up (to where they came from). Edit > Workshop Under the Map.
+local WORKSHOP = Vector3.new(0, -10000, 0)
+local workshopOn = true
+pcall(function() local v = plugin:GetSetting("RB_Workshop") if v ~= nil then workshopOn = v == true end end)
+local function home() return workshopOn and WORKSHOP or Vector3.new() end
+-- is this part in the workshop (so shown in ROBLEND)? With the workshop off, everything is
+local function shownHere(p)
+	if not workshopOn then return true end
+	local ok, y = pcall(function() return p:GetPivot().Position.Y end)
+	return ok and y < WORKSHOP.Y / 2
+end
+local CURSOR = home() + Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
+local importSelected -- (Import: further down)
 local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment", pivot = "median" }
 -- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
 local FALLOFF = {
@@ -1627,7 +1640,7 @@ end
 
 -- ----- the scene: every ROBLEND part, shown in our 3D view -----
 local function sceneAdd(p)
-	if p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") and not scene[p] then scene[p] = { part = p } end
+	if p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") and not scene[p] and shownHere(p) then scene[p] = { part = p } end
 end
 local function sceneScan()
 	for _, d in ipairs(workspace:GetDescendants()) do
@@ -1656,7 +1669,8 @@ local function syncScene()
 	if not ownView() then return false end
 	local changed = false
 	for p, r in pairs(scene) do
-		if not p.Parent or not p:FindFirstChild("RB_Data") then
+		if not p.Parent or not p:FindFirstChild("RB_Data") or (not shownHere(p) and not (editing and p == obj)) then
+			-- gone, or sent back up to the map (Export)
 			view:removeObject(p)
 			scene[p] = nil
 			changed = true
@@ -1835,7 +1849,7 @@ local ctx = {
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
 	Convert = Convert, AssetService = AssetService, VERSION = VERSION, Boolean = Boolean, evaluated = evaluated,
-	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools, writeData = writeData,
+	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools, writeData = writeData, home = home,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -2335,7 +2349,8 @@ local function modelingTools()
 	function MOD.placeCursor(mp)
 		CURSOR = surfacePoint(mp)
 		dirtyCage = true
-		setStatus(("3D cursor: %.2f, %.2f, %.2f"):format(CURSOR.X, CURSOR.Y, CURSOR.Z))
+		local rc = CURSOR - home()
+		setStatus(("3D cursor: %.2f, %.2f, %.2f"):format(rc.X, rc.Y, rc.Z))
 	end
 	local function snapPoint(mp)
 		if editing and bm then
@@ -3119,7 +3134,7 @@ local function modelingTools()
 		end
 		dirtyCage = true
 	end
-	O.CursorToOrigin = function() CURSOR = V3() dirtyCage = true end
+	O.CursorToOrigin = function() CURSOR = home() dirtyCage = true end
 	O.CursorToGrid = function() CURSOR = V3(math.floor(CURSOR.X + 0.5), math.floor(CURSOR.Y + 0.5), math.floor(CURSOR.Z + 0.5)) dirtyCage = true end
 	O.ClearAnnotations = function() MOD.strokes = {} dirtyCage = true end
 	-- modal tools from menus / keys
@@ -3383,6 +3398,11 @@ local function toggleXray() xray = not xray worldTris = nil dirtyCage = true set
 local function toggleEdit()
 	if editing then exitEdit() return end
 	local p = selectedPart()
+	-- a part up on the map: bring it down to the workshop first (Import)
+	if workshopOn and p and p:IsA("BasePart") and p.Parent and not p.Locked and not shownHere(p) and importSelected then
+		importSelected({ p })
+		p = selectedPart()
+	end
 	-- Tab on an ordinary part / mesh: turn it into a ROBLEND mesh first (Blender edits any mesh object)
 	if p and p:IsA("BasePart") and not isRB(p) and p.Parent and not p.Locked and not p:IsA("Terrain") then
 		local made = OT.convert({ p })
@@ -3493,7 +3513,7 @@ end
 local api = { version = VERSION, logoImage = logoImage }
 local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, blockKeys = KC and KC.enabled and not KC.failed,
+	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -3505,7 +3525,7 @@ function api.state()
 	local p = selectedPart()
 	if p then
 		st.objName, st.isRB = p.Name, isRB(p)
-		st.objLoc, st.objDim = p.CFrame.Position, p.Size
+		st.objLoc, st.objDim = p.CFrame.Position - home(), p.Size
 		local rx, ry, rz = p.CFrame:ToOrientation()
 		st.objRot = V3(math.deg(rx), math.deg(ry), math.deg(rz))
 		st.color, st.material = p.Color, p.Material and p.Material.Name
@@ -3537,9 +3557,9 @@ function api.state()
 		for e in pairs(bm.edges) do if e.sel then s.es += 1 end end
 		for f in pairs(bm.faces) do if f.sel then s.fs += 1 end end
 		st.stats = s
-		if n > 0 then st.loc = W(sum / n) end
+		if n > 0 then st.loc = W(sum / n) - home() end
 	elseif p then
-		st.loc = p.CFrame.Position
+		st.loc = p.CFrame.Position - home()
 	end
 	return st
 end
@@ -3706,6 +3726,133 @@ api.sculptSet = function(key, value)
 	elseif key == "symmetryX" then B.symmetryX = value == true end
 end
 -- Text objects (Add > Text): change the words / block size / depth, the mesh is rebuilt
+-- ===== the workshop: Import (map -> workshop) and Export (workshop -> map) =====
+-- the things to move: selected Models and parts in the workspace (not ones inside another selected thing)
+local function topLevel(list)
+	local set, out = {}, {}
+	for _, x in ipairs(list) do if (x:IsA("BasePart") or x:IsA("Model")) and x:IsDescendantOf(workspace) and not x:IsA("Terrain") then set[x] = true end end
+	for x in pairs(set) do
+		local a, inside = x.Parent, false
+		while a and a ~= workspace do if set[a] then inside = true break end a = a.Parent end
+		if not inside then out[#out + 1] = x end
+	end
+	return out
+end
+local function boxOf(list)
+	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
+	for _, x in ipairs(list) do
+		local cf, size
+		if x:IsA("Model") then cf, size = x:GetBoundingBox() else cf, size = x.CFrame, x.Size end
+		local h = size / 2
+		for _, s in ipairs({ V3(1, 1, 1), V3(-1, 1, 1), V3(1, -1, 1), V3(1, 1, -1), V3(-1, -1, 1), V3(-1, 1, -1), V3(1, -1, -1), V3(-1, -1, -1) }) do
+			local w = cf * (h * s)
+			lo, hi = lo:Min(w), hi:Max(w)
+		end
+	end
+	return lo, hi
+end
+-- where Studio's camera looks (on the map), for things made in ROBLEND that never came from the map
+local function studioSpawn(ignore)
+	local cam = workspace.CurrentCamera
+	local sc = MOD.savedCam
+	local cf = (sc and sc.cf) or (cam and cam.CFrame) or CFrame.new(0, 20, 20)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore or {}
+	local res = workspace:Raycast(cf.Position, cf.LookVector * 600, params)
+	local p = res and res.Position or (cf.Position + cf.LookVector * 30)
+	return V3(math.floor(p.X + 0.5), math.floor(p.Y + 0.5), math.floor(p.Z + 0.5))
+end
+importSelected = function(list)
+	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map), so things are edited where they are.") return end
+	if modal then return end
+	local things = topLevel(list or Selection:Get())
+	local up = {}
+	for _, x in ipairs(things) do if not shownHere(x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x) then up[#up + 1] = x end end
+	if #things == 0 then setStatus("Select parts or models in Studio first (Explorer or the 3D view), then Import.") return end
+	if #up == 0 then setStatus("Those are already down in the workshop.") return end
+	if editing then exitEdit() end
+	local lo, hi = boxOf(up)
+	-- the group lands in the middle of the workshop, sitting on its floor; each remembers where it was
+	local delta = (home() + V3(0, (hi.Y - lo.Y) / 2, 0)) - (lo + hi) / 2
+	delta = V3(math.floor(delta.X + 0.5), math.floor(delta.Y + 0.5), math.floor(delta.Z + 0.5))
+	record("Import to workshop", function()
+		for _, x in ipairs(up) do
+			local cf = x:GetPivot()
+			x:SetAttribute("RB_Home", cf)
+			x:PivotTo(cf + delta)
+		end
+	end)
+	-- normal parts become ROBLEND meshes so they can be edited (up to 60 at a time)
+	local plain, rb = {}, {}
+	for _, x in ipairs(up) do
+		local parts = x:IsA("BasePart") and { x } or x:GetDescendants()
+		for _, q in ipairs(parts) do
+			if q:IsA("BasePart") then
+				if isRB(q) then rb[#rb + 1] = q
+				elseif not q.Locked and not q:IsA("Terrain") and not q:IsA("UnionOperation") then plain[#plain + 1] = q end
+			end
+		end
+	end
+	if #plain > 0 and #plain <= 60 then
+		for _, q in ipairs(OT.convert(plain)) do rb[#rb + 1] = q end
+	end
+	for _, q in ipairs(rb) do sceneAdd(q) end
+	if #rb > 0 then Selection:Set(rb) activeObj = rb[#rb] end
+	if not uiOn then setUIOn(true) end
+	dirtyCage = true
+	task.defer(function() pcall(frameSelected) end)
+	setStatus(("Imported %d into the workshop (10,000 studs under the map)%s. Export sends %s back where %s came from."):format(#up,
+		#plain > 60 and (" - " .. #plain .. " normal parts is a lot, so they weren't turned into ROBLEND meshes (Tab one to edit it)") or "", #up == 1 and "it" or "them", #up == 1 and "it" or "they"))
+end
+api.importSelected = function(list) importSelected(list) end
+api.exportSelected = function(list)
+	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map).") return end
+	if modal then return end
+	if editing then exitEdit() end
+	local things = {}
+	for _, x in ipairs(topLevel(list or Selection:Get())) do
+		if shownHere(x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x) then things[#things + 1] = x end
+	end
+	if #things == 0 then setStatus("Select what to send back up to the map (click it, or pick it in the Outliner), then Export.") return end
+	local fresh = {}
+	for _, x in ipairs(things) do if typeof(x:GetAttribute("RB_Home")) ~= "CFrame" then fresh[#fresh + 1] = x end end
+	-- new things go where Studio's camera is looking, keeping their layout
+	local delta
+	if #fresh > 0 then
+		local lo, hi = boxOf(fresh)
+		delta = (studioSpawn(fresh) + V3(0, (hi.Y - lo.Y) / 2, 0)) - (lo + hi) / 2
+	end
+	record("Export to map", function()
+		for _, x in ipairs(things) do
+			local back = x:GetAttribute("RB_Home")
+			if typeof(back) == "CFrame" then
+				x:PivotTo(back)
+				x:SetAttribute("RB_Home", nil)
+			else
+				x:PivotTo(x:GetPivot() + delta)
+			end
+		end
+	end)
+	Selection:Set(things)
+	dirtyCage = true
+	setStatus(("Sent %d back up to the map%s."):format(#things, #fresh > 0 and " (new ones are where Studio's camera is looking)" or ""))
+	return things
+end
+api.backToStudio = function() setUIOn(false) end
+api.setWorkshop = function(on)
+	if editing then exitEdit() end
+	workshopOn = on == true
+	pcall(function() plugin:SetSetting("RB_Workshop", workshopOn) end)
+	CURSOR = home() + V3(0, 2, 0)
+	for p in pairs(scene) do if view then view:removeObject(p) end scene[p] = nil end
+	sceneScan()
+	if view then view.floorY = home().Y view.grid.spacing = nil frameAll() end
+	dirtyCage = true
+	setStatus(workshopOn and "Workshop on: ROBLEND works 10,000 studs under the map (Import / Export move things)." or "Workshop off: ROBLEND works right on the map.")
+end
+api.home = home
+
 -- Add > Text: a new text object with these words
 api.addText = function(words)
 	if modal then return end
@@ -3856,6 +4003,8 @@ function api.setProp(key, axis, value)
 	local p = selectedPart()
 	if not p or modal then return end
 	local function with(v3) return V3(axis == "X" and value or v3.X, axis == "Y" and value or v3.Y, axis == "Z" and value or v3.Z) end
+	-- (locations are typed relative to the workshop)
+	if key == "loc" then value += home()[axis] end
 	record(key, function()
 		if key == "loc" then
 			p.CFrame = p.CFrame.Rotation + with(p.CFrame.Position)
@@ -3880,6 +4029,7 @@ function api.setField(key, axis, value)
 		local vs = selectedVertsList()
 		if #vs == 0 then return end
 		local cw = W(centerOf(vs))
+		value += home()[axis]
 		local target = V3(axis == "X" and value or cw.X, axis == "Y" and value or cw.Y, axis == "Z" and value or cw.Z)
 		local dL = origin:VectorToObjectSpace(target - cw)
 		for _, v in ipairs(vs) do v.co += dL end
@@ -3956,6 +4106,9 @@ setUIOn = function(on)
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1
+			view.floorY = home().Y
+			view.focus = CURSOR
+			view:update()
 			view.discard = function(part) Display.free(part) end
 			local had = false
 			sceneScan()
@@ -3968,6 +4121,12 @@ setUIOn = function(on)
 		if ownView() then plugin:Activate(true) end
 		local hasApi = pcall(function() assert(AssetService.CreateAssetAsync) end)
 		setStatus(hasApi and ("Welcome to " .. NAME .. ". Shift A = add, click a mesh + Tab = edit, MMB / RMB drag = orbit, wheel = zoom.") or BETA_MSG)
+		-- ROBLEND meshes up on the map aren't shown down here: say so
+		if workshopOn then
+			local up = 0
+			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
+			if up > 0 then setStatus(("Workshop (10,000 studs under the map). %d ROBLEND mesh%s up on the map: select in Studio, then Import (Plugins tab or File menu) to edit here."):format(up, up == 1 and " is" or "es are")) end
+		end
 		-- the first time ever: open the tutorial (Help > Tutorial brings it back)
 		local seen
 		pcall(function() seen = plugin:GetSetting("RB_TutorialSeen") end)
@@ -3987,6 +4146,15 @@ setUIOn = function(on)
 	dirtyCage = true
 end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
+-- Studio toolbar: Import (selected -> ROBLEND's workshop) and Export (back up to the map)
+pcall(function()
+	local bi = toolbar:CreateButton("RB_Import", "Send the selected parts / models down to ROBLEND's workshop (10,000 studs under the map) and edit them", "", "Import")
+	bi.ClickableWhenViewportHidden = true
+	bi.Click:Connect(function() pcall(function() bi:SetActive(false) end) importSelected() end)
+	local be = toolbar:CreateButton("RB_Export", "Send the selected ROBLEND work back up to the map (to where it came from)", "", "Export")
+	be.ClickableWhenViewportHidden = true
+	be.Click:Connect(function() pcall(function() be:SetActive(false) end) api.exportSelected() end)
+end)
 plugin.Unloading:Connect(function()
 	pcall(function() if editing then exitEdit() end end)
 	ui:destroy()
@@ -4399,7 +4567,7 @@ local function objectKey(k, shift, ctrl, alt)
 	if k == Enum.KeyCode.C and shift and ctrl and alt then ui:openNamedMenu("origin", mousePos()) return end
 	if k == Enum.KeyCode.A and ctrl and not shift and not alt then ui:openNamedMenu("apply", mousePos()) return end
 	if k == Enum.KeyCode.Z and not ctrl and not shift and not alt then ui:openNamedMenu("shading", mousePos()) return end
-	if k == Enum.KeyCode.C and shift and not ctrl and not alt then CURSOR = V3() frameAll() setStatus("3D cursor to the world origin, view all.") return end
+	if k == Enum.KeyCode.C and shift and not ctrl and not alt then CURSOR = home() frameAll() setStatus("3D cursor to the world origin, view all.") return end
 	if k == Enum.KeyCode.H and alt then OT.hide("reveal") return end
 	if k == Enum.KeyCode.H and shift then OT.hide("unselected") return end
 	if k == Enum.KeyCode.H then OT.hide("selected") return end

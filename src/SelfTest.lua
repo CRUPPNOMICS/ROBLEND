@@ -50,7 +50,7 @@ function SelfTest.run(C, api)
 		q.Parent = folder
 		return q
 	end
-	local ORIGIN = V3(0, 400, 0)   -- far up, out of the way
+	local ORIGIN = (C.home and C.home() or V3()) + V3(0, 400, 0)   -- out of the way (above the workshop when it's on)
 	C.setStatus("ROBLEND self-test running... (watch the Output window)")
 	print("ROBLEND TEST START  version " .. tostring(C.VERSION))
 

@@ -1873,6 +1873,7 @@ check("Help > Run Self-Test runs clean in the fake Studio and tidies up", functi
 	local lines = {}
 	local realPrint = print
 	print = function(...) local t = table.concat({ ... }, " ") lines[#lines + 1] = t end
+	MOCK.api.setWorkshop(true) beat()
 	local okRun, errRun = pcall(function() headerBtn("Help") menuItem("Run Self-Test") end)
 	print = realPrint
 	for _ = 1, 20 do beat() end
@@ -1885,6 +1886,7 @@ check("Help > Run Self-Test runs clean in the fake Studio and tidies up", functi
 	assert(done, "finished: " .. table.concat(lines, "\n"))
 	assert(#fails == 0, table.concat(fails, "\n"))
 	assert(not workspace:FindFirstChild("ROBLEND_SelfTest"), "test folder taken out")
+	MOCK.api.setWorkshop(false) beat()
 	MOCK.warns = {}
 end)
 check("a big sculpt (over Roblox's 200,000-character string limit) is stored in pieces and reads back whole (0.22.4)", function()
@@ -1959,9 +1961,74 @@ check("Help > Quick Test sets up and shows every item, then tidies up", function
 	MOCK.api.quickTestState().reset()
 	MOCK.warns = {}
 end)
+check("the workshop: work happens 10,000 studs down; Import / Export / Back to Studio (0.23.0)", function()
+	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
+	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	local api = MOCK.api
+	api.setWorkshop(true) beat()
+	assert(api.state().workshop, "on")
+	-- a new shape goes in the workshop; Properties show it relative to the workshop
+	api.add("Cube") beat()
+	local c = S.Selection:Get()[1]
+	assert(c.CFrame.Position.Y < -9000, "made down in the workshop: " .. tostring(c.CFrame.Position))
+	assert(math.abs(api.state().objLoc.Y) < 50, "Location is relative: " .. tostring(api.state().objLoc))
+	-- a normal Part on the map: Import (toolbar button) sends it down and makes it a ROBLEND mesh
+	local q = Instance.new("Part")
+	q.Name, q.Size, q.CFrame, q.Anchored = "MapRock", Vector3.new(4, 2, 4), CFrame.new(50, 5, 0), true
+	q.Parent = workspace
+	S.Selection:Set({ q })
+	assert(MOCK.toolbarButtons.RB_Import and MOCK.toolbarButtons.RB_Export, "Studio toolbar has Import and Export")
+	MOCK.toolbarButtons.RB_Import.Click:Fire() beat() beat()
+	local rock = workspace:FindFirstChild("MapRock")
+	assert(rock and rock:FindFirstChild("RB_Data"), "converted")
+	assert(rock.CFrame.Position.Y < -9000, "sent down: " .. tostring(rock.CFrame.Position))
+	assert(typeof(rock:GetAttribute("RB_Home")) == "CFrame", "remembers where it came from")
+	local listed = false
+	for _, row in ipairs(api.outliner()) do if row.key == rock then listed = true end end
+	assert(listed, "in the Outliner")
+	-- Export (top bar button) puts it back exactly
+	S.Selection:Set({ rock })
+	local eb = find("TextButton", function(d) return d.Name == "RB_TopExport" end)
+	assert(eb, "Export button in the top bar")
+	eb.Activated:Fire() beat() beat()
+	assert((rock.CFrame.Position - Vector3.new(50, 5, 0)).Magnitude < 1e-3, "back where it was: " .. tostring(rock.CFrame.Position))
+	assert(rock:GetAttribute("RB_Home") == nil, "home cleared")
+	for _ = 1, 6 do MOCK.t += 0.05 beat() end
+	for _, row in ipairs(api.outliner()) do assert(row.key ~= rock, "gone from the workshop list") end
+	-- something new made in ROBLEND goes where Studio's camera looks
+	S.Selection:Set({ c })
+	api.exportSelected() beat()
+	assert(c.CFrame.Position.Y > -5000, "new work exported up to the map: " .. tostring(c.CFrame.Position))
+	-- a Model with two parts comes down together
+	local m = Instance.new("Model") m.Name = "Hut" m.Parent = workspace
+	for i = 1, 2 do local pp = Instance.new("Part") pp.Name = "Wall" .. i pp.Size = Vector3.new(2, 2, 2) pp.CFrame = CFrame.new(100 + i * 3, 1, 0) pp.Anchored = true pp.Parent = m end
+	S.Selection:Set({ m })
+	api.importSelected() beat()
+	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000 and m:FindFirstChild("Wall1"):FindFirstChild("RB_Data"), "model came down, parts editable")
+	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
+	S.Selection:Set({ m }) api.exportSelected() beat()
+	assert(math.abs(m.Wall1.CFrame.Position.Y - 1) < 1e-3, "model back up")
+	-- Tab on a part up on the map brings it down and edits it
+	local r2 = Instance.new("Part") r2.Name = "MapCrate" r2.Size = Vector3.new(2, 2, 2) r2.CFrame = CFrame.new(-40, 1, 0) r2.Anchored = true r2.Parent = workspace
+	S.Selection:Set({ r2 }) beat()
+	press("Tab") beat() beat()
+	assert(inEdit(), "editing it")
+	local crate
+	for _, ch in ipairs(workspace:GetChildren()) do if ch.Name == "MapCrate" then crate = ch end end
+	assert(crate.CFrame.Position.Y < -9000, "Tab brought it down")
+	press("Tab") beat()
+	-- Back to Studio closes ROBLEND
+	find("TextButton", function(d) return d.Name == "RB_TopBacktoStudio" end).Activated:Fire() beat()
+	assert(not gui.Enabled, "Back to Studio closes ROBLEND")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	for _, x in ipairs({ c, rock, m, crate }) do x.Parent = nil end
+	api.setWorkshop(false) beat()
+end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
 	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	MOCK.api.setWorkshop(true) beat()
 	if inEdit() then press("Tab") beat() end
 	local realPrint = print
 	local lines = {}
@@ -2002,8 +2069,10 @@ check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 		for _, hex in ipairs(d.vc or {}) do if hex ~= "" and not seen[hex] then seen[hex] = true n += 1 end end
 		assert(n == 4, "four colours, got " .. n)
 		assert(not MOCK.api.state().editing, "back in Object Mode")
+		assert(block.CFrame.Position.Y < -9000, "made in the workshop")
 		block.Parent = nil
 	end
+	MOCK.api.setWorkshop(false) beat()
 	MOCK.warns = {}
 end)
 check("wireframe, x-ray, Studio view switch, close", function()
