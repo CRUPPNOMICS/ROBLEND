@@ -25,6 +25,9 @@ def item(cls, name, source, children=''):
 # every src/*.lua except Main is a ModuleScript under the plugin Script
 names = sorted(m.stem for m in src.glob('*.lua') if m.stem != 'Main.server')
 mods = ''.join(item('ModuleScript', n, (src / f'{n}.lua').read_text()) for n in names)
+# the licence travels with the plugin (GPL section 1): NOTICE, CREDITS and the full GPL text, as a comment-only module
+legal = '\n\n'.join((root / f).read_text() for f in ('NOTICE', 'CREDITS.md', 'LICENSE'))
+mods += item('ModuleScript', 'LICENSE', '--[==[\n' + legal + '\n]==]\nreturn {}\n')
 main = item('Script', 'ROBLEND', (src / 'Main.server.lua').read_text(), mods)
 xml = ('<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" '
        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '

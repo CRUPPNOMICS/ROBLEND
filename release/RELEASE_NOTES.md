@@ -1,4 +1,4 @@
-# ROBLEND 0.24.5
+# ROBLEND 0.24.6
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.24.6:** The plugin file now carries its licence: a LICENSE module inside ROBLEND holds the notice, the Blender credits and the full GPL text.
 
 **0.24.5:** One click on any part (a part on its own or one part of a model) selects just that part and gives it the outline. Alt + click selects the whole model or group; G / R / S then move, turn or resize all of it.
 
