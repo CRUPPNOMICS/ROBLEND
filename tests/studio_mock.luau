@@ -151,6 +151,10 @@ Inst.__index = function(o, k)
 	return v
 end
 Inst.__newindex = function(o, k, v)
+	-- Roblox's limit on one string property
+	if k == "Value" and type(v) == "string" and #v >= 200000 then
+		error(("Unable to assign property Value. Provided string length (%d) is greater than or equal to max length (200000)"):format(#v), 2)
+	end
 	if k == "Parent" then
 		local old = o._p.Parent
 		if old then for i, c in ipairs(old._kids) do if c == o then table.remove(old._kids, i) break end end end
@@ -185,7 +189,12 @@ function Inst.Clone(o)
 	for _, k in ipairs(o._kids) do local kk = k:Clone() kk.Parent = c end
 	return c
 end
-function Inst.SetAttribute(o, k, v) o._attr[k] = v end
+function Inst.SetAttribute(o, k, v)
+	local old = o._attr[k]
+	o._attr[k] = v
+	if old ~= v and o._asig and o._asig[k] then o._asig[k]:Fire() end
+end
+function Inst.GetAttributeChangedSignal(o, k) o._asig = o._asig or {} o._asig[k] = o._asig[k] or Signal.new() return o._asig[k] end
 function Inst.GetAttribute(o, k) return o._attr[k] end
 function Inst.GetAttributes(o) return table.clone(o._attr) end
 function Inst.GetPropertyChangedSignal(o, k) o._psig[k] = o._psig[k] or Signal.new() return o._psig[k] end

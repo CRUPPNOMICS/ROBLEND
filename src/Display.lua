@@ -395,14 +395,15 @@ function Display.upload(bm, params, uv)
 	return idOrErr, nil, nil, c
 end
 -- a MeshPart using the uploaded mesh (new uploads can take a moment to be ready, so it retries)
-function Display.fromAsset(id)
+-- opts: { CollisionFidelity, RenderFidelity } (Roblox only sets these when the MeshPart is made)
+function Display.fromAsset(id, opts)
 	local lastErr
 	for attempt = 1, 5 do
 		for _, make in ipairs({
 			function() return Content.fromAssetId(id) end,
 			function() return Content.fromUri("rbxassetid://" .. tostring(id)) end,
 		}) do
-			local ok, mp = pcall(function() return AssetService:CreateMeshPartAsync(make()) end)
+			local ok, mp = pcall(function() if opts and next(opts) then return AssetService:CreateMeshPartAsync(make(), opts) end return AssetService:CreateMeshPartAsync(make()) end)
 			if ok and mp then return mp end
 			lastErr = mp
 		end

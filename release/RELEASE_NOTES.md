@@ -1,4 +1,4 @@
-# ROBLEND 0.22.3
+# ROBLEND 0.22.4
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.22.4:** Fixed (found by the Auto-Test in real Studio): big meshes (a sculpt subdivided a few times) couldn't be stored - Roblox caps one text value at 200,000 characters, so the mesh now carries on in extra pieces. Collision / render detail from Properties now really changes the part (Roblox only takes them when the mesh part is made, so it's made again). Auto-Test made steadier.
 
 **0.22.3:** Help > Run Auto-Test: checks about 100 features by itself (pretend mouse and keys through the real controls) and prints a report. Faster: moving a big selection (G / S / R) no longer redraws thousands of outline pieces every step, and orbiting round a big mesh in Edit Mode is smoother. Fixed: Ctrl + numpad plus / minus now grows / shrinks the selection in Edit Mode (it zoomed); Select Mirror works in edge and face select.
 

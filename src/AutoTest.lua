@@ -79,7 +79,6 @@ function AutoTest.run(C, api, only)
 	local function view() return C.get().view end
 	local inMock = MOCK ~= nil   -- the fake Studio used for ROBLEND's own tests (its undo is only pretend)
 	local function mid() local v = view() return v:offset() + v:size() / 2 end
-	local function corner() return view():offset() + V2(12, 12) end
 	-- finish whatever tool is running (a click confirms)
 	local function confirm() if C.get().modal then click(nil) end if C.get().modal then pcall(C.finishModal, false) end end
 
@@ -172,6 +171,13 @@ function AutoTest.run(C, api, only)
 		if only and not only[id] then return end
 		H.clean()
 		FAKE.keys = {}
+		pcall(function()
+			local v = C.get().view
+			api.viewAxis("front")
+			v:step(math.rad(-40), math.rad(25))
+			v.viewName = nil
+			C.dirtyCage()
+		end)
 		move(mid())
 		beat()
 		local ok, err = pcall(fn)
@@ -235,7 +241,7 @@ function AutoTest.run(C, api, only)
 		check((p.CFrame.Position - p0).Magnitude < 1e-3, "Esc didn't put it back")
 		key("G") key("X") glide(mid(), mid() + V2(80, 60)) click(nil)
 		local d = p.CFrame.Position - p0
-		check(math.abs(d.X) > 0.05 and near(d.Y, 0) and near(d.Z, 0), "G X should move along X only, moved " .. tostring(d))
+		check(math.abs(d.X) > 0.05 and near(d.Y, 0) and near(d.Z, 0), "G X should move along X only, moved " .. tostring(d) .. " (view looks along " .. tostring(api.camera().CFrame.LookVector) .. ")")
 		local r0 = p.CFrame.Rotation
 		key("R") glide(mid(), mid() + V2(150, 0)) click(nil)
 		check(p.CFrame.Rotation ~= r0, "R didn't rotate")
@@ -304,6 +310,7 @@ function AutoTest.run(C, api, only)
 	end)
 	T("convundo", function()
 		local q = H.part("Part") beat()
+		C.CHS:SetWaypoint("ROBLEND auto-test setup")
 		api.convert({ q }) beat()
 		check(q.Parent == nil, "converted")
 		api.undo() beat(3)
@@ -337,7 +344,11 @@ function AutoTest.run(C, api, only)
 		click(S(W(centre(other))), { "LeftShift" })
 		check(stats().fs == 2, "Shift click adds one, " .. stats().fs .. " selected")
 		key("A", { "LeftAlt" })
-		drag(corner(), S(W(centre(fs[1]))))
+		local lo = V2(math.huge, math.huge)
+		for v in pairs(bm().verts) do local sp = S(W(v.co)) lo = V2(math.min(lo.X, sp.X), math.min(lo.Y, sp.Y)) end
+		local off = view():offset()
+		local start = V2(math.max(lo.X - 25, off.X + 70), math.max(lo.Y - 25, off.Y + 40))
+		drag(start, S(W(centre(fs[1]))))
 		check(stats().fs >= 2, "box select picked " .. stats().fs)
 	end)
 	T("allnone", function()
@@ -373,7 +384,7 @@ function AutoTest.run(C, api, only)
 	end)
 	T("circle", function()
 		edit("Sphere", "vert", "none")
-		local c = S(W(centre(frontFace())))
+		local c = S(W(BMesh.faceVerts(frontFace())[1].co))
 		move(c)
 		key("C")
 		check(C.get().modal ~= nil, "C starts circle select")
@@ -1030,9 +1041,11 @@ function AutoTest.run(C, api, only)
 	-- ===== Collision and saving =====
 	T("collision", function()
 		local p = addObj("Sphere")
-		api.setPhys("collision", "Hull") beat()
+		api.setPhys("collision", "Hull") beat(3)
+		p = obj() or p
 		check(p.CollisionFidelity == Enum.CollisionFidelity.Hull, "collision " .. tostring(p.CollisionFidelity))
-		api.setPhys("render", "Performance") beat()
+		api.setPhys("render", "Performance") beat(3)
+		p = obj() or p
 		check(p.RenderFidelity == Enum.RenderFidelity.Performance, "render " .. tostring(p.RenderFidelity))
 		api.toggleEdit() H.pick("all") key("E") glide(mid(), mid() + V2(0, -30)) click(nil) api.toggleEdit() beat(3)
 		local q = obj() or p

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.3"
+local VERSION = "0.22.4"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -194,7 +194,44 @@ local function setStatus(t) status.Text = t lastStatus = t if ui then ui:setRepo
 
 -- ===== saving on the part =====
 local function isRB(p) return p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") ~= nil end
-local function dataOf(p) return p:FindFirstChild("RB_Data") end
+-- the mesh is stored as text in the part's RB_Data StringValue. Roblox caps one string at 200,000 characters, so a
+-- big mesh (a sculpt) carries on in child StringValues named 2, 3, ... (written first, then RB_Data itself, so
+-- anything watching RB_Data sees the whole thing). dataOf(p).Value reads / writes all of it as one string.
+local CHUNK = 190000
+local function readData(sv)
+	local s = sv.Value
+	local c = sv:FindFirstChild("2")
+	if not c then return s end
+	local parts, i = { s }, 2
+	while c do parts[#parts + 1] = c.Value i += 1 c = sv:FindFirstChild(tostring(i)) end
+	return table.concat(parts)
+end
+local function writeData(sv, s)
+	local n = math.max(1, math.ceil(#s / CHUNK))
+	for i = 2, n do
+		local c = sv:FindFirstChild(tostring(i))
+		if not c then c = Instance.new("StringValue") c.Name = tostring(i) c.Parent = sv end
+		c.Value = s:sub((i - 1) * CHUNK + 1, i * CHUNK)
+	end
+	local i = n + 1
+	local extra = sv:FindFirstChild(tostring(i))
+	while extra do extra.Parent = nil i += 1 extra = sv:FindFirstChild(tostring(i)) end
+	-- (a change only in a later piece still shows up on RB_Data itself, for undo to notice)
+	sv:SetAttribute("RB_Sum", n > 1 and (#s .. ":" .. s:sub(-48)) or nil)
+	sv.Value = s:sub(1, CHUNK)
+end
+local DataProxy = {}
+DataProxy.__index = function(t, k)
+	if k == "Value" then return readData(t.sv) end
+	local v = t.sv[k]
+	if type(v) == "function" then return function(_, ...) return v(t.sv, ...) end end
+	return v
+end
+DataProxy.__newindex = function(t, k, v) if k == "Value" then writeData(t.sv, v) else t.sv[k] = v end end
+local function dataOf(p)
+	local sv = p:FindFirstChild("RB_Data")
+	return sv and setmetatable({ sv = sv }, DataProxy) or nil
+end
 
 local function encode(b) return HttpService:JSONEncode(b:toData()) end
 
@@ -241,7 +278,7 @@ local function uvKey(p)
 end
 -- what a save covers: the mesh + its modifiers + its UVs
 local function saveKey(p)
-	local d, s = p.RB_Data.Value, modsStr(p)
+	local d, s = dataOf(p).Value, modsStr(p)
 	local u = uvKey(p)
 	if s == "" and u == "" then return d end
 	local ek = envKey(p)
@@ -323,7 +360,7 @@ envKey = function(p)
 				-- where the other part sits relative to this one (three of its points pin that down)
 				local o, qc = originOf(p), q.CFrame
 				local d = q:FindFirstChild("RB_Data")
-				out[#out + 1] = tostring(o:PointToObjectSpace(qc * V3())) .. tostring(o:PointToObjectSpace(qc * V3(1, 0, 0))) .. tostring(o:PointToObjectSpace(qc * V3(0, 1, 0))) .. tostring(q.Size) .. (d and tostring(#d.Value) .. modsStr(q) or "")
+				out[#out + 1] = tostring(o:PointToObjectSpace(qc * V3())) .. tostring(o:PointToObjectSpace(qc * V3(1, 0, 0))) .. tostring(o:PointToObjectSpace(qc * V3(0, 1, 0))) .. tostring(q.Size) .. (d and tostring(#dataOf(q).Value) .. modsStr(q) or "")
 			else
 				out[#out + 1] = "?"
 			end
@@ -438,7 +475,7 @@ local function restoreSaved(p)
 	local id = p:GetAttribute("RB_AssetId")
 	if not id then return end
 	task.spawn(function()
-		local real = Display.fromAsset(id)
+		local real = Display.fromAsset(id, (Display.fidelity(p)))
 		if real and p.Parent and not (editing and p == obj) and isSaved(p) then
 			local c = Display.bounds(evaluated(p, (loadFrom(p))))
 			applyBuilt(p, real, c)
@@ -724,7 +761,8 @@ end
 local function watchData()
 	if dataConn then dataConn:Disconnect() dataConn = nil end
 	if not obj then return end
-	dataConn = dataOf(obj):GetPropertyChangedSignal("Value"):Connect(function()
+	local sv = obj:FindFirstChild("RB_Data")
+	local function onChange()
 		if not editing or modal then return end
 		local v = dataOf(obj).Value
 		if v ~= lastWritten then
@@ -739,7 +777,10 @@ local function watchData()
 				setStatus("Undo / redo: mesh reloaded.")
 			end
 		end
-	end)
+	end
+	local c1 = sv:GetPropertyChangedSignal("Value"):Connect(onChange)
+	local c2 = sv:GetAttributeChangedSignal("RB_Sum"):Connect(onChange)
+	dataConn = { Disconnect = function() c1:Disconnect() c2:Disconnect() end }
 end
 
 -- ===== edit mode =====
@@ -883,7 +924,7 @@ local function addShape(kind)
 	mp.CFrame = CFrame.new(base + c)
 	local sv = Instance.new("StringValue")
 	sv.Name = "RB_Data"
-	sv.Value = encode(m)
+	writeData(sv, encode(m))
 	sv.Parent = mp
 	mp:SetAttribute("RB_Center", c)
 	mp:SetAttribute("RB_Size", mp.Size)
@@ -1618,7 +1659,7 @@ local function syncScene()
 			scene[p] = nil
 			changed = true
 		elseif not (editing and p == obj) then
-			local data, ms = p.RB_Data.Value, modsStr(p) .. uvKey(p) .. envKey(p)
+			local data, ms = dataOf(p).Value, modsStr(p) .. uvKey(p) .. envKey(p)
 			local look = lookOf(p)
 			if r.hidden or r.localOut then
 				if r.shown then view:removeObject(p) r.shown = false changed = true end
@@ -1785,7 +1826,7 @@ local ctx = {
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
 	Convert = Convert, AssetService = AssetService, VERSION = VERSION, Boolean = Boolean, evaluated = evaluated,
-	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools,
+	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools, writeData = writeData,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -2346,7 +2387,7 @@ local function modelingTools()
 		mp.CFrame = originCF * CFrame.new(c)
 		local sv = Instance.new("StringValue")
 		sv.Name = "RB_Data"
-		sv.Value = HttpService:JSONEncode(m:toData())
+		writeData(sv, HttpService:JSONEncode(m:toData()))
 		sv.Parent = mp
 		mp:SetAttribute("RB_Center", c)
 		mp:SetAttribute("RB_Size", mp.Size)
@@ -3776,7 +3817,14 @@ function api.setPhys(key, value)
 			if key == "collision" or key == "render" then
 				if p:IsA("MeshPart") then
 					p:SetAttribute(key == "collision" and "RB_Collision" or "RB_Render", value)
-					if not (editing and p == obj) then Display.applyFidelity(p) end
+					if not (editing and p == obj) then
+						-- Roblox only takes collision / render detail when a MeshPart is made: make the mesh again
+						-- with them (from the saved asset if it has one) and put it on the part
+						Display.applyFidelity(p)
+						if isRB(p) then
+							if isSaved(p) then restoreSaved(p) else pcall(function() applyMesh(p, loadFrom(p), false) end) end
+						end
+					end
 				end
 			elseif key == "Anchored" or key == "CanCollide" or key == "CastShadow" then
 				p[key] = value == true

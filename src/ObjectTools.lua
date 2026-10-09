@@ -210,7 +210,7 @@ function ObjectTools.new(C)
 							mp.CFrame = p.CFrame * CFrame.new(c)
 							local sv = Instance.new("StringValue")
 							sv.Name = "RB_Data"
-							sv.Value = encode(m)
+							C.writeData(sv, encode(m))
 							sv.Parent = mp
 							for k, v in pairs(p:GetAttributes()) do pcall(function() mp:SetAttribute(k, v) end) end
 							mp:SetAttribute("RB_Center", c)

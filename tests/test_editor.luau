@@ -1887,6 +1887,28 @@ check("Help > Run Self-Test runs clean in the fake Studio and tidies up", functi
 	assert(not workspace:FindFirstChild("ROBLEND_SelfTest"), "test folder taken out")
 	MOCK.warns = {}
 end)
+check("a big sculpt (over Roblox's 200,000-character string limit) is stored in pieces and reads back whole (0.22.4)", function()
+	if inEdit() then press("Tab") beat() end
+	local api = MOCK.api
+	api.add("Sphere") beat()
+	local p = S.Selection:Get()[1]
+	api.toggleEdit() beat()
+	api.setPaintMode("sculpt")
+	for _ = 1, 3 do api.sculptSubdivide() beat() end
+	api.setPaintMode(nil)
+	press("Tab") beat()
+	local sv = p:FindFirstChild("RB_Data")
+	assert(sv:FindFirstChild("2"), "stored in more than one piece")
+	local whole = sv.Value .. sv["2"].Value .. (sv:FindFirstChild("3") and sv["3"].Value or "")
+	assert(#whole > 200000, "big: " .. #whole)
+	local d = S.HttpService:JSONDecode(whole)
+	assert(d and #d.v > 3 * 4000, "reads back")
+	-- open it again: the whole mesh loads
+	api.toggleEdit() beat()
+	assert(api.state().meshInfo.v > 4000, "loads back: " .. api.state().meshInfo.v)
+	api.toggleEdit() beat()
+	p.Parent = nil
+end)
 check("Help > Quick Test sets up and shows every item, then tidies up", function()
 	if inEdit() then press("Tab") beat() end
 	local mine = workspace:FindFirstChild("Crate Lid", true)
