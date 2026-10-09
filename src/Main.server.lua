@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.4"
+local VERSION = "0.24.5"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -78,6 +78,7 @@ local useStudio = false   -- true = edit in Studio's own 3D view instead of ours
 local shading = "solid"   -- solid / wire
 local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLEND parts shown in our 3D view: part -> record
+local rootOf              -- (further down: the model / group a part belongs to)
 local extras = {}         -- other things brought into the workshop (parts, unions, meshes): shown as copies, Tab turns a part into a ROBLEND mesh
 local activeObj = nil     -- Blender's "active object"
 -- the workshop: ROBLEND's work happens 10,000 studs under the map, so models don't get mixed up with it.
@@ -1144,7 +1145,13 @@ local function selectedParts()
 	return out
 end
 local function startObjTransform(kind)
-	local ps = selectedParts()
+	local ps, seen = {}, {}
+	for _, x in ipairs(Selection:Get()) do
+		local list = x:IsA("BasePart") and { x } or ((x:IsA("Model") or x:IsA("Folder")) and x:GetDescendants() or {})
+		for _, p in ipairs(list) do
+			if p:IsA("BasePart") and not seen[p] then seen[p] = true ps[#ps + 1] = p end
+		end
+	end
 	if #ps == 0 then setStatus("Nothing selected.") return end
 	local orig, c = {}, V3()
 	for _, p in ipairs(ps) do orig[p] = { cf = p.CFrame, size = p.Size } c += p.CFrame.Position end
@@ -1787,7 +1794,17 @@ local function rayBox(ray, cf, size)
 	if tmax < 0 then return nil end
 	return math.max(tmin, 0)
 end
-local function pickObject(sp)
+local pickObject0
+local function pickObject(sp, justPart)
+	-- a click picks the one part under the mouse (it gets the outline); Alt + click picks the whole model / group it's in
+	local p = pickObject0(sp)
+	if p and not justPart and (keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)) and rootOf then
+		local rt = rootOf(p)
+		if rt ~= p and p.Parent and (rt:IsA("Model") or rt:IsA("Folder")) then return rt end
+	end
+	return p
+end
+function pickObject0(sp)
 	local ray = view:ray(sp)
 	local best, bt = nil, math.huge
 	for p, r in pairs(extras) do
@@ -1816,7 +1833,7 @@ local function selectObject(p, add)
 		Selection:Set(cur)
 	else
 		Selection:Set(p and { p } or {})
-		activeObj = p
+		activeObj = (p and p:IsA("BasePart")) and p or nil
 	end
 	dirtyCage = true
 end
@@ -3497,6 +3514,11 @@ local MOD = modelingTools()
 local function toggleXray() xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off")) end
 local function toggleEdit()
 	if editing then exitEdit() return end
+	local first = Selection:Get()[1]
+	if first and (first:IsA("Model") or first:IsA("Folder")) and #Selection:Get() == 1 then
+		setStatus("That's a whole model: click one part of it, then Tab to edit that part.")
+		return
+	end
 	local p = selectedPart()
 	-- a part up on the map: bring it down to the workshop first (Import)
 	if workshopOn and p and p:IsA("BasePart") and p.Parent and not p.Locked and not shownHere(p) and importSelected then
@@ -3864,7 +3886,7 @@ boxOf = function(list)
 	end
 	return lo, hi
 end
-local function rootOf(x)
+rootOf = function(x)
 	local r, a = x, x.Parent
 	while a and a ~= workspace do
 		if a:IsA("Model") or (a:IsA("Folder") and a:GetAttribute("RB_HomeShift") ~= nil) then r = a end

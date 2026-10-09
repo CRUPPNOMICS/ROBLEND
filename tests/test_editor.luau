@@ -2086,6 +2086,25 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	local function shownLines() local n = 0 for _, d in ipairs(view.frame:GetDescendants()) do if d:IsA("BasePart") and (d.Transparency or 0) < 1 and d.Color == View.THEME.active then n += 1 end end return n end
 	for _ = 1, 3 do MOCK.t += 0.05 beat() end
 	assert(shownLines() >= 12, "outline drawn: " .. shownLines())
+	-- one click on a part of it: just that part, with its outline
+	press("KeypadPeriod") beat()
+	mouseTo(m.Wall2.CFrame.Position) click()
+	eq(S.Selection:Get()[1], m.Wall2, "a click picks the one part")
+	eq(#S.Selection:Get(), 1, "only that part")
+	for _ = 1, 2 do MOCK.t += 0.05 beat() end
+	assert(shownLines() >= 12, "the clicked part has its outline: " .. shownLines())
+	mouseTo(m.Wall1.CFrame.Position) click()
+	eq(S.Selection:Get()[1], m.Wall1, "and the other part on its own")
+	-- Alt + click: the whole model; G moves all of it
+	MOCK.held.LeftAlt = true
+	mouseTo(m.Wall1.CFrame.Position) click()
+	MOCK.held.LeftAlt = nil
+	eq(S.Selection:Get()[1], m, "Alt + click picks the whole model")
+	local w1, w2 = m.Wall1.CFrame.Position, m.Wall2.CFrame.Position
+	press("G") press("X") type_("2") press("Return") beat()
+	assert(near(m.Wall1.CFrame.Position.X - w1.X, 2) and near(m.Wall2.CFrame.Position.X - w2.X, 2), "G moves the whole model")
+	press("Z", { "LeftControl" }) beat()
+	S.Selection:Set({ m }) beat()
 	-- picking just one wall still carries the whole model (in a model, out a model)
 	S.Selection:Set({ m.Wall1 }) api.exportSelected() beat()
 	local held = api.placing()
