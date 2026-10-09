@@ -1778,6 +1778,14 @@ check("ROBLEND holds the keyboard so Studio's 1 2 3 4 / Ctrl D etc. don't fire; 
 	local _, hi1 = bounds(after)
 	assert(math.abs(hi1.Z - hi0.Z - 2) < 1e-3, "moved 2 along Z: " .. tostring(hi1.Z - hi0.Z))
 	press("Three") beat()
+	-- Studio takes numpad 4 too: if the numpad key is down, it orbits instead
+	local yaw0 = view.yaw
+	MOCK.held.KeypadFour = true
+	MOCK.ribbonTool = Enum.RibbonTool.Rotate
+	beat()
+	MOCK.held.KeypadFour = nil
+	assert(math.abs(view.yaw - yaw0) > 0.1, "numpad 4 orbited")
+	eq(MOCK.api.state().mode, "face", "and didn't touch the select mode")
 	-- the Customize Shortcuts commands (for keys Studio keeps for itself)
 	MOCK.actions.ROBLEND_EdgeSelect.Triggered:Fire() beat()
 	eq(MOCK.api.state().mode, "edge", "ROBLEND: Edge Select command")

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.9"
+local VERSION = "0.22.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3992,7 +3992,8 @@ end
 
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
-	if uiOn and ownView() then task.defer(KC.grab) end
+	-- (only in the 3D view itself: a click on a text box in Properties must keep the keyboard for typing)
+	if uiOn and ownView() and ui:inCanvas(mp) then task.defer(KC.grab) end
 	if UVE.mouseDown(mp) then return end
 	if ui:overUI(mp) then return end
 	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
@@ -4133,7 +4134,7 @@ pcall(function()
 end)
 mouse.Move:Connect(function()
 	local mp = mousePos()
-	if uiOn and ownView() then KC.grab() end
+	if uiOn and ownView() and ui:inCanvas(mp) then KC.grab() end
 	if uiOn then pcall(function() ui:step(mp) end) end
 	if UVE.mouseMove(mp) then return end
 	if lasso then
@@ -4415,6 +4416,18 @@ local function catchRibbonTool()
 	if not okT or tool == nil or tool == Enum.RibbonTool.None then return end
 	pcall(function() plugin:SelectRibbonTool(Enum.RibbonTool.None, UDim2.new()) end)
 	local key = RIBBON_KEYS[tool.Name]
+	-- Studio also takes the numpad 1 2 3 4 for its tools: if a numpad key is down, it was a view key
+	if key then
+		local pad = ({ One = Enum.KeyCode.KeypadOne, Two = Enum.KeyCode.KeypadTwo, Three = Enum.KeyCode.KeypadThree, Four = Enum.KeyCode.KeypadFour })[key]
+		local downPad = false
+		pcall(function() downPad = UIS:IsKeyDown(pad) end)
+		if downPad then
+			local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+			if KC.showKeys then print(("%s key: Keypad%s  (from Studio's %s tool key)"):format(NAME, key, tool.Name)) end
+			pcall(navKey, pad, ctrl)
+			return
+		end
+	end
 	if key then
 		if KC.showKeys then print(("%s key: %s  (from Studio's %s tool key)"):format(NAME, key, tool.Name)) end
 		local ok, err = pcall(ribbonKey, key)
