@@ -332,6 +332,7 @@ function UI:buildTopBar()
 		return b
 	end
 	menu("File", function() return {
+		{ "Import from Studio...", "", function() self:openImportList() end },
 		{ "Bring Studio Selection Here", "", function() api.importSelected() end },
 		{ "Place in Studio", "", function() api.exportSelected() end },
 		{ "Back to Studio", "", function() api.backToStudio() end },
@@ -385,6 +386,7 @@ function UI:buildTopBar()
 	n += 1
 	make("Frame", { LayoutOrder = n, BackgroundTransparency = 1, Size = UDim2.fromOffset(18, 1) }, row)
 	for _, t in ipairs({
+		{ "Import from Studio", "Import from Studio", "Pick something on your map to bring in (click it, or drag it into the 3D view)", function() self:openImportList() end, rgb(0x8a5a12) },
 		{ "Place in Studio", "Place in Studio", "Go back to Studio holding the selected work: click to place it, R turns it, Enter puts it back where it came from", function() api.exportSelected() end, rgb(0x3d5a80) },
 		{ "Back to Studio", "Back to Studio", "Close ROBLEND (your Studio camera is where you left it)", function() api.backToStudio() end, rgb(0x2e6b3f) },
 	}) do
@@ -1623,6 +1625,110 @@ function UI:openSearch()
 	self.catcher.Visible = true
 	refresh()
 	pcall(function() box:CaptureFocus() end)
+	return fr
+end
+-- Import from Studio: a list of what's on the map (like the Explorer). Click a row, or drag it into the 3D view,
+-- to bring it in; the arrow opens a model / group
+function UI:openImportList()
+	local api = self.api
+	if self.importFrame then self.importFrame.Parent = nil self.importFrame = nil end
+	local UIS = game:GetService("UserInputService")
+	local ca = self.canvas
+	local x0 = (ca.AbsolutePosition and ca.AbsolutePosition.X or 0) + 52
+	local y0 = (ca.AbsolutePosition and ca.AbsolutePosition.Y or 60) + 8
+	local fr = make("Frame", { Name = "RB_ImportList", ZIndex = 75, Position = UDim2.fromOffset(x0, y0), Size = UDim2.fromOffset(300, 430), BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Active = true }, self.gui)
+	corner(stroke(fr, T.menuOutline), 6)
+	self.importFrame = fr
+	table.insert(self.blockers, fr)
+	label(fr, { ZIndex = 76, Position = UDim2.fromOffset(10, 6), Size = UDim2.new(1, -40, 0, 20), Text = "Import from Studio", Font = Enum.Font.GothamBold, TextColor3 = T.textMenu })
+	local conns = {}
+	local ghost
+	local function close()
+		for _, c in ipairs(conns) do c:Disconnect() end
+		self.importDrop = nil
+		if ghost then ghost.Parent = nil ghost = nil end
+		fr.Parent = nil
+		if self.importFrame == fr then self.importFrame = nil end
+	end
+	local x = self:btn(fr, { ZIndex = 76, Position = UDim2.new(1, -28, 0, 6), Size = UDim2.fromOffset(20, 20), Text = "X", BackgroundColor3 = T.regular }, function() close() end, "regular")
+	corner(x, 4)
+	local search = make("TextBox", { Name = "RB_ImportSearch", ZIndex = 76, Position = UDim2.fromOffset(8, 30), Size = UDim2.new(1, -16, 0, 22), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12,
+		TextColor3 = T.text, Text = "", PlaceholderText = "Search the map...", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, fr)
+	corner(search, 4)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, search)
+	label(fr, { ZIndex = 76, Position = UDim2.fromOffset(10, 56), Size = UDim2.new(1, -20, 0, 14), TextSize = 10, TextColor3 = T.textDim, Text = "Click one, or drag it into the 3D view" })
+	local list = make("ScrollingFrame", { ZIndex = 76, Position = UDim2.fromOffset(4, 74), Size = UDim2.new(1, -8, 1, -80), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 6,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y }, fr)
+	vlist(list, 1)
+	local open = {}
+	local drag
+	local function pick(inst)
+		close()
+		self:safe(function() api.importSelected({ inst }) end)
+	end
+	local refresh
+	local order = 0
+	local function addRows(parent, depth)
+		for _, it in ipairs(api.mapItems(parent, search.Text)) do
+			order += 1
+			local row = make("TextButton", { Name = "RB_ImportRow", LayoutOrder = order, ZIndex = 77, Size = UDim2.new(1, -8, 0, 22), BackgroundColor3 = T.blue, BackgroundTransparency = 1,
+				BorderSizePixel = 0, AutoButtonColor = false, Text = "" }, list)
+			row:SetAttribute("rbName", it.name)
+			corner(row, 3)
+			local indent = 6 + depth * 14
+			if it.kids then
+				local arrow = make("TextButton", { ZIndex = 78, Position = UDim2.fromOffset(indent, 2), Size = UDim2.fromOffset(16, 18), BackgroundTransparency = 1, Text = open[it.inst] and "v" or ">",
+					Font = FONT, TextSize = 12, TextColor3 = T.textDim }, row)
+				arrow.Activated:Connect(function() open[it.inst] = not open[it.inst] refresh() end)
+			end
+			label(row, { ZIndex = 78, Position = UDim2.fromOffset(indent + 18, 0), Size = UDim2.new(1, -(indent + 80), 1, 0), Text = it.name, TextColor3 = T.textMenu, TextTruncate = Enum.TextTruncate.AtEnd })
+			label(row, { ZIndex = 78, Position = UDim2.new(1, -62, 0, 0), Size = UDim2.fromOffset(56, 22), Text = it.kind, TextSize = 10, TextColor3 = T.textDim, TextXAlignment = Enum.TextXAlignment.Right })
+			row.MouseEnter:Connect(function() row.BackgroundTransparency = 0.6 end)
+			row.MouseLeave:Connect(function() row.BackgroundTransparency = 1 end)
+			row.MouseButton1Down:Connect(function() drag = { inst = it.inst, name = it.name, at = api.mousePos(), moved = false } end)
+			row.MouseButton1Up:Connect(function() if self.importDrop then self.importDrop() end end)
+			if it.kids and open[it.inst] then addRows(it.inst, depth + 1) end
+		end
+	end
+	refresh = function()
+		for _, c in ipairs(list:GetChildren()) do if c:IsA("GuiObject") then c.Parent = nil end end
+		order = 0
+		addRows(nil, 0)
+		if order == 0 then label(list, { LayoutOrder = 1, ZIndex = 77, Size = UDim2.new(1, -8, 0, 40), TextWrapped = true, TextColor3 = T.textDim, TextSize = 11,
+			Text = search.Text ~= "" and "Nothing on the map called that." or "Nothing on the map to bring in." }) end
+	end
+	search:GetPropertyChangedSignal("Text"):Connect(refresh)
+	-- dragging a row: a label follows the mouse; let go anywhere off the list (or just click) to bring it in
+	conns[#conns + 1] = UIS.InputChanged:Connect(function(input)
+		if not drag or input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+		local mp = api.mousePos()
+		if (mp - drag.at).Magnitude > 8 then
+			drag.moved = true
+			if not ghost then
+				ghost = make("TextLabel", { ZIndex = 90, Size = UDim2.fromOffset(0, 24), AutomaticSize = Enum.AutomaticSize.X, BackgroundColor3 = rgb(0xe6a01e), Font = FONT, TextSize = 12,
+					TextColor3 = rgb(0x191919), Text = "  " .. drag.name .. "  " }, self.gui)
+				corner(ghost, 12)
+			end
+			ghost.Position = UDim2.fromOffset(mp.X + 12, mp.Y + 6)
+		end
+	end)
+	-- letting go: a click, or a drop off the list, brings it in (called from here and from ROBLEND's own mouse up)
+	local function drop()
+		if not drag then return false end
+		local d = drag
+		drag = nil
+		if ghost then ghost.Parent = nil ghost = nil end
+		local mp = api.mousePos()
+		local a, sz = fr.AbsolutePosition, fr.AbsoluteSize
+		local overList = a and sz and mp.X >= a.X and mp.X <= a.X + sz.X and mp.Y >= a.Y and mp.Y <= a.Y + sz.Y
+		if not d.moved or not overList then pick(d.inst) end
+		return true
+	end
+	self.importDrop = drop
+	conns[#conns + 1] = UIS.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then drop() end
+	end)
+	refresh()
 	return fr
 end
 -- a small box to type into (Add > Text > Type Your Own..., Properties > Change Text...): Enter = done

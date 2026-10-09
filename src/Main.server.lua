@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.5"
+local VERSION = "0.24.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -78,6 +78,7 @@ local useStudio = false   -- true = edit in Studio's own 3D view instead of ours
 local shading = "solid"   -- solid / wire
 local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLEND parts shown in our 3D view: part -> record
+local extras = {}         -- other things brought into the workshop (parts, unions, meshes): shown as copies, Tab turns a part into a ROBLEND mesh
 local activeObj = nil     -- Blender's "active object"
 -- the workshop: ROBLEND's work happens 10,000 studs under the map, so models don't get mixed up with it.
 -- Import sends Studio parts down, Export sends them back up (to where they came from). Edit > Workshop Under the Map.
@@ -1650,9 +1651,13 @@ end
 local function sceneAdd(p)
 	if p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") and not scene[p] and shownHere(p) then scene[p] = { part = p } end
 end
+local function extraAdd(p)
+	if p and p:IsA("BasePart") and not p:IsA("Terrain") and not isRB(p) and not extras[p] and workshopOn and shownHere(p) then extras[p] = {} end
+end
 local function sceneScan()
 	for _, d in ipairs(workspace:GetDescendants()) do
-		if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") then sceneAdd(d) end
+		if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") then sceneAdd(d)
+		elseif d:IsA("BasePart") and workshopOn then extraAdd(d) end
 	end
 end
 pcall(function()
@@ -1719,9 +1724,31 @@ local function syncScene()
 			end
 		end
 	end
+	-- other things brought in (unions, normal parts, meshes): shown as plain copies, following the real thing
+	for p, r in pairs(extras) do
+		if not p.Parent or isRB(p) or not shownHere(p) then
+			view:removeObject(p)
+			extras[p] = nil
+			changed = true
+		elseif not r.shown or p.Size ~= r.size or p.Color ~= r.col then
+			local ok, c = pcall(function() return p:Clone() end)
+			if ok and c then
+				for _, d in ipairs(c:GetDescendants()) do
+					if d:IsA("BaseScript") or d:IsA("ModuleScript") or d:IsA("Sound") or d:IsA("ParticleEmitter") or d:IsA("Light") or d:IsA("JointInstance") or d:IsA("Constraint") or d:IsA("Attachment") then pcall(function() d.Parent = nil end) end
+				end
+				view:setObject(p, c, p.CFrame, nil)
+			end
+			r.shown, r.cf, r.size, r.col = true, p.CFrame, p.Size, p.Color
+			changed = true
+		elseif p.CFrame ~= r.cf then
+			view:moveObject(p, p.CFrame)
+			r.cf = p.CFrame
+			changed = true
+		end
+	end
 	-- a picture in the view whose part is gone (or was swapped for another): take it out
 	for key in pairs(view.objects) do
-		if not scene[key] and key ~= obj then
+		if not scene[key] and not extras[key] and key ~= obj then
 			view:removeObject(key)
 			changed = true
 		end
@@ -1741,9 +1768,34 @@ local function objTris(r)
 	end
 	return r.tris
 end
+-- where a ray first hits a part's box (nil = misses)
+local function rayBox(ray, cf, size)
+	local o, d = cf:PointToObjectSpace(ray.Origin), cf:VectorToObjectSpace(ray.Direction)
+	local h = size / 2
+	local tmin, tmax = -math.huge, math.huge
+	for _, ax in ipairs({ "X", "Y", "Z" }) do
+		local oo, dd, hh = o[ax], d[ax], h[ax]
+		if math.abs(dd) < 1e-9 then
+			if oo < -hh or oo > hh then return nil end
+		else
+			local t1, t2 = (-hh - oo) / dd, (hh - oo) / dd
+			if t1 > t2 then t1, t2 = t2, t1 end
+			tmin, tmax = math.max(tmin, t1), math.min(tmax, t2)
+			if tmin > tmax then return nil end
+		end
+	end
+	if tmax < 0 then return nil end
+	return math.max(tmin, 0)
+end
 local function pickObject(sp)
 	local ray = view:ray(sp)
 	local best, bt = nil, math.huge
+	for p, r in pairs(extras) do
+		if r.shown and p.Parent then
+			local t = rayBox(ray, p.CFrame, p.Size)
+			if t and t < bt then best, bt = p, t end
+		end
+	end
 	for p, r in pairs(scene) do
 		if r.shown and r.bm and not (editing and p == obj) then
 			for _, t in ipairs(objTris(r)) do
@@ -3585,6 +3637,9 @@ function api.outliner()
 	for p, r in pairs(scene) do
 		if p.Parent then list[#list + 1] = { key = p, name = p.Name, unsaved = not isSaved(p), selected = sel[p] == true or (editing and p == obj), active = p == activeObj or (editing and p == obj), hidden = r.hidden == true } end
 	end
+	for p in pairs(extras) do
+		if p.Parent then list[#list + 1] = { key = p, name = p.Name, unsaved = false, selected = sel[p] == true, active = p == activeObj, hidden = false, extra = true } end
+	end
 	table.sort(list, function(a, b) return a.name < b.name end)
 	return list
 end
@@ -3748,7 +3803,7 @@ end
 -- the things to move: selected Models and parts in the workspace (not ones inside another selected thing)
 local function topLevel(list)
 	local set, out = {}, {}
-	for _, x in ipairs(list) do if (x:IsA("BasePart") or x:IsA("Model")) and x:IsDescendantOf(workspace) and not x:IsA("Terrain") then set[x] = true end end
+	for _, x in ipairs(list) do if (x:IsA("BasePart") or x:IsA("Model") or x:IsA("Folder")) and x:IsDescendantOf(workspace) and not x:IsA("Terrain") then set[x] = true end end
 	for x in pairs(set) do
 		local a, inside = x.Parent, false
 		while a and a ~= workspace do if set[a] then inside = true break end a = a.Parent end
@@ -3756,11 +3811,18 @@ local function topLevel(list)
 	end
 	return out
 end
-local function boxOf(list)
+local boxOf
+boxOf = function(list)
 	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
 	for _, x in ipairs(list) do
 		local cf, size
-		if x:IsA("Model") then cf, size = x:GetBoundingBox() else cf, size = x.CFrame, x.Size end
+		if x:IsA("Folder") then
+			local parts = {}
+			for _, d in ipairs(x:GetDescendants()) do if d:IsA("BasePart") then parts[#parts + 1] = d end end
+			if #parts == 0 then continue end
+			local flo, fhi = boxOf(parts)
+			cf, size = CFrame.new((flo + fhi) / 2), fhi - flo
+		elseif x:IsA("Model") then cf, size = x:GetBoundingBox() else cf, size = x.CFrame, x.Size end
 		local h = size / 2
 		for _, s in ipairs({ V3(1, 1, 1), V3(-1, 1, 1), V3(1, -1, 1), V3(1, 1, -1), V3(-1, -1, 1), V3(-1, 1, -1), V3(1, -1, -1), V3(-1, -1, -1) }) do
 			local w = cf * (h * s)
@@ -3781,49 +3843,101 @@ local function studioSpawn(ignore)
 	local p = res and res.Position or (cf.Position + cf.LookVector * 30)
 	return V3(math.floor(p.X + 0.5), math.floor(p.Y + 0.5), math.floor(p.Z + 0.5))
 end
+-- a thing's first part (to tell where it is), and moving any of them (a Folder moves everything in it)
+local function probeOf(x)
+	if x:IsA("BasePart") then return x end
+	if x:IsA("Model") and x.PrimaryPart then return x.PrimaryPart end
+	return x:FindFirstChildWhichIsA("BasePart", true)
+end
+local function moversOf(x, out)
+	out = out or {}
+	if x:IsA("Folder") then
+		for _, c in ipairs(x:GetChildren()) do
+			if c:IsA("BasePart") or c:IsA("Model") then out[#out + 1] = c elseif c:IsA("Folder") then moversOf(c, out) end
+		end
+	else
+		out[#out + 1] = x
+	end
+	return out
+end
+-- Import: the things come down to the ROBLEND scene, centred on its floor, and the view frames them. Parts,
+-- meshes, unions, models and folders (groups) all come as they are; Tab on a part turns it into a ROBLEND mesh
 importSelected = function(list)
 	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map), so things are edited where they are.") return end
 	if modal then return end
 	local things = topLevel(list or Selection:Get())
 	local up = {}
-	for _, x in ipairs(things) do if not shownHere(x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x) then up[#up + 1] = x end end
-	if #things == 0 then setStatus("Select parts or models in Studio first (Explorer or the 3D view), then Import.") return end
-	if #up == 0 then setStatus("Those are already down in the workshop.") return end
+	for _, x in ipairs(things) do
+		local probe = probeOf(x)
+		if probe and not shownHere(probe) then up[#up + 1] = x end
+	end
+	if #things == 0 then setStatus("Pick something to bring in: Import from Studio (top bar), or click it in the Explorer.") return end
+	if #up == 0 then setStatus("That's already here.") return end
 	if editing then exitEdit() end
 	local lo, hi = boxOf(up)
-	-- the group lands in the middle of the workshop, sitting on its floor; each remembers where it was
 	local delta = (home() + V3(0, (hi.Y - lo.Y) / 2, 0)) - (lo + hi) / 2
 	delta = V3(math.floor(delta.X + 0.5), math.floor(delta.Y + 0.5), math.floor(delta.Z + 0.5))
-	record("Import to workshop", function()
+	record("Import", function()
 		for _, x in ipairs(up) do
-			local cf = x:GetPivot()
-			x:SetAttribute("RB_Home", cf)
-			x:PivotTo(cf + delta)
+			if x:IsA("Folder") then
+				x:SetAttribute("RB_HomeShift", delta)
+				for _, m in ipairs(moversOf(x)) do m:PivotTo(m:GetPivot() + delta) end
+			else
+				x:SetAttribute("RB_Home", x:GetPivot())
+				x:PivotTo(x:GetPivot() + delta)
+			end
 		end
 	end)
-	-- normal parts become ROBLEND meshes so they can be edited (up to 60 at a time)
-	local plain, rb = {}, {}
+	-- show them: ROBLEND meshes as meshes, everything else as it is
 	for _, x in ipairs(up) do
 		local parts = x:IsA("BasePart") and { x } or x:GetDescendants()
 		for _, q in ipairs(parts) do
-			if q:IsA("BasePart") then
-				if isRB(q) then rb[#rb + 1] = q
-				elseif not q.Locked and not q:IsA("Terrain") and not q:IsA("UnionOperation") then plain[#plain + 1] = q end
+			if q:IsA("BasePart") then if isRB(q) then sceneAdd(q) else extraAdd(q) end end
+		end
+	end
+	if not uiOn then setUIOn(true) end
+	Selection:Set(up)
+	activeObj = up[#up]:IsA("BasePart") and up[#up] or nil
+	dirtyCage = true
+	if view then
+		local nlo, nhi = lo + delta, hi + delta
+		task.defer(function() if view then view:frameBox(nlo, nhi) end end)
+	end
+	setStatus(("Brought in %s%s. Tab on a part edits it; Place in Studio sends it back."):format(up[1].Name, #up > 1 and (" + " .. (#up - 1) .. " more") or ""))
+end
+api.importSelected = function(list) importSelected(list) end
+-- what Import from Studio lists: parts, models and groups (folders) on the map (not ones already down here)
+api.mapItems = function(parent, query)
+	local out = {}
+	local function ok(c)
+		if not (c:IsA("BasePart") or c:IsA("Model") or c:IsA("Folder")) or c:IsA("Terrain") then return false end
+		if c.Name == "ROBLEND_QuickTest" or c.Name == "ROBLEND_SelfTest" then return false end
+		local probe = probeOf(c)
+		return probe ~= nil and not shownHere(probe)
+	end
+	local function kind(c)
+		if c:IsA("UnionOperation") then return "Union" elseif c:IsA("MeshPart") then return isRB(c) and "ROBLEND" or "Mesh"
+		elseif c:IsA("BasePart") then return "Part" elseif c:IsA("Model") then return "Model" else return "Group" end
+	end
+	if query and query ~= "" then
+		local q = query:lower()
+		for _, c in ipairs(workspace:GetDescendants()) do
+			if #out >= 200 then break end
+			if ok(c) and c.Name:lower():find(q, 1, true) then out[#out + 1] = { inst = c, name = c.Name, kind = kind(c), kids = false } end
+		end
+	else
+		for _, c in ipairs((parent or workspace):GetChildren()) do
+			if #out >= 300 then break end
+			if ok(c) then
+				local kids = false
+				if not c:IsA("BasePart") then for _, k in ipairs(c:GetChildren()) do if ok(k) then kids = true break end end end
+				out[#out + 1] = { inst = c, name = c.Name, kind = kind(c), kids = kids }
 			end
 		end
 	end
-	if #plain > 0 and #plain <= 60 then
-		for _, q in ipairs(OT.convert(plain)) do rb[#rb + 1] = q end
-	end
-	for _, q in ipairs(rb) do sceneAdd(q) end
-	if #rb > 0 then Selection:Set(rb) activeObj = rb[#rb] end
-	if not uiOn then setUIOn(true) end
-	dirtyCage = true
-	task.defer(function() pcall(frameSelected) end)
-	setStatus(("Brought %d in to edit%s. When you're done: Place in Studio (top bar)."):format(#up,
-		#plain > 60 and (" - " .. #plain .. " normal parts is a lot, so they weren't turned into ROBLEND meshes (Tab one to edit it)") or ""))
+	table.sort(out, function(x, y) return x.name:lower() < y.name:lower() end)
+	return out
 end
-api.importSelected = function(list) importSelected(list) end
 -- click something in Studio's Explorer while ROBLEND is open: a "Bring in" button appears at the top of the view
 -- (Roblox doesn't let plugins add to the Explorer's own right-click menu)
 local bringBtn
@@ -3832,7 +3946,7 @@ local function updateBringIn()
 	if not (uiOn and ui and ui.canvas and workshopOn) or placing or modal then return hide() end
 	local up = {}
 	for _, x in ipairs(topLevel(Selection:Get())) do
-		local probe = x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x
+		local probe = probeOf(x)
 		if probe and not shownHere(probe) then up[#up + 1] = x end
 	end
 	if #up == 0 then return hide() end
@@ -3847,14 +3961,17 @@ local function updateBringIn()
 		bringBtn.TextColor3 = Color3.fromRGB(25, 25, 25)
 		bringBtn.Font = Enum.Font.GothamBold
 		bringBtn.TextSize = 13
-		bringBtn.ZIndex = 55
+		bringBtn.ZIndex = 80
 		bringBtn.AutoButtonColor = true
 		local pad = Instance.new("UIPadding") pad.PaddingLeft = UDim.new(0, 16) pad.PaddingRight = UDim.new(0, 16) pad.Parent = bringBtn
 		local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 15) c.Parent = bringBtn
 		bringBtn.Activated:Connect(function() bringBtn.Visible = false importSelected() end)
-		bringBtn.Parent = ui.canvas
+		bringBtn.Parent = ui.gui
 		if ui.blockers then table.insert(ui.blockers, bringBtn) end
 	end
+	-- (on the window itself, over the middle top of the 3D view)
+	local ca = ui.canvas
+	if ca.AbsoluteSize and ca.AbsolutePosition then bringBtn.Position = UDim2.fromOffset(ca.AbsolutePosition.X + ca.AbsoluteSize.X / 2, ca.AbsolutePosition.Y + 12) end
 	bringBtn.Text = ("Bring in  \"%s\"%s"):format(up[1].Name, #up > 1 and ("  + " .. (#up - 1) .. " more") or "")
 	bringBtn.Visible = true
 end
@@ -3864,7 +3981,8 @@ api.bringInButton = function() return bringBtn end
 local function workshopThings(list)
 	local things = {}
 	for _, x in ipairs(topLevel(list or Selection:Get())) do
-		if shownHere(x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x) then things[#things + 1] = x end
+		local probe = probeOf(x)
+		if probe and shownHere(probe) then things[#things + 1] = x end
 	end
 	return things
 end
@@ -3903,6 +4021,14 @@ local function finishPlacing(how)
 			if how == "home" and typeof(back) == "CFrame" then x:PivotTo(back) end
 			x:SetAttribute("RB_Home", nil)
 		end
+		-- groups (folders): everything in them goes back by the same amount it came down
+		for _, f in ipairs(P.folders or {}) do
+			local shift = f:GetAttribute("RB_HomeShift")
+			if how == "home" and typeof(shift) == "Vector3" then
+				for _, m in ipairs(moversOf(f)) do if P.orig[m] then m:PivotTo(P.orig[m] - shift) end end
+			end
+			f:SetAttribute("RB_HomeShift", nil)
+		end
 	end
 	if P.rec then CHS:FinishRecording(P.rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND Place in Studio") end
 	pcall(function() plugin:Deactivate() end)
@@ -3916,11 +4042,18 @@ api.exportSelected = function(list)
 	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map).") return end
 	if modal or placing then return end
 	if editing then exitEdit() end
-	local things = workshopThings(list)
-	if #things == 0 then setStatus("Select what to place in Studio (click it, or pick it in the Outliner), then Place in Studio.") return end
+	local picked = workshopThings(list)
+	if #picked == 0 then setStatus("Select what to place in Studio (click it, or pick it in the Outliner), then Place in Studio.") return end
+	-- a group (folder) is carried as the things inside it
+	local things, folders = {}, {}
+	for _, x in ipairs(picked) do
+		if x:IsA("Folder") then folders[#folders + 1] = x for _, m in ipairs(moversOf(x)) do things[#things + 1] = m end
+		else things[#things + 1] = x end
+	end
+	if #things == 0 then setStatus("That group is empty.") return end
 	local lo, hi = boxOf(things)
 	local anchor = CFrame.new((lo + hi) / 2)
-	local P = { things = things, rel = {}, orig = {}, rot = 0, h = (hi.Y - lo.Y) / 2 }
+	local P = { things = things, folders = folders, rel = {}, orig = {}, rot = 0, h = (hi.Y - lo.Y) / 2 }
 	for _, x in ipairs(things) do
 		P.orig[x] = x:GetPivot()
 		P.rel[x] = anchor:Inverse() * x:GetPivot()
@@ -4245,6 +4378,10 @@ setUIOn = function(on)
 		elseif firstRun then
 			task.defer(function() if uiOn then TUT.openTutorial() end end)
 		end
+		-- empty folders left behind by older test runs
+		for _, ch in ipairs(workspace:GetChildren()) do
+			if ch:IsA("Folder") and (ch.Name == "ROBLEND_QuickTest" or ch.Name == "ROBLEND_SelfTest") and #ch:GetChildren() == 0 then ch.Parent = nil end
+		end
 		-- something on the map already selected in the Explorer: offer to bring it in
 		task.defer(function() pcall(updateBringIn) end)
 	else
@@ -4439,6 +4576,8 @@ hook("Button1Down", mouse.Button1Down, function()
 	down = mp
 end)
 hook("Button1Up", mouse.Button1Up, function()
+	-- a row dragged out of Import from Studio and let go over the view
+	if uiOn and ui.importDrop and ui.importDrop() then return end
 	if uiOn then ui:mouseUp() end
 	if UVE.mouseUp(mousePos()) then return end
 	if paintMode and editing then

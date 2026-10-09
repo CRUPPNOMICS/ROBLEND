@@ -2011,8 +2011,10 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	bb.Activated:Fire() beat() beat()
 	assert(not bb.Visible, "button goes once it's in")
 	local rock = workspace:FindFirstChild("MapRock")
-	assert(rock and rock:FindFirstChild("RB_Data"), "converted")
+	assert(rock and rock:IsA("Part"), "comes in as it is (Tab would make it a ROBLEND mesh)")
 	assert(rock.CFrame.Position.Y < -9000, "sent down: " .. tostring(rock.CFrame.Position))
+	for _ = 1, 6 do MOCK.t += 0.05 beat() end
+	assert(view.objects[rock], "shown in the view")
 	assert(typeof(rock:GetAttribute("RB_Home")) == "CFrame", "remembers where it came from")
 	local listed = false
 	for _, row in ipairs(api.outliner()) do if row.key == rock then listed = true end end
@@ -2050,7 +2052,7 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	for i = 1, 2 do local pp = Instance.new("Part") pp.Name = "Wall" .. i pp.Size = Vector3.new(2, 2, 2) pp.CFrame = CFrame.new(100 + i * 3, 1, 0) pp.Anchored = true pp.Parent = m end
 	S.Selection:Set({ m })
 	api.importSelected() beat()
-	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000 and m:FindFirstChild("Wall1"):FindFirstChild("RB_Data"), "model came down, parts editable")
+	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000, "model came down")
 	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
 	S.Selection:Set({ m }) api.exportSelected() beat()
 	press("Escape") beat()
@@ -2060,6 +2062,26 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	press("Return") beat()
 	assert(math.abs(m.Wall1.CFrame.Position.Y - 1) < 1e-3, "model back up where it was")
 	MOCK.toolbarButton.Click:Fire() beat() beat()
+	-- a group (Folder) with a Union in it: Import from Studio (top bar) lists the map; click a row to bring it in
+	local g = Instance.new("Folder") g.Name = "Ruins" g.Parent = workspace
+	local u = Instance.new("UnionOperation") u.Name = "Arch" u.Size = Vector3.new(6, 6, 2) u.CFrame = CFrame.new(200, 3, 0) u.Anchored = true u.Parent = g
+	local b2 = Instance.new("Part") b2.Name = "Block" b2.Size = Vector3.new(2, 2, 2) b2.CFrame = CFrame.new(206, 1, 0) b2.Anchored = true b2.Parent = g
+	find("TextButton", function(d) return d.Name == "RB_TopImportfromStudio" end).Activated:Fire() beat()
+	local row = find("TextButton", function(d) return d.Name == "RB_ImportRow" and d:GetAttribute("rbName") == "Ruins" end)
+	assert(row, "the group is listed")
+	row.MouseButton1Down:Fire() beat()
+	S.UserInputService.InputEnded:Fire({ UserInputType = Enum.UserInputType.MouseButton1 }) beat() beat()
+	assert(u.CFrame.Position.Y < -9000 and b2.CFrame.Position.Y < -9000, "the whole group came down")
+	assert(math.abs((b2.CFrame.Position - u.CFrame.Position).X - 6) < 1e-3, "layout kept")
+	assert(typeof(g:GetAttribute("RB_HomeShift")) == "Vector3", "the group remembers where it was")
+	for _ = 1, 6 do MOCK.t += 0.05 beat() end
+	assert(view.objects[u], "the union is shown")
+	S.Selection:Set({ g }) api.exportSelected() beat()
+	press("Return") beat()
+	assert((u.CFrame.Position - Vector3.new(200, 3, 0)).Magnitude < 1e-3, "group back where it was: " .. tostring(u.CFrame.Position))
+	assert(g:GetAttribute("RB_HomeShift") == nil, "cleared")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	g.Parent = nil
 	-- Tab on a part up on the map brings it down and edits it
 	local r2 = Instance.new("Part") r2.Name = "MapCrate" r2.Size = Vector3.new(2, 2, 2) r2.CFrame = CFrame.new(-40, 1, 0) r2.Anchored = true r2.Parent = workspace
 	S.Selection:Set({ r2 }) beat()

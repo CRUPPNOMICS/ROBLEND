@@ -34,7 +34,7 @@ local function helpers(C)
 			local p = row.key
 			if not H.keep[p] and p.Parent and p.Name:sub(1, 3) == "QT_" then p.Parent = nil end
 		end
-		if H.folder then for _, ch in ipairs(H.folder:GetChildren()) do ch.Parent = nil end end
+		if H.folder then for _, ch in ipairs(H.folder:GetChildren()) do ch.Parent = nil end H.folder.Parent = nil H.folder = nil end
 		pcall(function() C.Selection:Set({}) end)
 		C.setActive(nil)
 		C.dirtyCage()

@@ -36,6 +36,7 @@ CF.__mul = function(a, b)
 	return a.p + rot(a, b)
 end
 CF.__add = function(a, v) return cfNew(a.p + v, a.r, a.u, a.b) end
+CF.__sub = function(a, v) return cfNew(a.p - v, a.r, a.u, a.b) end
 function CF.VectorToWorldSpace(t, v) return rot(t, v) end
 function CF.VectorToObjectSpace(t, v) return irot(t, v) end
 function CF.PointToObjectSpace(t, v) return irot(t, v - t.p) end
@@ -135,7 +136,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { SelectionChanged = true, Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
+local SIGNALS = { SelectionChanged = true, MouseButton1Up = true, Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
