@@ -451,7 +451,7 @@ function UI:buildView()
 	end
 	pd("View", function() return self:viewMenu() end)
 	pd("Select", function() return api.state().editing and self:selectMenuEdit() or self:selectMenu() end)
-	pd("Add", function() return self:addMeshItems() end)
+	pd("Add", function() return (self:addItems()) end)
 	self.objMenuBtn = pd("Object", function()
 		local st = api.state()
 		if st.paintMode == "sculpt" then return self:sculptMenu() end
@@ -876,6 +876,13 @@ local MOD_FIELDS = {
 		num(3, "Segments", "segments", 1, 32, true)
 		num(4, "Angle", "angle", 0, 180)
 	end,
+	tube = function(self, b, i, m, api, num)
+		num(2, "Radius", "radius", 0.001, 1000)
+		num(3, "Sides", "sides", 3, 64, true)
+		num(4, "Resolution", "resolution", 1, 32, true)
+		self:toggleRow(b, 5, "Fill Caps", { { m.caps ~= false and "On" or "Off", m.caps ~= false, function() api.modToggle(i, "caps") end, "Close the open ends" } })
+		label(b, { LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Turns the mesh's line paths (edges with no faces) into smooth round pipes. Edit the path in Edit Mode; Ctrl + right click extends it." })
+	end,
 	wireframe = function(self, b, i, m, api, num)
 		num(2, "Thickness", "thickness", 0.001, 100)
 	end,
@@ -1029,6 +1036,22 @@ function UI:buildPropContent()
 	elseif tab == "modifiers" then
 		self:buildModifiers(s)
 	elseif tab == "data" then
+		if s.text then
+			if self.panelsOpen.text == nil then self.panelsOpen.text = true end
+			self:panel(0, "text", "Text", function(b)
+				local r = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
+				label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Body", TextXAlignment = Enum.TextXAlignment.Right })
+				local tb = make("TextBox", { Name = "RB_TextBody", Position = UDim2.new(0.38, 0, 0, 0), Size = UDim2.new(0.62, 0, 1, 0), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12,
+					TextColor3 = T.text, Text = s.text, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, r)
+				corner(tb, 4)
+				make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, tb)
+				tb.FocusLost:Connect(function() if tb.Text ~= s.text then self:safe(function() api.setText("text", tb.Text) end) end end)
+				self:numField(b, 2, "Block Size", "p_textpx", function(st) return st.textPixel end, function(v) api.setText("pixel", v) end)
+				self:numField(b, 3, "Depth", "p_textdepth", function(st) return st.textDepth end, function(v) api.setText("depth", v) end)
+				label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+					Text = "Letters A-Z, 0-9 and . , ! ? - + = : ' / ( ) # & _ < > * % $ @. Edit Mode changes the shape itself (typing new words rebuilds it)." })
+			end)
+		end
 		self:panel(1, "mesh", "Mesh", function(b)
 			local st = s.meshInfo or {}
 			for i, k in ipairs({ { "Vertices", st.v }, { "Edges", st.e }, { "Faces", st.f }, { "Triangles", st.t } }) do
@@ -1204,10 +1227,33 @@ function UI:addMeshItems()
 	end
 	return items
 end
-function UI:openAddMenu(at)
+function UI:addCurveItems()
 	local api = self.api
-	if api.state().editing then return self:openMenu(self:addMeshItems(), at, "Add Mesh") end
-	return self:openMenu({ { "Mesh", "", nil, sub = function() return self:addMeshItems() end, icon = "mesh" } }, at, "Add")
+	return {
+		{ "Bezier", "", function() api.add("CurveBezier") end, icon = "spin" },
+		{ "Circle", "", function() api.add("CurveCircle") end, icon = "spin" },
+		{ "Path", "", function() api.add("CurvePath") end, icon = "spin" },
+	}
+end
+-- Add menu (Shift A / header): Mesh, Curve, Text (in Edit Mode: shapes + curve paths go into this mesh)
+function UI:addItems()
+	local api = self.api
+	if api.state().editing then
+		local items = self:addMeshItems()
+		items[#items + 1] = "-"
+		items[#items + 1] = { header = "Curve paths (a Tube modifier makes them pipes)" }
+		for _, it in ipairs(self:addCurveItems()) do items[#items + 1] = it end
+		return items, "Add Mesh"
+	end
+	return {
+		{ "Mesh", "", nil, sub = function() return self:addMeshItems() end, icon = "mesh" },
+		{ "Curve", "", nil, sub = function() return self:addCurveItems() end, icon = "spin" },
+		{ "Text", "", function() api.add("Text") end, icon = "annotate" },
+	}, "Add"
+end
+function UI:openAddMenu(at)
+	local items, title = self:addItems()
+	return self:openMenu(items, at, title)
 end
 function UI:viewMenu()
 	local api = self.api

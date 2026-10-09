@@ -659,5 +659,40 @@ check2("vertex paint: draw, erase, blur, fill, sample, colours save + survive ed
 	eq(BMesh.fromData(cube():toData()).verts ~= nil, true, "a never-painted mesh has no vc")
 	eq(cube():toData().vc, nil, "no colours saved when nothing is painted")
 end)
+check2("tube modifier: a line becomes a capped pipe, a loop becomes a ring", function()
+	local bm = BMesh.new()
+	local a, b = bm:vertCreate(Vector3.new(-2, 0, 0)), bm:vertCreate(Vector3.new(2, 0, 0))
+	bm:edgeCreate(a, b)
+	local out = Mods.evaluate(bm, { Mods.new("tube") })
+	out:validate() closed(out) outward(out)
+	eq(out.nf, 4 * 8 + 2, "4 smooth steps x 8 sides + 2 caps")
+	for v in pairs(out.verts) do assert(math.abs(Vector3.new(0, v.co.Y, v.co.Z).Magnitude - 0.25) < 1e-4, "radius 0.25 round the line") end
+	local ring = BMesh.new()
+	local vs = {}
+	for i = 0, 11 do local an = i / 12 * 2 * math.pi vs[#vs + 1] = ring:vertCreate(Vector3.new(math.cos(an) * 3, 0, math.sin(an) * 3)) end
+	for i = 1, 12 do ring:edgeCreate(vs[i], vs[i % 12 + 1]) end
+	local m = Mods.new("tube") m.resolution = 2
+	local tor = Mods.evaluate(ring, { m })
+	tor:validate() closed(tor)
+	eq(tor.nf, 24 * 8, "a closed ring of pipe, no caps")
+end)
+check2("text: HI builds closed solid letters", function()
+	local bm = BMesh.new()
+	local fs = Font.build(bm, "HI", { pixel = 0.5, depth = 1 })
+	bm:validate() closed(bm)
+	for f in pairs(bm.faces) do
+		BMesh.faceNormalUpdate(f)
+		local c = BMesh.faceCenter(f)
+		if math.abs(c.Z + 0.5) < 1e-6 then assert(f.no.Z < -0.9, "front faces point -Z") end
+		if math.abs(c.Z - 0.5) < 1e-6 then assert(f.no.Z > 0.9, "back faces point +Z") end
+	end
+	assert(#fs > 0, "faces")
+	local lo, hi = math.huge, -math.huge
+	for v in pairs(bm.verts) do lo = math.min(lo, v.co.X) hi = math.max(hi, v.co.X) end
+	assert(math.abs(hi - lo - 11 * 0.5) < 1e-6, "two letters + a gap = 11 blocks wide")
+	assert(math.abs(lo + hi) < 1e-6, "centred")
+	local cells, w = Font.cells("A B")
+	eq(w, 5 + 1 + 3 + 1 + 5, "a space is 3 blocks")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

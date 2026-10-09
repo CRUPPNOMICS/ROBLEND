@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.15.0"
+local VERSION = "0.16.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -28,6 +28,7 @@ local ObjectTools = require(script.ObjectTools)
 local ModStack = require(script.ModStack)
 local Sculpt = require(script.Sculpt)
 local Paint = require(script.Paint)
+local Font = require(script.Font)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -650,6 +651,8 @@ local function enterEdit(p)
 	obj, bm = p, m
 	origin = originOf(p)
 	editing = true
+	-- a curve (only line paths, no faces): edit its points
+	if m.nf == 0 and m.nv > 0 then mode = "vert" end
 	worldTris = nil
 	lastWritten = dataOf(p).Value
 	clearSel()
@@ -710,8 +713,22 @@ local function primitive(m, kind)
 	elseif kind == "Sphere" then Ops.uvSphere(m, 24, 12, 2)
 	elseif kind == "IcoSphere" then Ops.icoSphere(m, 2, 2)
 	elseif kind == "Cone" then Ops.cone(m, 32, 2, 4)
-	elseif kind == "Torus" then Ops.torus(m, 48, 12, 2, 0.5) end
+	elseif kind == "Torus" then Ops.torus(m, 48, 12, 2, 0.5)
+	-- curves (Add > Curve): line paths that the Tube modifier turns into pipes
+	elseif kind == "CurveBezier" or kind == "CurvePath" or kind == "CurveCircle" then
+		local pts = {}
+		if kind == "CurveBezier" then pts = { V3(-3, 0, 0), V3(-1, 1.5, 0), V3(1, -1.5, 0), V3(3, 0, 0) }
+		elseif kind == "CurvePath" then for i = 0, 4 do pts[#pts + 1] = V3(-4 + i * 2, 0, 0) end
+		else for i = 0, 15 do local a = i / 16 * 2 * math.pi pts[#pts + 1] = V3(math.cos(a) * 2, 0, math.sin(a) * 2) end end
+		local vs = {}
+		for i, p in ipairs(pts) do vs[i] = m:vertCreate(p) end
+		for i = 1, #vs - 1 do m:edgeCreate(vs[i], vs[i + 1]) end
+		if kind == "CurveCircle" then m:edgeCreate(vs[#vs], vs[1]) end
+	elseif kind == "Text" then
+		Font.build(m, "Text", { pixel = 0.5, depth = 1 })
+	end
 end
+local CURVE_KINDS = { CurveBezier = "Bezier Curve", CurvePath = "Path", CurveCircle = "Curve Circle" }
 local function addShape(kind)
 	if editing and bm and not modal then
 		-- edit mode: add into this mesh, at its middle, and select just the new part (like Blender)
@@ -737,14 +754,21 @@ local function addShape(kind)
 	if editing then exitEdit() end
 	local m = BMesh.new()
 	primitive(m, kind)
-	local mp, c, err = Display.build(m)
+	-- a curve comes with a Tube modifier (so it shows as a pipe); edit its path in Edit Mode
+	local mods
+	if CURVE_KINDS[kind] then
+		local tube = Mods.new("tube")
+		tube.name = Mods.BY_ID.tube.name
+		mods = { tube }
+	end
+	local mp, c, err = Display.build(mods and Mods.evaluate(m, mods) or m)
 	if not mp then
 		setStatus("Couldn't make the mesh: " .. tostring(err) .. "  (Game Settings > Security > allow Mesh / Image APIs, then try again)")
 		return
 	end
 	local rec
 	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND add " .. kind) end)
-	mp.Name = NAME .. " " .. kind
+	mp.Name = NAME .. " " .. (CURVE_KINDS[kind] or kind)
 	mp.Anchored = true
 	mp.Color = Color3.fromRGB(200, 200, 205)
 	mp.Material = Enum.Material.SmoothPlastic
@@ -758,12 +782,24 @@ local function addShape(kind)
 	mp:SetAttribute("RB_Center", c)
 	mp:SetAttribute("RB_Size", mp.Size)
 	mp:SetAttribute("ROBLEND", VERSION)
+	if mods then setMods(mp, mods) end
+	if kind == "Text" then
+		mp:SetAttribute("RB_Text", "Text")
+		mp:SetAttribute("RB_TextPixel", 0.5)
+		mp:SetAttribute("RB_TextDepth", 1)
+	end
 	mp.Parent = workspace
 	Display.adopt(mp, Display.emOf[mp])
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND add") end
 	Selection:Set({ mp })
 	activeObj = mp
-	setStatus("Added a " .. kind .. ". Press Tab (or Edit) to edit it.")
+	if CURVE_KINDS[kind] then
+		setStatus("Added a " .. CURVE_KINDS[kind] .. ". Tab = edit its points (Ctrl + right click extends it); pipe size in Properties > Modifiers.")
+	elseif kind == "Text" then
+		setStatus("Added Text. Change the words in Properties > Data > Text.")
+	else
+		setStatus("Added a " .. kind .. ". Press Tab (or Edit) to edit it.")
+	end
 end
 
 -- ===== picking =====
@@ -3199,9 +3235,11 @@ function api.state()
 		st.color, st.material = p.Color, p.Material and p.Material.Name
 		st.hidden = scene[p] ~= nil and scene[p].hidden == true
 		if isRB(p) then
+			st.text = p:GetAttribute("RB_Text")
+			st.textPixel, st.textDepth = p:GetAttribute("RB_TextPixel"), p:GetAttribute("RB_TextDepth")
 			st.uv = uvOf(p)
 			pcall(function() st.texture = p.TextureID end)
-			st.modsKey = modsStr(p) .. uvKey(p) .. tostring(st.texture)
+			st.modsKey = modsStr(p) .. uvKey(p) .. tostring(st.texture) .. tostring(st.text)
 			st.mods = modsOf(p)
 			st.saved = isSaved(p)
 			st.assetId = p:GetAttribute("RB_AssetId")
@@ -3333,6 +3371,29 @@ api.sculptSet = function(key, value)
 	if key == "radius" then B.radius = math.clamp(value, 4, 500)
 	elseif key == "strength" then B.strength = math.clamp(value, 0.01, 1)
 	elseif key == "symmetryX" then B.symmetryX = value == true end
+end
+-- Text objects (Add > Text): change the words / block size / depth, the mesh is rebuilt
+api.setText = function(key, value)
+	local p = modTarget()
+	if not (p and p:GetAttribute("RB_Text")) then return end
+	if editing and p == obj then setStatus("Leave Edit Mode (Tab) to change the text.") return end
+	local text = p:GetAttribute("RB_Text")
+	local px = p:GetAttribute("RB_TextPixel") or 0.5
+	local depth = p:GetAttribute("RB_TextDepth") or 1
+	if key == "text" then text = tostring(value) ~= "" and tostring(value) or text
+	elseif key == "pixel" then px = math.clamp(tonumber(value) or px, 0.05, 20)
+	elseif key == "depth" then depth = math.clamp(tonumber(value) or depth, 0.05, 50) end
+	local m = BMesh.new()
+	Font.build(m, text, { pixel = px, depth = depth })
+	if m.nf == 0 then setStatus("No letters to build.") return end
+	record("Text", function()
+		p:SetAttribute("RB_Text", text)
+		p:SetAttribute("RB_TextPixel", px)
+		p:SetAttribute("RB_TextDepth", depth)
+		dataOf(p).Value = encode(m)
+		modsChanged(p)
+	end)
+	setStatus(("Text: \"%s\"."):format(text))
 end
 -- Vertex Paint: colour, fill, white base
 api.setPaintColor = function(c)

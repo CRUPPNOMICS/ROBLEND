@@ -31,13 +31,14 @@ The Blender source files used are:
 | `source/blender/editors/uvedit/uvedit_unwrap_ops.cc`, `source/blender/blenlib/intern/uvproject.cc` | Cube, cylinder and sphere UV projection |
 | `source/blender/editors/sculpt_paint/brushes/*.cc`, `sculpt.cc` | Sculpt brushes (draw, clay strips, inflate, grab, smooth, flatten, pinch, crease), area normal, falloff, symmetry |
 | `source/blender/editors/sculpt_paint/paint_vertex.cc` | Vertex Paint (draw, blur, average, fill, sample, front faces only) |
+| `source/blender/blenkernel/intern/curve_bevel.cc`, `displist.cc` | The Tube modifier (a curve's round bevel swept along a path) |
 | `scripts/presets/keyconfig/keymap_data/blender_default.py` | The keyboard shortcuts (Edit Mode, Object Mode and 3D view keymaps) |
 | `release/datafiles/userdef/userdef_default_theme.c` | Every colour of the window and the 3D view |
 | `scripts/startup/bl_ui/space_view3d.py` | The 3D view header menus, the Add menu and the right-click menus |
 | `scripts/startup/bl_ui/space_toolsystem_toolbar.py` | Tool strip names, tooltips and shortcuts |
 | `scripts/startup/bl_ui/space_topbar.py`, `space_outliner.py`, `properties_object.py`, `space_statusbar.py` | Layout of the top bar, Outliner, Properties and status bar |
 
-Blender's icon images are not included; the icons are drawn from simple shapes.
+Blender's icon images are not included; the icons are drawn from simple shapes. The text font (src/Font.lua) is ROBLEND's own, not a Blender font.
 
 ROBLEND is not made, endorsed or supported by the Blender Foundation.
 

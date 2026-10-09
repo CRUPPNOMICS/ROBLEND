@@ -18,6 +18,7 @@
 	  source/blender/modifiers/intern/MOD_wave.cc       (Wave)
 	  source/blender/modifiers/intern/MOD_displace.cc   (Displace, with Roblox's math.noise as the texture)
 	  source/blender/modifiers/intern/MOD_wireframe.cc  + bmesh/operators/bmo_wireframe.cc (Wireframe, simplified)
+	  source/blender/blenkernel/intern/curve_bevel.cc + displist.cc (Tube: a curve's round bevel, on line paths)
 	Original: Copyright (C) Blender Authors (GPL-2.0-or-later)
 	Luau conversion: Copyright (C) 2026 Cruppnomics (Giga_gad27) - GPL-2.0-or-later.
 
@@ -41,6 +42,7 @@ Mods.TYPES = {
 	{ id = "screw", name = "Screw", group = "Generate", defaults = { angle = 360, steps = 16, screw = 0, axis = "Y" } },
 	{ id = "subsurf", name = "Subdivision Surface", group = "Generate", defaults = { levels = 1 } },
 	{ id = "triangulate", name = "Triangulate", group = "Generate", defaults = {} },
+	{ id = "tube", name = "Tube (Curve Bevel)", group = "Generate", defaults = { radius = 0.25, sides = 8, resolution = 4, caps = true } },
 	{ id = "weld", name = "Weld", group = "Generate", defaults = { distance = 0.01 } },
 	{ id = "wireframe", name = "Wireframe", group = "Generate", defaults = { thickness = 0.1 } },
 	{ id = "cast", name = "Cast", group = "Deform", defaults = { factor = 0.5 } },
@@ -304,6 +306,145 @@ function Mods.wireframe(bm, m)
 	for f in pairs(out.faces) do all[f] = true end
 	MT.solidify(out, all, t)
 	for f in pairs(out.faces) do f.sel = false end
+	return out
+end
+
+-- ===== Tube: every line path (edges with no faces) becomes a smooth round pipe =====
+-- (Blender: a curve with Bevel Depth / Resolution; here the "curve" is the mesh's loose edge chains,
+-- smoothed Catmull-Rom style, then a ring of `sides` points swept along with rotation-minimising frames)
+local function wireChains(bm)
+	local wire, deg = {}, {}
+	for e in pairs(bm.edges) do
+		if not e.l then
+			wire[e] = true
+			deg[e.v1] = (deg[e.v1] or 0) + 1
+			deg[e.v2] = (deg[e.v2] or 0) + 1
+		end
+	end
+	local used, chains = {}, {}
+	local function walk(v, e)
+		local pts = { v }
+		while e and not used[e] do
+			used[e] = true
+			local o = (e.v1 == v) and e.v2 or e.v1
+			pts[#pts + 1] = o
+			v = o
+			if deg[v] ~= 2 then break end
+			local nxt
+			for _, e2 in ipairs(BMesh.vertEdges(v)) do if wire[e2] and not used[e2] then nxt = e2 break end end
+			e = nxt
+		end
+		return pts
+	end
+	-- open chains start at ends / junctions
+	for v, d in pairs(deg) do
+		if d ~= 2 then
+			for _, e in ipairs(BMesh.vertEdges(v)) do
+				if wire[e] and not used[e] then chains[#chains + 1] = { pts = walk(v, e), closed = false } end
+			end
+		end
+	end
+	-- whatever is left are closed loops
+	for e in pairs(wire) do
+		if not used[e] then
+			local pts = walk(e.v1, e)
+			if pts[#pts] == pts[1] then table.remove(pts) end
+			chains[#chains + 1] = { pts = pts, closed = true }
+		end
+	end
+	return chains, wire
+end
+local function catmull(p0, p1, p2, p3, t)
+	local t2, t3 = t * t, t * t * t
+	return (p1 * 2 + (p2 - p0) * t + (p0 * 2 - p1 * 5 + p2 * 4 - p3) * t2 + (p1 * 3 - p0 - p2 * 3 + p3) * t3) * 0.5
+end
+function Mods.smoothPath(pts, closed, res)
+	local n = #pts
+	if n < 2 or res <= 1 then
+		local out = {}
+		for i, p in ipairs(pts) do out[i] = p end
+		return out
+	end
+	local function at(i)
+		if closed then return pts[(i - 1) % n + 1] end
+		if i < 1 then return pts[1] * 2 - pts[2] end
+		if i > n then return pts[n] * 2 - pts[n - 1] end
+		return pts[i]
+	end
+	local out = {}
+	local segs = closed and n or n - 1
+	for i = 1, segs do
+		for s = 0, res - 1 do out[#out + 1] = catmull(at(i - 1), at(i), at(i + 1), at(i + 2), s / res) end
+	end
+	if not closed then out[#out + 1] = pts[n] end
+	return out
+end
+function Mods.tube(bm, m)
+	local chains, wire = wireChains(bm)
+	if #chains == 0 then return bm end
+	local r = math.max(m.radius or 0.25, 1e-3)
+	local sides = math.clamp(math.floor(m.sides or 8), 3, 64)
+	local res = math.clamp(math.floor(m.resolution or 4), 1, 32)
+	local spec = MT.toSpec(bm)
+	-- the line paths themselves don't stay (they'd only show as stray edges)
+	local keep = {}
+	for _, e in ipairs(spec.edges) do keep[#keep + 1] = e end
+	spec.edges = {}
+	for _, ch in ipairs(chains) do
+		local raw = {}
+		for i, v in ipairs(ch.pts) do raw[i] = v.co end
+		local P = Mods.smoothPath(raw, ch.closed, res)
+		local n = #P
+		if n >= 2 then
+			-- tangents + rotation-minimising frames (parallel transport)
+			local T = {}
+			for i = 1, n do
+				local a = ch.closed and P[(i - 2) % n + 1] or P[math.max(1, i - 1)]
+				local b = ch.closed and P[i % n + 1] or P[math.min(n, i + 1)]
+				local d = b - a
+				T[i] = d.Magnitude > 1e-9 and d.Unit or V3(1, 0, 0)
+			end
+			local up = math.abs(T[1].Y) < 0.9 and V3(0, 1, 0) or V3(1, 0, 0)
+			local N = { (up - T[1] * up:Dot(T[1])).Unit }
+			for i = 2, n do
+				local prev = N[i - 1]
+				local q = prev - T[i] * prev:Dot(T[i])
+				N[i] = q.Magnitude > 1e-9 and q.Unit or prev
+			end
+			local rings = {}
+			for i = 1, n do
+				local B = T[i]:Cross(N[i])
+				rings[i] = {}
+				for s = 0, sides - 1 do
+					local a = 2 * math.pi * s / sides
+					rings[i][s + 1] = MT.addVert(spec, P[i] + (N[i] * math.cos(a) + B * math.sin(a)) * r, false)
+				end
+			end
+			local last = ch.closed and n or n - 1
+			for i = 1, last do
+				local A, Bq = rings[i], rings[i % n + 1]
+				for s = 1, sides do
+					local s2 = s % sides + 1
+					-- winding so the face points out of the tube
+					spec.faces[#spec.faces + 1] = { v = { A[s], A[s2], Bq[s2], Bq[s] }, sel = false, smooth = true }
+				end
+			end
+			if not ch.closed and m.caps ~= false then
+				local c1, c2 = {}, {}
+				for s = sides, 1, -1 do c1[#c1 + 1] = rings[1][s] end
+				for s = 1, sides do c2[#c2 + 1] = rings[n][s] end
+				spec.faces[#spec.faces + 1] = { v = c1, sel = false }
+				spec.faces[#spec.faces + 1] = { v = c2, sel = false }
+			end
+		end
+	end
+	local out = MT.fromSpec(spec)
+	-- sharp rims where the caps meet the pipe, smooth along it
+	for e in pairs(out.edges) do
+		local fs = BMesh.edgeFaces(e)
+		if #fs == 2 and (fs[1].smooth == nil) ~= (fs[2].smooth == nil) then e.sharp = true end
+	end
+	pcall(MT.recalcNormals, out)
 	return out
 end
 

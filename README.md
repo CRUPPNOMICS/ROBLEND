@@ -161,6 +161,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | Solidify | Gives a flat surface thickness | Thickness, offset |
 | Subdivision Surface | Catmull-Clark smoothing (Ctrl 0 to 4 sets it) | Levels (0 to 4) |
 | Triangulate | Splits every face into triangles | - |
+| Tube (Curve Bevel) | Turns line paths into smooth round pipes | Radius, sides, resolution, caps |
 | Weld | Merges verts closer than the distance | Distance |
 | Wireframe | Turns every edge into a beam (cages, scaffolding, lattices) | Thickness |
 | Cast | Pulls the mesh towards a sphere | Factor |
@@ -232,6 +233,16 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - The part's own colour tints the paint: Paint > White Base Colour shows the true colours.
 - More points = finer painting (Subdivide first). Colours are saved with the mesh and go up when it's saved to Roblox.
 
+**Curves and pipes** (Add > Curve > Bezier / Circle / Path)
+- A curve is a line path with a **Tube** modifier that turns it into a smooth round pipe: radius, sides, smoothness (resolution) and end caps in Properties > Modifiers.
+- Tab edits the path's points: move them, Ctrl + right click to extend the path, E to extrude a point.
+- Add a Tube modifier to any mesh: every line path in it (edges with no faces) becomes a pipe. Good for railings, cables, handles and neon signs.
+
+**Text** (Add > Text)
+- Chunky block letters (A-Z, 0-9 and common symbols), solid and closed.
+- Change the words, the block size and the depth in Properties > Data > Text; the mesh rebuilds.
+- Modifiers work on text too (Bevel to round it off, Array, Wave, ...).
+
 **Textures and UVs**
 - U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
 - Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
@@ -263,6 +274,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
 | `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
+| `src/Font.lua` | The block font for Add > Text (ROBLEND's own 5 x 7 letters). |
 | `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
