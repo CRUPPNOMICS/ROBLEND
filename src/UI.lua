@@ -241,7 +241,7 @@ end
 function UI.new(api, parentGui)
 	local self = setmetatable({ api = api, on = false, menuOpen = nil, subOpen = nil, sidebar = false, toolbar = true,
 		hover = {}, report = "", drag = nil, propTab = "object", panelsOpen = { transform = true, vis = false, mesh = true, surface = true, save = true, keep = false },
-		fields = {}, outRows = {}, version = api.version or "" }, UI)
+		fields = {}, outRows = {}, blockers = {}, version = api.version or "" }, UI)
 	local gui = make("ScreenGui", { Name = "ROBLEND_UI", Enabled = false, IgnoreGuiInset = true, DisplayOrder = 50, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false }, parentGui)
 	self.gui = gui
 	self:buildTopBar()
@@ -359,7 +359,8 @@ function UI:buildTopBar()
 		table.insert(items, 2, { "Tutorial", "", function() api.tutorial() end })
 		table.insert(items, 3, { "Show Key Presses", "", function() api.toggleShowKeys() end })
 		table.insert(items, 4, { "Run Self-Test", "", function() api.selfTest() end })
-		table.insert(items, 5, "-")
+		table.insert(items, 5, { "Quick Test (check every feature)", "", function() api.quickTest() end })
+		table.insert(items, 6, "-")
 		return items
 	end)
 	-- workspace tabs (Layout = Object Mode, Modeling = Edit Mode)
@@ -2004,6 +2005,8 @@ function UI:inCanvas(p)
 		if inside(f, p) then return false end
 	end
 	if self.uvFrame and self.uvFrame.Visible and inside(self.uvFrame, p) then return false end
+	-- cards over the view (Tutorial, Quick Test): clicks on them aren't clicks in 3D
+	for _, f in ipairs(self.blockers) do if inside(f, p) then return false end end
 	return true
 end
 function UI:overUI(p) return not self:inCanvas(p) end

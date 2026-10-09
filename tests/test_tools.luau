@@ -841,6 +841,20 @@ check2("boolean of round shapes (sphere minus cylinder)", function()
 	closed(nb)
 	assert(volume(nb) > 0 and volume(nb) < volume(a), "smaller than the sphere")
 end)
+check2("boolean with bent faces and a dense sphere: no endless splitting, no stack overflow (0.22.2)", function()
+	-- bent quads (like Roblox's 32-bit positions far from the middle) used to split against their own plane forever
+	local s = BMesh.new() Ops.uvSphere(s, 24, 12, 2)
+	local k = 0
+	for v in pairs(s.verts) do k += 1 v.co = v.co + Vector3.new(2, 2, 2) + Vector3.new(((k * 7) % 5 - 2) * 3e-5, ((k * 3) % 5 - 2) * 3e-5, 0) end
+	s:normalsUpdate()
+	local nb = assert(Boolean.run(boxAt(Vector3.new(4, 4, 4), Vector3.new(0, 0, 0)), s, "difference", BOPTS))
+	assert(nb.nf > 6, "cut: " .. nb.nf)
+	nb:validate()
+	-- a convex shape with thousands of faces makes a chain that deep: must not recurse per level
+	local d = BMesh.new() Ops.uvSphere(d, 96, 48, 2)
+	local nb2 = assert(Boolean.run(d, boxAt(Vector3.new(2, 2, 2), Vector3.new(1.5, 0, 0)), "difference", BOPTS))
+	assert(nb2.nf > 100, "dense cut: " .. nb2.nf)
+end)
 check2("Intersect (Boolean) in Edit Mode: the selected faces cut the rest", function()
 	local bm = cube()
 	local cut = boxAt(Vector3.new(1, 1, 1), Vector3.new(1, 1, 1))

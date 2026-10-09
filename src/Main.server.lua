@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.1"
+local VERSION = "0.22.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -36,6 +36,7 @@ local UVEditor = require(script.UVEditor)
 local Tutorial = require(script.Tutorial)
 local KeyCapture = require(script.KeyCapture)
 local SelfTest = require(script.SelfTest)
+local QuickTest = require(script.QuickTest)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1788,6 +1789,7 @@ function ctx.finishModal(cancel) finishModal(cancel) end
 function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
 local KC = KeyCapture.new(ctx)
+local QT = QuickTest.new(ctx)
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3525,6 +3527,8 @@ api.uvEditor = function() UVE.toggle() end
 api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
+api.quickTest = function() QT.toggle() end
+api.quickTestState = function() return QT end
 api.setBlockKeys = function(on) KC.setEnabled(on) end
 -- Help > Show Key Presses: every key ROBLEND receives is printed to Output (to find keys Studio keeps for itself)
 api.toggleShowKeys = function()
@@ -3694,9 +3698,10 @@ api.undo = function() pcall(function() CHS:Undo() end) end
 api.redo = function() pcall(function() CHS:Redo() end) end
 api.close = function() setUIOn(false) end
 api.setStudioView = function(b) setStudioView(b) end
-api.setAutoSave = function(b)
+api.setAutoSave = function(b, quiet)
 	autoSave = b
 	pcall(function() plugin:SetSetting("RB_AutoSave", b) end)
+	if quiet then return end
 	setStatus(b and "Meshes save to Roblox when you leave Edit Mode." or "Auto save off - use File > Save Mesh.")
 end
 api.rename = function(name)
@@ -3823,6 +3828,7 @@ setUIOn = function(on)
 	end
 	if not on then
 		KC.release()
+		pcall(QT.close)
 		if modal then pcall(finishModal, true) end
 		if editing then exitEdit() end
 	end

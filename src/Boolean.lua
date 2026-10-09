@@ -88,49 +88,82 @@ end
 local Node = {}
 Node.__index = Node
 local function newNode() return setmetatable({ polys = {} }, Node) end
+-- all of these walk the tree with a list instead of calling themselves: a round shape makes a chain as deep as it
+-- has faces, which would overflow Luau's call stack on big meshes
 function Node:build(polys)
-	if #polys == 0 then return end
-	if not self.pn then self.pn, self.pw = polys[1].n, polys[1].w end
-	local front, back = {}, {}
-	for _, p in ipairs(polys) do splitPoly(self.pn, self.pw, p, self.polys, self.polys, front, back) end
-	if #front > 0 then
-		self.front = self.front or newNode()
-		self.front:build(front)
-	end
-	if #back > 0 then
-		self.back = self.back or newNode()
-		self.back:build(back)
+	local stack = { self, polys }
+	while #stack > 0 do
+		local list = table.remove(stack)
+		local node = table.remove(stack)
+		if #list > 0 then
+			local start = 1
+			if not node.pn then
+				-- the first polygon sets this node's plane and always stays here (a slightly bent face would
+				-- otherwise be split against its own plane over and over)
+				node.pn, node.pw = list[1].n, list[1].w
+				node.polys[#node.polys + 1] = list[1]
+				start = 2
+			end
+			local front, back = {}, {}
+			for i = start, #list do splitPoly(node.pn, node.pw, list[i], node.polys, node.polys, front, back) end
+			if #front > 0 then
+				node.front = node.front or newNode()
+				stack[#stack + 1] = node.front
+				stack[#stack + 1] = front
+			end
+			if #back > 0 then
+				node.back = node.back or newNode()
+				stack[#stack + 1] = node.back
+				stack[#stack + 1] = back
+			end
+		end
 	end
 end
+function Node:nodes()
+	local out, stack = {}, { self }
+	while #stack > 0 do
+		local n = table.remove(stack)
+		out[#out + 1] = n
+		if n.front then stack[#stack + 1] = n.front end
+		if n.back then stack[#stack + 1] = n.back end
+	end
+	return out
+end
 function Node:invert()
-	for _, p in ipairs(self.polys) do flip(p) end
-	if self.pn then self.pn, self.pw = -self.pn, -self.pw end
-	if self.front then self.front:invert() end
-	if self.back then self.back:invert() end
-	self.front, self.back = self.back, self.front
+	for _, n in ipairs(self:nodes()) do
+		for _, p in ipairs(n.polys) do flip(p) end
+		if n.pn then n.pn, n.pw = -n.pn, -n.pw end
+		n.front, n.back = n.back, n.front
+	end
 end
 -- keep only the parts of `polys` outside this solid
 function Node:clip(polys)
-	if not self.pn then return table.clone(polys) end
-	local front, back = {}, {}
-	for _, p in ipairs(polys) do splitPoly(self.pn, self.pw, p, front, back, front, back) end
-	if self.front then front = self.front:clip(front) end
-	if self.back then
-		back = self.back:clip(back)
-		for _, p in ipairs(back) do front[#front + 1] = p end
+	local out = {}
+	local stack = { self, polys }
+	while #stack > 0 do
+		local list = table.remove(stack)
+		local node = table.remove(stack)
+		if not node.pn then
+			for _, p in ipairs(list) do out[#out + 1] = p end
+		else
+			local front, back = {}, {}
+			for _, p in ipairs(list) do splitPoly(node.pn, node.pw, p, front, back, front, back) end
+			if node.front then stack[#stack + 1] = node.front stack[#stack + 1] = front
+			else for _, p in ipairs(front) do out[#out + 1] = p end end
+			-- behind a leaf = inside the solid: dropped
+			if node.back then stack[#stack + 1] = node.back stack[#stack + 1] = back end
+		end
 	end
-	return front
+	return out
 end
 function Node:clipTo(other)
-	self.polys = other:clip(self.polys)
-	if self.front then self.front:clipTo(other) end
-	if self.back then self.back:clipTo(other) end
+	for _, n in ipairs(self:nodes()) do n.polys = other:clip(n.polys) end
 end
 function Node:all(out)
 	out = out or {}
-	for _, p in ipairs(self.polys) do out[#out + 1] = p end
-	if self.front then self.front:all(out) end
-	if self.back then self.back:all(out) end
+	for _, n in ipairs(self:nodes()) do
+		for _, p in ipairs(n.polys) do out[#out + 1] = p end
+	end
 	return out
 end
 local function tree(polys)
@@ -176,8 +209,17 @@ function Boolean.fromMesh(bm, keep, side, opts)
 			local tag = { face = f, side = side, smooth = f.smooth }
 			local p = newPoly(vs, tag)
 			if p then
-				if #vs == 3 or convex(vs, p.n) or not opts.triangulate then
+				-- a face that isn't flat (bent quad, or rounding in Roblox's 32-bit positions) is cut into triangles
+				local flat = true
+				if #vs > 3 then for _, co in ipairs(vs) do if math.abs(p.n:Dot(co) - p.w) > EPS * 0.5 then flat = false break end end end
+				local cv = #vs == 3 or convex(vs, p.n)
+				if flat and (cv or not opts.triangulate) then
 					out[#out + 1] = p
+				elseif cv or not opts.triangulate then
+					for i = 2, #vs - 1 do
+						local q = newPoly({ vs[1], vs[i], vs[i + 1] }, tag)
+						if q then out[#out + 1] = q end
+					end
 				else
 					local wrap = {}
 					for i, co in ipairs(vs) do wrap[i] = { co = co } end

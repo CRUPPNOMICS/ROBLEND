@@ -1886,6 +1886,48 @@ check("Help > Run Self-Test runs clean in the fake Studio and tidies up", functi
 	assert(not workspace:FindFirstChild("ROBLEND_SelfTest"), "test folder taken out")
 	MOCK.warns = {}
 end)
+check("Help > Quick Test sets up and shows every item, then tidies up", function()
+	if inEdit() then press("Tab") beat() end
+	local mine = workspace:FindFirstChild("Crate Lid", true)
+	local realPrint = print
+	local lines = {}
+	print = function(...) lines[#lines + 1] = table.concat({ ... }, " ") end
+	local okAll, errAll = pcall(function()
+		headerBtn("Help") menuItem("Quick Test (check every feature)")
+		local Q = MOCK.api.quickTestState()
+		assert(Q.open, "card open")
+		local items = QuickTest.ITEMS
+		assert(#items > 80, "items: " .. #items)
+		local bad = {}
+		for i, it in ipairs(items) do
+			Q.go(i)
+			for _ = 1, 3 do beat() end
+			if Q.setupErr then bad[#bad + 1] = it.id .. " setup: " .. Q.setupErr end
+			if it.show then
+				Q.show()
+				beat()
+				if Q.showErr then bad[#bad + 1] = it.id .. " show: " .. Q.showErr end
+				if MOCK.api.state().modal then press("Escape") beat() end
+			end
+		end
+		assert(#bad == 0, table.concat(bad, "\n"))
+		Q.go(1) beat() beat()
+		Q.mark("works") beat() beat()
+		assert(Q.results[items[1].id] == "works", "result kept")
+		Q.close() beat()
+	end)
+	print = realPrint
+	assert(okAll, tostring(errAll))
+	local found = false
+	for _, l in ipairs(lines) do if l:find("ROBLEND CHECK " .. QuickTest.ITEMS[1].id .. " works", 1, true) then found = true end end
+	assert(found, "result printed")
+	for _, d in ipairs(workspace:GetDescendants()) do
+		assert(not (d:IsA("BasePart") and d.Name:sub(1, 3) == "QT_"), "test part left behind: " .. d.Name)
+	end
+	if mine then assert(mine.Parent, "your own part is kept") end
+	MOCK.api.quickTestState().reset()
+	MOCK.warns = {}
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

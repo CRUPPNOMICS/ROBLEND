@@ -1,4 +1,4 @@
-# ROBLEND 0.22.1
+# ROBLEND 0.22.2
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.22.2:** Help > Quick Test: a card that sets up each feature for you, says what to press and what you should see, with Works / Broken / Skip buttons. Fixed: Booleans on round or detailed shapes could crash with "stack overflow".
 
 **0.22.1:** closing ROBLEND puts Studio back on its Select tool, so Studio's move arrows don't appear on parts afterwards.
 
