@@ -1667,6 +1667,38 @@ check("Smart UV Project in Object Mode unwraps the whole mesh", function()
 	eq(p:GetAttribute("RB_UVMode"), "unwrap", "stored")
 	assert(data(p).uv, "UVs saved")
 end)
+check("knife: C = angle constraint, Z = cut through", function()
+	local p = editCube()
+	press("K") beat()
+	press("C") beat()
+	assert(MOCK.status:find("angle constraint ON", 1, true), MOCK.status)
+	press("Z") beat()
+	assert(MOCK.status:find("cut through ON", 1, true), MOCK.status)
+	press("Escape") beat()
+	assert(not MOCK.api.state().modal, "cancelled")
+	press("Tab") beat()
+end)
+check("Shrinkwrap modifier onto another part, then Apply", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("UV Sphere")
+	local ball = S.Selection:Get()[1]
+	ball.Name = "Globe"
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local box = S.Selection:Get()[1]
+	beat()
+	ball.CFrame = CFrame.new(V3(0, 50, 200))
+	box.CFrame = CFrame.new(V3(0, 50, 200))
+	S.Selection:Set({ ball, box }) beat()
+	MOCK.api.modAdd("shrinkwrap") beat()
+	MOCK.api.modTargetFromSelection(1) beat()
+	MOCK.api.modApply(1) beat()
+	local vs = worldVerts(box)
+	for _, v in ipairs(vs) do
+		local r = (v - V3(0, 50, 200)).Magnitude
+		assert(math.abs(r - 2) < 0.1, "on the ball's surface: " .. r)
+	end
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

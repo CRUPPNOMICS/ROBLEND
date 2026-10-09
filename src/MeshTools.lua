@@ -509,6 +509,35 @@ function MT.knife(bm, points)
 	return cut, verts
 end
 
+-- Knife cut-through (Z in the knife): every edge the cut line crosses, in front or behind, is split
+-- (crossings = { {e, t}, ... } for one straight piece of the cut), then each face holding exactly two of the
+-- new points is split between them, like a bisect limited to where the line was drawn
+function MT.knifeThrough(bm, crossings, ends)
+	local on, cut = {}, {}
+	for _, v in ipairs(ends or {}) do on[v] = true end
+	for _, x in ipairs(crossings) do
+		local e = x.e
+		if bm.edges[e] then
+			local v = (x.t <= 0.001 and e.v1) or (x.t >= 0.999 and e.v2) or bm:edgeSplit(e, e.v1, x.t)
+			on[v] = true
+		end
+	end
+	local fl = {}
+	for f in pairs(bm.faces) do fl[#fl + 1] = f end
+	for _, f in ipairs(fl) do
+		if bm.faces[f] then
+			local hit = {}
+			for _, l in ipairs(BMesh.faceLoops(f)) do if on[l.v] then hit[#hit + 1] = l end end
+			if #hit == 2 and hit[1].next ~= hit[2] and hit[2].next ~= hit[1] then
+				local _, e = bm:faceSplit(f, hit[1], hit[2])
+				if e then cut[e] = true end
+			end
+		end
+	end
+	bm:normalsUpdate()
+	return cut
+end
+
 -- ===== bisect (bmesh_bisect_plane.cc): cut faces with a plane (point p0, normal n) =====
 function MT.bisect(bm, p0, n, faceSet)
 	n = n.Unit
@@ -982,7 +1011,10 @@ local function chains(es)
 	return out
 end
 MT.chains = chains
-function MT.bridge(bm)
+-- opts (Blender's Bridge Edge Loops panel): cuts = rings in between, twist = turn one loop round by that many
+-- points, smooth = how much the bridge bulges to carry on the surfaces it joins (0 = straight)
+function MT.bridge(bm, opts)
+	opts = opts or {}
 	-- faces selected: bridge their border loops and remove them
 	local fs = MT.selFaces(bm)
 	local es = {}
@@ -1016,19 +1048,55 @@ function MT.bridge(bm)
 			if s < best then best, bestK, bestDir = s, k, dir end
 		end
 	end
+	local twist = closed and math.floor(opts.twist or 0) or 0
 	local Bo = {}
-	for i = 1, n do Bo[i] = B[closed and ((bestK + (i - 1) * bestDir) % n + 1) or (bestDir == 1 and i or n - i + 1)] end
+	for i = 1, n do Bo[i] = B[closed and ((bestK + (i - 1 + twist) * bestDir) % n + 1) or (bestDir == 1 and i or n - i + 1)] end
 	-- winding: if A[1]->A[2] is already used by a face in that direction, the bridge goes the other way
 	local flip = false
 	local e = BMesh.edgeExists(A[1], A[2])
 	if e and e.l and e.l.v == A[1] then flip = true end
+	-- rings in between (cuts): a Hermite curve from each A point to its B point; with smoothness the curve
+	-- leaves each loop carrying on the way its faces were going
+	local cuts = math.clamp(math.floor(opts.cuts or 0), 0, 64)
+	local smooth = opts.smooth or 0
+	local function outward(v)
+		local d, k = Vector3.new(), 0
+		for _, f in ipairs(BMesh.vertFaces(v)) do
+			local c = BMesh.faceCenter(f)
+			if (v.co - c).Magnitude > 1e-9 then d += (v.co - c).Unit k += 1 end
+		end
+		return k > 0 and d.Magnitude > 1e-9 and d.Unit or nil
+	end
+	local rings = { A }
+	if cuts > 0 then
+		local dirA, dirB = {}, {}
+		for i = 1, n do dirA[i], dirB[i] = outward(A[i]), outward(Bo[i]) end
+		for c = 1, cuts do
+			local t = c / (cuts + 1)
+			local h00, h10, h01, h11 = 2 * t ^ 3 - 3 * t ^ 2 + 1, t ^ 3 - 2 * t ^ 2 + t, -2 * t ^ 3 + 3 * t ^ 2, t ^ 3 - t ^ 2
+			local ring = {}
+			for i = 1, n do
+				local pa, pb = A[i].co, Bo[i].co
+				local L = (pb - pa).Magnitude
+				local ta = (dirA[i] or (pb - pa).Unit) * L * smooth
+				local tb = -(dirB[i] or (pa - pb).Unit) * L * smooth
+				local p = (smooth > 0) and (pa * h00 + ta * h10 + pb * h01 + tb * h11) or pa:Lerp(pb, t)
+				ring[i] = bm:vertCreate(p)
+			end
+			rings[#rings + 1] = ring
+		end
+	end
+	rings[#rings + 1] = Bo
 	local out = {}
 	local last = closed and n or n - 1
-	for i = 1, last do
-		local i2 = i % n + 1
-		local quad = flip and { A[i2], A[i], Bo[i], Bo[i2] } or { A[i], A[i2], Bo[i2], Bo[i] }
-		local f = bm:faceCreate(quad)
-		if f then out[f] = true end
+	for r = 1, #rings - 1 do
+		local P, Q = rings[r], rings[r + 1]
+		for i = 1, last do
+			local i2 = i % n + 1
+			local quad = flip and { P[i2], P[i], Q[i], Q[i2] } or { P[i], P[i2], Q[i2], Q[i] }
+			local f = bm:faceCreate(quad)
+			if f then out[f] = true end
+		end
 	end
 	clearSel(bm)
 	for f in pairs(out) do selectFace(f) end

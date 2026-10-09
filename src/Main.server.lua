@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.19.0"
+local VERSION = "0.20.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -2089,15 +2089,10 @@ local function modelingTools()
 		end
 		return nil
 	end
-	-- the edges a screen segment crosses (so a long cut goes through every face on the way)
-	local function crossings(p, q)
-		local sp, sq = toScreen(p.pos), toScreen(q.pos)
+	-- the edges a screen segment crosses (so a long cut goes through every face on the way);
+	-- through = also the ones hidden behind faces (the knife's cut-through, Z)
+	local function screenCrossings(sp, sq, skip, through)
 		local out = {}
-		local skip = {}
-		for _, x in ipairs({ p, q }) do
-			if x.e then skip[x.e] = true end
-			if x.v then for _, e in ipairs(BMesh.vertEdges(x.v)) do skip[e] = true end end
-		end
 		local r = sq - sp
 		for e in pairs(bm.edges) do
 			if not skip[e] and not e.hide then
@@ -2110,7 +2105,7 @@ local function modelingTools()
 					local t = (w.X * r.Y - w.Y * r.X) / den
 					if u > 0.001 and u < 0.999 and t > 0.001 and t < 0.999 then
 						local wp = W(e.v1.co:Lerp(e.v2.co, t))
-						if xray or not occluded(wp, faceSetOfEdge(e)) then out[#out + 1] = { e = e, t = t, u = u, pos = wp } end
+						if through or xray or not occluded(wp, faceSetOfEdge(e)) then out[#out + 1] = { e = e, t = t, u = u, pos = wp } end
 					end
 				end
 			end
@@ -2118,10 +2113,48 @@ local function modelingTools()
 		table.sort(out, function(x, y) return x.u < y.u end)
 		return out
 	end
+	local function crossings(p, q, through)
+		local skip = {}
+		for _, x in ipairs({ p, q }) do
+			if x.e then skip[x.e] = true end
+			if x.v then for _, e in ipairs(BMesh.vertEdges(x.v)) do skip[e] = true end end
+		end
+		return screenCrossings(toScreen(p.pos), toScreen(q.pos), skip, through)
+	end
+	-- the knife's angle constraint (C): the next point sits on the line from the last one at a multiple of
+	-- 45 degrees on screen, where that line crosses an edge nearest the mouse
+	local function knifeAngleSnap(last, mp)
+		local sl = toScreen(last.pos)
+		local d = mp - sl
+		if d.Magnitude < 2 then return nil end
+		local a = math.round(math.atan2(d.Y, d.X) / (math.pi / 4)) * (math.pi / 4)
+		local dir = Vector2.new(math.cos(a), math.sin(a))
+		local want = d:Dot(dir)
+		local far = 4000
+		local skip = {}
+		if last.e then skip[last.e] = true end
+		if last.v then for _, e in ipairs(BMesh.vertEdges(last.v)) do skip[e] = true end end
+		local best, bd = nil, math.huge
+		for _, x in ipairs(screenCrossings(sl, sl + dir * far, skip, false)) do
+			local dd = math.abs(x.u * far - want)
+			if dd < bd then best, bd = x, dd end
+		end
+		return best
+	end
 	function T.knife()
 		if not editing or modal then return end
-		local M = { kind = "knife", pts = {}, num = "" }
-		M.update = function() M.hover = knifeSnap(mousePos()) dirtyCage = true end
+		local M = { kind = "knife", pts = {}, num = "", angleSnap = MOD.knifeAngle == true, through = MOD.knifeThrough == true }
+		M.update = function()
+			local mp = mousePos()
+			M.hover = (M.angleSnap and #M.pts > 0 and knifeAngleSnap(M.pts[#M.pts], mp)) or knifeSnap(mp)
+			dirtyCage = true
+		end
+		M.toggle = function(what)
+			if what == "angle" then M.angleSnap = not M.angleSnap MOD.knifeAngle = M.angleSnap
+			else M.through = not M.through MOD.knifeThrough = M.through end
+			M.update()
+			setStatus(("Knife: angle constraint %s (C), cut through %s (Z). Click to add points, Enter = cut, Esc = cancel."):format(M.angleSnap and "ON" or "off", M.through and "ON" or "off"))
+		end
 		M.click = function()
 			M.update()
 			if M.hover then M.pts[#M.pts + 1] = M.hover end
@@ -2129,12 +2162,31 @@ local function modelingTools()
 		end
 		M.finish = function(cancel)
 			if cancel or #M.pts < 2 then setStatus("Knife cancelled.") return end
-			local chain = { M.pts[1] }
-			for i = 2, #M.pts do
-				for _, x in ipairs(crossings(M.pts[i - 1], M.pts[i])) do chain[#chain + 1] = x end
-				chain[#chain + 1] = M.pts[i]
+			local cut
+			if M.through then
+				-- cut through: each straight piece splits every edge under it, front and back
+				cut = {}
+				for _, x in ipairs(M.pts) do
+					if not x.v and x.e and bm.edges[x.e] then
+						x.v = (x.t <= 0.001 and x.e.v1) or (x.t >= 0.999 and x.e.v2) or bm:edgeSplit(x.e, x.e.v1, x.t)
+						x.e = nil
+					end
+				end
+				for i = 2, #M.pts do
+					local ends = {}
+					for _, x in ipairs({ M.pts[i - 1], M.pts[i] }) do
+						if x.v then ends[#ends + 1] = x.v end
+					end
+					for e in pairs(MT.knifeThrough(bm, crossings(M.pts[i - 1], M.pts[i], true), ends)) do cut[e] = true end
+				end
+			else
+				local chain = { M.pts[1] }
+				for i = 2, #M.pts do
+					for _, x in ipairs(crossings(M.pts[i - 1], M.pts[i])) do chain[#chain + 1] = x end
+					chain[#chain + 1] = M.pts[i]
+				end
+				cut = MT.knife(bm, chain)
 			end
-			local cut = MT.knife(bm, chain)
 			MT.clearSel(bm)
 			for e in pairs(cut) do e.sel = true e.v1.sel = true e.v2.sel = true end
 			setMode("edge")
@@ -2143,7 +2195,7 @@ local function modelingTools()
 			if MOD.tool == "knife" then task.defer(function() if editing and not modal and MOD.tool == "knife" then T.knife() end end) end
 		end
 		modal = M
-		setStatus("Knife: click points on edges / faces, Enter = cut, Esc = cancel.")
+		setStatus("Knife: click points on edges / faces, Enter = cut, Esc = cancel. C = angle constraint, Z = cut through.")
 	end
 	-- bisect: a cut along a line dragged on the screen (through the view)
 	function T.bisect(a, b)
@@ -2727,7 +2779,28 @@ local function modelingTools()
 	O.DeleteLoose = function() local n = MT.deleteLoose(bm) changed("Delete Loose") setStatus(("Removed %d loose bits."):format(n)) end
 	O.RotateCW = function() for e in pairs(MT.selEdges(bm)) do MT.rotateEdge(bm, e, false) end changed("Rotate Edge") end
 	O.RotateCCW = function() for e in pairs(MT.selEdges(bm)) do MT.rotateEdge(bm, e, true) end changed("Rotate Edge") end
-	O.Bridge = function() local out, err = MT.bridge(bm) if not out then setStatus(err) return end flush() changed("Bridge Edge Loops") end
+	-- Bridge Edge Loops, then adjust it like Blender's redo panel: mouse right = smoothness, wheel = cuts,
+	-- T / Shift T = twist; click or Enter = done
+	O.Bridge = function()
+		local sn = snapshot()
+		local ok, err = MT.bridge(bm)
+		bm = restore(sn)
+		if not ok then setStatus(err or "Select two edge loops.") return end
+		MOD.bridgeCuts, MOD.bridgeTwist = MOD.bridgeCuts or 0, 0
+		MOD.startParam({ name = "Bridge Edge Loops", mode = "x",
+			info = function() return ("Cuts %d (wheel), Twist %d (T / Shift T), Smoothness = mouse right"):format(MOD.bridgeCuts, MOD.bridgeTwist) end,
+			onWheel = function(steps) MOD.bridgeCuts = math.clamp(MOD.bridgeCuts + (steps > 0 and 1 or -1), 0, 64) end,
+			onKey = function(k)
+				if k == Enum.KeyCode.T then MOD.bridgeTwist += shiftDown() and -1 or 1 return true end
+				if k == Enum.KeyCode.PageUp then MOD.bridgeCuts = math.min(64, MOD.bridgeCuts + 1) return true end
+				if k == Enum.KeyCode.PageDown then MOD.bridgeCuts = math.max(0, MOD.bridgeCuts - 1) return true end
+				return false
+			end,
+			fn = function(x)
+				local out, err = MT.bridge(bm, { cuts = MOD.bridgeCuts, twist = MOD.bridgeTwist, smooth = math.clamp(x or 0, 0, 2) })
+				if not out then error(err) end
+			end })
+	end
 	O.SubdivideRing = function()
 		local e = next(MT.selEdges(bm))
 		if not need(e, "Pick an edge of the ring.") then return end
@@ -4098,6 +4171,7 @@ local function modalKey(k)
 		end
 	end
 	if k == Enum.KeyCode.Space and modal.kind == "knife" then finishModal(false) return end
+	if modal.kind == "knife" and (k == Enum.KeyCode.C or k == Enum.KeyCode.Z) then modal.toggle(k == Enum.KeyCode.C and "angle" or "through") return end
 	local ch = DIGITS[k.Name]
 	if ch then modal.num = (modal.num or "") .. ch
 	elseif k == Enum.KeyCode.Backspace then modal.num = (modal.num or ""):sub(1, -2)

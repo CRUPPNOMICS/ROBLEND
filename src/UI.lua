@@ -893,8 +893,32 @@ local MOD_FIELDS = {
 		label(b, { LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, TextColor3 = T.textDim, Text = "Splits every face into triangles." })
 	end,
 	decimate = function(self, b, i, m, api, num)
-		self:toggleRow(b, 2, "Mode", { { "Planar", true, function() end, "Joins faces that are flatter than the angle limit" } })
-		num(3, "Angle Limit", "angle", 0, 180)
+		local mode = m.mode or "Planar"
+		self:toggleRow(b, 2, "Mode", {
+			{ "Collapse", mode == "Collapse", function() api.modSet(i, "mode", "Collapse") end, "Merges the edges that change the shape least, down to the ratio of triangles" },
+			{ "Planar", mode == "Planar", function() api.modSet(i, "mode", "Planar") end, "Joins faces that are flatter than the angle limit" } })
+		if mode == "Collapse" then num(3, "Ratio", "ratio", 0.01, 1) else num(3, "Angle Limit", "angle", 0, 180) end
+	end,
+	edgesplit = function(self, b, i, m, api, num)
+		self:toggleRow(b, 2, "Edge Angle", { { m.useAngle ~= false and "On" or "Off", m.useAngle ~= false, function() api.modToggle(i, "useAngle") end, "Split edges sharper than the angle" } })
+		num(3, "Split Angle", "angle", 0, 180)
+		self:toggleRow(b, 4, "Sharp Edges", { { m.sharp ~= false and "On" or "Off", m.sharp ~= false, function() api.modToggle(i, "sharp") end, "Split edges marked Sharp" } })
+	end,
+	shrinkwrap = function(self, b, i, m, api, num)
+		local mode = m.mode or "Nearest Surface Point"
+		self:toggleRow(b, 2, "Mode", {
+			{ "Surface", mode == "Nearest Surface Point", function() api.modSet(i, "mode", "Nearest Surface Point") end, "Each point goes to the nearest place on the target's surface" },
+			{ "Vertex", mode == "Nearest Vertex", function() api.modSet(i, "mode", "Nearest Vertex") end, "Each point goes to the target's nearest point" },
+			{ "Project", mode == "Project", function() api.modSet(i, "mode", "Project") end, "Each point moves along its normal until it meets the target" } })
+		local r = make("Frame", { LayoutOrder = 3, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
+		label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Target", TextXAlignment = Enum.TextXAlignment.Right })
+		local tb = make("TextBox", { Name = "RB_ModTarget" .. i, Position = UDim2.new(0.38, 0, 0, 0), Size = UDim2.new(0.62, 0, 1, 0), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12,
+			TextColor3 = T.text, Text = m.target or "", PlaceholderText = "the target part's name", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, r)
+		corner(tb, 4)
+		make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, tb)
+		tb.FocusLost:Connect(function() if tb.Text ~= (m.target or "") then self:safe(function() api.modSet(i, "target", tb.Text) end) end end)
+		self:wideButton(b, 4, "Use the other selected part", function() self:safe(function() api.modTargetFromSelection(i) end) end)
+		num(5, "Offset", "offset", -1000, 1000)
 	end,
 	screw = function(self, b, i, m, api, num)
 		num(2, "Angle", "angle", -3600, 3600)

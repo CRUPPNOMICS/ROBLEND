@@ -68,7 +68,7 @@ The header also has toggles for snapping, proportional editing (O; the mouse whe
 | Ctrl B, Ctrl Shift B | Bevel edges, bevel vertices (while bevelling, the mouse wheel or PageUp/PageDown changes the number of segments, for rounded edges) |
 | Ctrl R | Loop cut and slide (the mouse wheel changes the number of cuts; click to cut, then slide; Esc keeps the cut centred) |
 | Ctrl click | Select the shortest path from the last element you picked |
-| K | Knife |
+| K | Knife (while cutting: C = angle constraint in 45 degree steps, Z = cut through to the back) |
 | V, Alt D | Rip, rip and extend |
 | Y | Split |
 | P | Separate into a new part |
@@ -156,7 +156,8 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | Array | Repeats the mesh in a row | Count, axis, relative offset, constant offset, merge |
 | Bevel | Rounds every edge sharper than the angle | Amount, segments, angle |
 | Boolean | Cuts by, joins with or trims to another part, and follows it when it moves | Operation, object (by name, or "Use the other selected part") |
-| Decimate (Planar) | Joins faces that are flatter than the angle into bigger ones | Angle limit |
+| Decimate | Collapse: merges the edges that change the shape least, down to a ratio of the triangles. Planar: joins faces flatter than the angle | Mode, ratio / angle limit |
+| Edge Split | Splits the mesh apart along edges sharper than the angle and / or marked Sharp | Edge angle, split angle, sharp edges |
 | Mirror | Copies the mesh across its own X / Y / Z, welding the middle | Axis, merge, distance |
 | Screw | Spins the open edges (a profile line) round an axis: vases, springs, bolts | Angle, screw height, steps, axis |
 | Solidify | Gives a flat surface thickness | Thickness, offset |
@@ -167,6 +168,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | Wireframe | Turns every edge into a beam (cages, scaffolding, lattices) | Thickness |
 | Cast | Pulls the mesh towards a sphere | Factor |
 | Displace | Pushes the surface in and out with noise (rocks, terrain) | Strength, texture size, seed |
+| Shrinkwrap | Moves the points onto another part: its nearest surface point, its nearest point, or along each point's normal (Project) | Mode, target (by name), offset |
 | Simple Deform | Twist, Bend, Taper or Stretch | Method, angle / factor, axis |
 | Smooth | Relaxes the shape | Factor, repeat |
 | Wave | Ripples, out from the middle or along X | Height, width, offset |
@@ -272,6 +274,10 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - MeshParts are read with Roblox's `CreateEditableMeshAsync`, so only meshes you (or the experience's owner) uploaded can be opened. Unions can't be read by plugins.
 - A MeshPart's corners are welded back together so it edits as one surface; its old texture UVs aren't kept (use the UV menu).
 
+**Bridge Edge Loops** (Edge menu): once bridged, move the mouse right for Smoothness (the bridge bulges to carry on the shapes it joins), the wheel adds Cuts, T / Shift T twists it. Click or Enter when done.
+
+**Modifiers that use another part** (Boolean, Shrinkwrap) find it by name, a sibling first. Give the target a name nothing else uses.
+
 **Boolean**
 - Object > Boolean > Difference / Union / Intersect: select the cutters, then Shift click the part to keep (it's the active one). The cutters are used up and taken out; Ctrl Z brings them back. Ordinary Parts can be cutters or the base (they're converted).
 - The Boolean modifier does the same but stays live: move the cutter and the cut follows. Apply makes it permanent.
@@ -292,7 +298,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/MeshTools.lua` | The Modeling tab's operators: bevel, knife, bisect, spin, smooth, rip, split, dissolve, bridge, poke, triangulate, solidify, hull, symmetrize, normals, selection tools. |
-| `src/Modifiers.lua` | The modifier stack (17 modifiers) and merge by distance. |
+| `src/Modifiers.lua` | The modifier stack (19 modifiers) and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |

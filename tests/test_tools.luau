@@ -405,10 +405,12 @@ check2("weld + triangulate modifiers", function()
 end)
 check2("decimate (planar) joins a flat grid back into one face", function()
 	local g = BMesh.new() Ops.grid(g, 4, 4, 4)
-	local out = Mods.evaluate(g, { Mods.new("decimate") })
+	local planar = Mods.new("decimate")
+	planar.mode = "Planar"
+	local out = Mods.evaluate(g, { planar })
 	out:validate()
 	eq(out.nf, 1, "one face") eq(out.nv, 4, "4 corners")
-	local c = Mods.evaluate(Mods.evaluate(cube(), { Mods.new("subsurf") }), { Mods.new("decimate") })
+	local c = Mods.evaluate(Mods.evaluate(cube(), { Mods.new("subsurf") }), { planar })
 	eq(c.nf, 24, "a curved surface is left alone")
 end)
 check2("screw: a line spun 360 degrees makes a closed tube band", function()
@@ -693,6 +695,100 @@ check2("text: HI builds closed solid letters", function()
 	assert(math.abs(lo + hi) < 1e-6, "centred")
 	local cells, w = Font.cells("A B")
 	eq(w, 5 + 1 + 3 + 1 + 5, "a space is 3 blocks")
+end)
+-- ===== 0.20: bridge options, knife cut-through =====
+check2("bridge: cuts add rings, smoothness bulges to follow the surfaces, twist turns it", function()
+	local function flared()
+		local b = BMesh.new()
+		local A, Ain, B, Bin = {}, {}, {}, {}
+		for i = 1, 8 do
+			local a = (i - 1) / 8 * math.pi * 2
+			local c, s2 = math.cos(a), math.sin(a)
+			Ain[i] = b:vertCreate(Vector3.new(c * 0.5, -1, s2 * 0.5))
+			A[i] = b:vertCreate(Vector3.new(c, 0, s2))
+			B[i] = b:vertCreate(Vector3.new(c, 2, s2))
+			Bin[i] = b:vertCreate(Vector3.new(c * 0.5, 3, s2 * 0.5))
+		end
+		for i = 1, 8 do
+			local j = i % 8 + 1
+			b:faceCreate({ Ain[i], Ain[j], A[j], A[i] })
+			b:faceCreate({ B[i], B[j], Bin[j], Bin[i] })
+		end
+		for i = 1, 8 do A[i].sel, B[i].sel = true, true end
+		for e in pairs(b.edges) do e.sel = e.v1.sel and e.v2.sel end
+		b:normalsUpdate()
+		return b
+	end
+	local b = flared()
+	local out = assert(MT.bridge(b, { cuts = 3 }))
+	local n = 0 for _ in pairs(out) do n += 1 end
+	eq(n, 32, "4 rows of 8 quads")
+	b:validate()
+	local function midRadius(m)
+		local r = 0
+		for v in pairs(m.verts) do if math.abs(v.co.Y - 1) < 1e-6 then r = math.max(r, math.sqrt(v.co.X ^ 2 + v.co.Z ^ 2)) end end
+		return r
+	end
+	assert(math.abs(midRadius(b) - 1) < 1e-6, "straight: the middle ring stays at radius 1")
+	local s = flared()
+	MT.bridge(s, { cuts = 3, smooth = 1 })
+	assert(midRadius(s) > 1.05, "smooth: it bulges out like the flares: " .. midRadius(s))
+	local tw = flared()
+	MT.bridge(tw, { twist = 1 })
+	tw:validate()
+end)
+check2("knife cut through: every crossed edge is cut, front and back", function()
+	local bm = cube()
+	local xs = {}
+	for e in pairs(bm.edges) do
+		if math.abs(e.v1.co.X - e.v2.co.X) < 1e-6 and math.abs(e.v1.co.Z - e.v2.co.Z) < 1e-6 then xs[#xs + 1] = { e = e, t = 0.5 } end
+	end
+	eq(#xs, 4, "the 4 upright edges")
+	local cut = MT.knifeThrough(bm, xs)
+	local n = 0 for _ in pairs(cut) do n += 1 end
+	eq(n, 4, "a ring of 4 new edges")
+	eq(bm.nf, 10, "the 4 sides are split")
+	bm:validate()
+	closed(bm)
+end)
+check2("Decimate Collapse: a quarter of the triangles, still closed and the same size", function()
+	local sp = BMesh.new() Ops.uvSphere(sp, 24, 12, 2)
+	local t0 = 0 for f in pairs(sp.faces) do t0 += f.len - 2 end
+	local out = assert(Mods.decimate(sp, { mode = "Collapse", ratio = 0.25 }))
+	out:validate()
+	local t1 = 0 for f in pairs(out.faces) do t1 += f.len - 2 end
+	assert(t1 <= math.ceil(t0 * 0.25) + 2 and t1 >= t0 * 0.2, ("triangles %d of %d"):format(t1, t0))
+	closed(out)
+	for v in pairs(out.verts) do assert(math.abs(v.co.Magnitude - 2) < 0.35, "stays on the sphere: " .. v.co.Magnitude) end
+	-- an open grid keeps its outline
+	local g = BMesh.new() Ops.grid(g, 10, 10, 10)
+	local og = assert(Mods.collapse(g, 0.1))
+	local lo, hi = math.huge, -math.huge
+	for v in pairs(og.verts) do lo = math.min(lo, v.co.X) hi = math.max(hi, v.co.X) end
+	assert(math.abs(lo + 5) < 1e-4 and math.abs(hi - 5) < 1e-4, "outline kept")
+	local g2 = BMesh.new() Ops.grid(g2, 4, 4, 4)
+	eq(assert(Mods.decimate(g2, { angle = 5 })).nf, 1, "old saves (no mode) are still Planar")
+end)
+check2("Edge Split: a cube comes apart at its corners", function()
+	local out = assert(Mods.edgesplit(cube(), { angle = 30 }))
+	out:validate()
+	eq(out.nv, 24, "4 points per side") eq(out.nf, 6, "faces")
+	eq(Mods.edgesplit(cube(), { useAngle = false, sharp = true }), nil, "nothing marked sharp")
+end)
+check2("Shrinkwrap: onto a sphere's surface, onto its points, projected onto a floor", function()
+	local sphere = BMesh.new() Ops.uvSphere(sphere, 24, 12, 2)
+	local env = { target = function() return BMesh.fromData(sphere:toData()) end }
+	local out = assert(Mods.shrinkwrap(cube(), { target = "x" }, env))
+	for v in pairs(out.verts) do assert(math.abs(v.co.Magnitude - 2) < 0.1, "on the sphere: " .. v.co.Magnitude) end
+	local nv = assert(Mods.shrinkwrap(cube(), { target = "x", mode = "Nearest Vertex" }, env))
+	for v in pairs(nv.verts) do assert(math.abs(v.co.Magnitude - 2) < 1e-3, "on a sphere point") end
+	local floor = BMesh.new() Ops.plane(floor, 20)
+	local g = BMesh.new() Ops.grid(g, 3, 3, 4)
+	for v in pairs(g.verts) do v.co = v.co + Vector3.new(0, -1, 0) end
+	g:normalsUpdate()
+	local pr = assert(Mods.shrinkwrap(g, { target = "x", mode = "Project", offset = 0.5 }, { target = function() return BMesh.fromData(floor:toData()) end }))
+	for v in pairs(pr.verts) do assert(math.abs(math.abs(v.co.Y) - 0.5) < 1e-6, "projected onto the floor, 0.5 off it: " .. v.co.Y) end
+	eq(Mods.shrinkwrap(cube(), { target = "" }, { target = function() return nil end }), nil, "no target, no change")
 end)
 -- ===== Boolean (0.18) =====
 local function volume(bm)

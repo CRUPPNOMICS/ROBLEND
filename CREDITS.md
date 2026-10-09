@@ -23,9 +23,11 @@ The Blender source files used are:
 | `source/blender/bmesh/tools/bmesh_bevel.cc` | Bevel (offset-meet corners, 1 segment) |
 | `source/blender/bmesh/tools/bmesh_bisect_plane.cc` | Bisect and knife plane cuts |
 | `source/blender/bmesh/operators/bmo_utils.cc`, `bmo_poke.cc`, `bmo_triangulate.cc`, `bmo_join_triangles.cc` | Smooth vertices, poke, triangulate, tris to quads |
-| `source/blender/bmesh/operators/bmo_bridge.cc`, `bmo_dissolve.cc`, `bmo_rotate_edges.cc`, `bmo_connect.cc` | Bridge loops, dissolve, rotate edge, connect vertex pairs |
+| `source/blender/bmesh/operators/bmo_bridge.cc`, `bmo_dissolve.cc`, `bmo_rotate_edges.cc`, `bmo_connect.cc` | Bridge loops (with cuts, twist and smoothness), dissolve, rotate edge, connect vertex pairs |
+| `source/blender/bmesh/tools/bmesh_decimate_collapse.cc` | Decimate Collapse (quadric error edge collapse, Garland and Heckbert 1997) |
+| `source/blender/editors/mesh/editmesh_knife.cc` | Knife angle constraint and cut through |
 | `source/blender/bmesh/operators/bmo_dupe.cc`, `bmo_hull.cc`, `bmo_symmetrize.cc`, `bmo_normals.cc` | Duplicate, split, spin, convex hull, symmetrize, recalculate normals |
-| `source/blender/modifiers/intern/MOD_mirror.cc`, `MOD_subsurf.cc`, `MOD_solidify.cc`, `MOD_array.cc`, `MOD_bevel.cc`, `MOD_smooth.cc`, `MOD_weld.cc`, `MOD_screw.cc`, `MOD_triangulate.cc`, `MOD_decimate.cc`, `MOD_simpledeform.cc`, `MOD_cast.cc`, `MOD_wave.cc`, `MOD_displace.cc`, `MOD_wireframe.cc` | The modifier stack (Subdivision uses the Catmull-Clark rules OpenSubdiv implements) |
+| `source/blender/modifiers/intern/MOD_mirror.cc`, `MOD_subsurf.cc`, `MOD_solidify.cc`, `MOD_array.cc`, `MOD_bevel.cc`, `MOD_smooth.cc`, `MOD_weld.cc`, `MOD_screw.cc`, `MOD_triangulate.cc`, `MOD_decimate.cc`, `MOD_simpledeform.cc`, `MOD_cast.cc`, `MOD_wave.cc`, `MOD_displace.cc`, `MOD_wireframe.cc`, `MOD_edgesplit.cc`, `MOD_shrinkwrap.cc` | The modifier stack (Subdivision uses the Catmull-Clark rules OpenSubdiv implements) |
 | `scripts/startup/bl_ui/properties_data_modifier.py` | The Modifiers tab and the Add Modifier menu |
 | `source/blender/editors/mesh/editmesh_select_similar.cc`, `source/blender/editors/object/object_transform.cc` | Select Similar; Set Origin and Apply Rotation |
 | `source/blender/modifiers/intern/MOD_boolean.cc`, `source/blender/editors/mesh/editmesh_intersect.cc` | The Boolean modifier's settings and Edit Mode's Intersect (Boolean) (the solid geometry itself is done differently, see below) |
