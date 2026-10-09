@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.4"
+local VERSION = "0.22.5"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -5743,8 +5743,58 @@ function AutoTest.run(C, api, only)
 		return (med > 60 and "info: SLOW " or "info: ") .. ("%.0f ms per step moving %d points (smooth is under ~20)"):format(med, nv())
 	end)
 
+	-- ===== the finish: a block painted in four colours, then a slow spin round it (nice for a video) =====
+	local showcase
+	if not only then
+		local ok, err = pcall(function()
+			H.clean()
+			pcall(function()
+				local v = C.get().view
+				api.viewAxis("front")
+				v:step(math.rad(-40), math.rad(25))
+				v.viewName = nil
+			end)
+			local p = H.add("Cube")
+			p.Name = "ROBLEND Painted Block"
+			H.select({ p }) H.frame() beat(2)
+			api.toggleEdit() beat()
+			for _ = 1, 4 do H.pick("all") H.tool("Subdivide") beat() end
+			api.setPaintMode("paint") beat()
+			api.paintWhiteBase()
+			C.setStatus("Auto-test done - painting the block...")
+			-- every point gets the colour of its quarter (round the up axis), swept round over two seconds
+			local COLS = { Color3.fromRGB(230, 57, 70), Color3.fromRGB(255, 196, 0), Color3.fromRGB(46, 196, 110), Color3.fromRGB(52, 120, 246) }
+			local list = {}
+			for v in pairs(bm().verts) do
+				local a = math.atan2(v.co.Z, v.co.X)
+				if a < 0 then a += 2 * math.pi end
+				list[#list + 1] = { v = v, a = a }
+			end
+			table.sort(list, function(x, y) return x.a < y.a end)
+			local steps = 40
+			for i = 1, steps do
+				for j = math.floor((i - 1) / steps * #list) + 1, math.floor(i / steps * #list) do
+					local x = list[j]
+					x.v.col = COLS[math.clamp(math.floor(x.a / (math.pi / 2)) + 1, 1, 4)]
+				end
+				C.dirtyMeshFast("col")
+				task.wait(0.05)
+			end
+			C.commit("Paint the block")
+			api.setPaintMode(nil)
+			api.toggleEdit() beat(2)
+			H.select({ p })
+			-- one slow turn round it
+			local v = C.get().view
+			for _ = 1, 120 do v:step(math.rad(3), 0) v.viewName = nil C.dirtyCage() task.wait(1 / 30) end
+			showcase = p
+		end)
+		if not ok then log("INFO", "painted block", "couldn't make it: " .. tostring(err)) end
+	end
+
 	-- ===== tidy up =====
 	H.clean()
+	if showcase then H.select({ showcase }) end
 	api.setFake(nil)
 	pcall(api.setAutoSave, autoSaveWas, true)
 	pcall(api.setPivot, pivotWas or "median")
@@ -5754,7 +5804,7 @@ function AutoTest.run(C, api, only)
 	if (st.mirrorX == true) ~= (mirrorWas == true) then api.toggleEdit2("mirrorX") end
 	local summary = ("ROBLEND AUTO DONE  %d passed, %d failed, %d need you  (%.0f s)"):format(pass, fail, you, os.clock() - t0)
 	print(summary)
-	C.setStatus(summary:gsub("ROBLEND AUTO DONE  ", "Auto-test: ") .. (fail > 0 and " - Claude can read what failed from the log." or "."))
+	C.setStatus(summary:gsub("ROBLEND AUTO DONE  ", "Auto-test: ") .. (fail > 0 and " - Claude can read what failed from the log." or ".") .. (showcase and "  (The painted block stays - delete it with X if you like.)" or ""))
 	AutoTest.running = false
 	return results, pass, fail, you
 end

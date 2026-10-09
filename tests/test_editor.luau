@@ -1985,6 +1985,17 @@ check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	for _, d in ipairs(workspace:GetDescendants()) do
 		assert(not (d:IsA("BasePart") and d.Name:sub(1, 3) == "QT_"), "test part left behind: " .. d.Name)
 	end
+	if not AUTO_ONLY then
+		-- the finish: a block painted in four colours stays in the place
+		local block = workspace:FindFirstChild("ROBLEND Painted Block")
+		assert(block, "the painted block")
+		local d = S.HttpService:JSONDecode(block.RB_Data.Value .. (block.RB_Data:FindFirstChild("2") and block.RB_Data["2"].Value or ""))
+		local seen, n = {}, 0
+		for _, hex in ipairs(d.vc or {}) do if hex ~= "" and not seen[hex] then seen[hex] = true n += 1 end end
+		assert(n == 4, "four colours, got " .. n)
+		assert(not MOCK.api.state().editing, "back in Object Mode")
+		block.Parent = nil
+	end
 	MOCK.warns = {}
 end)
 check("wireframe, x-ray, Studio view switch, close", function()
