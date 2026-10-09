@@ -2076,10 +2076,17 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	-- a Model with two parts comes down together; Esc while holding sends it back down
 	local m = Instance.new("Model") m.Name = "Hut" m.Parent = workspace
 	for i = 1, 2 do local pp = Instance.new("Part") pp.Name = "Wall" .. i pp.Size = Vector3.new(2, 2, 2) pp.CFrame = CFrame.new(100 + i * 3, 1, 0) pp.Anchored = true pp.Parent = m end
-	S.Selection:Set({ m })
+	S.Selection:Set({ m.Wall2 })
 	api.importSelected() beat()
-	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000, "model came down")
+	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000, "picking one wall brought the whole model down")
+	assert(m.Wall1.Parent == m and m.Parent == workspace, "still a model")
 	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
+	-- picking just one wall still carries the whole model (in a model, out a model)
+	S.Selection:Set({ m.Wall1 }) api.exportSelected() beat()
+	local held = api.placing()
+	assert(held and #held.things == 1 and held.things[1] == m, "the whole model is in your hand")
+	press("Escape") beat()
+	MOCK.toolbarButton.Click:Fire() beat() beat()
 	S.Selection:Set({ m }) api.exportSelected() beat()
 	press("Escape") beat()
 	assert(not api.placing() and m.Wall1.CFrame.Position.Y < -9000, "Esc: back in the workshop")

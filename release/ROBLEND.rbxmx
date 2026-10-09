@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.2"
+local VERSION = "0.24.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3831,6 +3831,14 @@ boxOf = function(list)
 	end
 	return lo, hi
 end
+local function rootOf(x)
+	local r, a = x, x.Parent
+	while a and a ~= workspace do
+		if a:IsA("Model") or (a:IsA("Folder") and a:GetAttribute("RB_HomeShift") ~= nil) then r = a end
+		a = a.Parent
+	end
+	return r
+end
 -- a thing's first part (to tell where it is), and moving any of them (a Folder moves everything in it)
 local function probeOf(x)
 	if x:IsA("BasePart") then return x end
@@ -3853,7 +3861,13 @@ end
 importSelected = function(list)
 	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map), so things are edited where they are.") return end
 	if modal then return end
-	local things = topLevel(list or Selection:Get())
+	-- a part inside a model brings the whole model (in a model, out a model)
+	local roots, seen = {}, {}
+	for _, x in ipairs(list or Selection:Get()) do
+		local rt = rootOf(x)
+		if not seen[rt] then seen[rt] = true roots[#roots + 1] = rt end
+	end
+	local things = topLevel(roots)
 	local up = {}
 	for _, x in ipairs(things) do
 		local probe = probeOf(x)
@@ -3934,7 +3948,12 @@ local function updateBringIn()
 	local function hide() if bringBtn then bringBtn.Visible = false end end
 	if not (uiOn and ui and ui.canvas and workshopOn) or placing or modal then return hide() end
 	local up = {}
-	for _, x in ipairs(topLevel(Selection:Get())) do
+	local roots, seen = {}, {}
+	for _, x in ipairs(Selection:Get()) do
+		local rt = rootOf(x)
+		if not seen[rt] then seen[rt] = true roots[#roots + 1] = rt end
+	end
+	for _, x in ipairs(topLevel(roots)) do
 		local probe = probeOf(x)
 		if probe and not shownHere(probe) then up[#up + 1] = x end
 	end
@@ -3966,10 +3985,16 @@ local function updateBringIn()
 end
 pcall(function() Selection.SelectionChanged:Connect(function() pcall(updateBringIn) end) end)
 api.bringInButton = function() return bringBtn end
--- the things to send up: selected Models / parts that are down in the workshop
+-- the things to send up: selected Models / parts that are down in the workshop. A part inside a model means the
+-- whole model (and a group that was brought in goes back as the whole group): in a model, out a model
 local function workshopThings(list)
 	local things = {}
-	for _, x in ipairs(topLevel(list or Selection:Get())) do
+	local roots, seen = {}, {}
+	for _, x in ipairs(list or Selection:Get()) do
+		local r = rootOf(x)
+		if not seen[r] then seen[r] = true roots[#roots + 1] = r end
+	end
+	for _, x in ipairs(topLevel(roots)) do
 		local probe = probeOf(x)
 		if probe and shownHere(probe) then things[#things + 1] = x end
 	end

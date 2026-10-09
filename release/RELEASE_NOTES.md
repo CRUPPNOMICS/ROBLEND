@@ -1,4 +1,4 @@
-# ROBLEND 0.24.2
+# ROBLEND 0.24.3
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.24.3:** In a model, out a model: picking any part of a model brings in (and places) the whole model, and a group that was brought in goes back as the whole group.
 
 **0.24.2:** Final check before publishing: a tidy-up (a leftover function taken out, the Bring in button sees Place in Studio properly) and the README now covers Before you start, the workshop, importing and placing, Q, and the three Help-menu tests.
 
