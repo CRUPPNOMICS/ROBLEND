@@ -1894,8 +1894,10 @@ check("wireframe, x-ray, Studio view switch, close", function()
 	assert(not view.frame.Visible and not plugin.Active, "Studio view")
 	headerBtn("Edit") menuItem("Use Studio's 3D View")
 	assert(view.frame.Visible and plugin.Active, "back to ours")
+	MOCK.ribbonTool = Enum.RibbonTool.Move
 	headerBtn("File") menuItem("Close ROBLEND")
 	assert(not gui.Enabled and not plugin.Active, "closed")
+	eq(MOCK.ribbonTool, Enum.RibbonTool.Select, "Studio's Select tool is back (no move arrows)")
 end)
 
 print(("%d passed, %d failed, %d meshes built"):format(pass, fail, MOCK.meshesMade))

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.0"
+local VERSION = "0.22.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3809,6 +3809,18 @@ setStudioView = function(b)
 	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLEND 3D view.")
 end
 setUIOn = function(on)
+	-- Studio's own tool (Select / Move / Scale / Rotate): remembered on open, put back on close, so Studio's
+	-- move arrows don't appear on parts after leaving ROBLEND
+	if on and not uiOn then
+		pcall(function() KC.studioTool = plugin:GetSelectedRibbonTool() end)
+	end
+	if not on and uiOn then
+		pcall(function()
+			local t = KC.studioTool
+			if t == nil or t == Enum.RibbonTool.None or t == Enum.RibbonTool.Move or t == Enum.RibbonTool.Scale or t == Enum.RibbonTool.Rotate then t = Enum.RibbonTool.Select end
+			plugin:SelectRibbonTool(t, UDim2.new())
+		end)
+	end
 	if not on then
 		KC.release()
 		if modal then pcall(finishModal, true) end

@@ -1,0 +1,397 @@
+<title>ROBLEND Test Run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one long checklist in Blender-editor greys, sticky progress header, sections as collapsible panels. Deliberately one dark look (Blender's own). */
+:root {
+  --bg: #1d1d1d;
+  --panel: #2b2b2b;
+  --panel-2: #333333;
+  --line: #3d3d3d;
+  --fg: #e6e6e6;
+  --fg-dim: #9a9a9a;
+  --accent: #4772b3;      /* Blender's selection blue */
+  --select: #ffa033;      /* Blender's active orange */
+  --ok: #5fb85f;
+  --bad: #e2574c;
+  --skip: #7d7d7d;
+  --kbd: #464646;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--fg); }
+body { font-family: var(--sans); font-size: 14px; line-height: 1.45; padding-inline: 16px; padding-block: 0 48px; }
+.wrap { max-width: 920px; margin: 0 auto; }
+header.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--bg); padding-block: 14px 12px; border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+h1 { font-size: 20px; font-weight: 600; margin: 0; letter-spacing: 0.2px; text-wrap: balance; }
+.ver { font-family: var(--mono); font-size: 12px; color: var(--select); }
+.lede { color: var(--fg-dim); margin: 4px 0 10px; max-width: 70ch; }
+.bar { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; display: flex; }
+.bar span { display: block; height: 100%; }
+.bar .ok { background: var(--ok); } .bar .bad { background: var(--bad); } .bar .skip { background: var(--skip); }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--fg-dim); font-variant-numeric: tabular-nums; align-items: center; }
+.stats b { color: var(--fg); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.filters { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.chip { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+.save-state { font-size: 12px; color: var(--fg-dim); }
+section.group { margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+section.group > button.head {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; font: inherit; color: var(--fg);
+  background: none; border: 0; padding: 10px 14px; cursor: pointer;
+}
+.head .tri { color: var(--fg-dim); font-size: 11px; width: 10px; }
+.head h2 { font-size: 15px; font-weight: 600; margin: 0; flex: 1; min-width: 0; }
+.head .count { font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.head .count .b { color: var(--bad); }
+.items { border-top: 1px solid var(--line); }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; padding: 11px 14px; border-top: 1px solid var(--line); }
+.item:first-child { border-top: 0; }
+.item.st-works { box-shadow: inset 3px 0 0 var(--ok); }
+.item.st-broken { box-shadow: inset 3px 0 0 var(--bad); }
+.item.st-skip { box-shadow: inset 3px 0 0 var(--skip); }
+.txt { min-width: 0; }
+.name { font-weight: 600; }
+.how, .expect { color: var(--fg-dim); margin-top: 2px; }
+.expect::before { content: "Should: "; color: var(--select); font-weight: 500; }
+kbd { font-family: var(--mono); font-size: 11.5px; background: var(--kbd); color: var(--fg); border-radius: 3px; padding: 0 5px; border-bottom: 2px solid #2a2a2a; white-space: nowrap; }
+.btns { display: flex; gap: 4px; align-items: flex-start; }
+.btns button { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 4px 9px; cursor: pointer; }
+.btns button:hover { border-color: #5a5a5a; }
+.btns button:focus-visible, .chip:focus-visible, button.head:focus-visible, textarea:focus-visible { outline: 2px solid var(--select); outline-offset: 1px; }
+.btns button.on.works { background: var(--ok); border-color: var(--ok); color: #0d1f0d; }
+.btns button.on.broken { background: var(--bad); border-color: var(--bad); color: #2a0b08; }
+.btns button.on.skip { background: var(--skip); border-color: var(--skip); color: #111; }
+.note { grid-column: 1 / -1; }
+.note textarea { width: 100%; min-height: 36px; resize: vertical; font: inherit; font-size: 13px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+.note textarea::placeholder { color: #6f6f6f; }
+.empty { padding: 14px; color: var(--fg-dim); }
+@media (max-width: 560px) {
+  .item { grid-template-columns: 1fr; }
+  .filters { margin-left: 0; }
+}
+@media (prefers-reduced-motion: no-preference) { .item { transition: box-shadow .15s; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><h1>ROBLEND Test Run</h1><span class="ver">plugin 0.22.1</span></div>
+    <p class="lede">Go down the list in Studio. Mark each one Works, Broken or Skip, and say what went wrong in the note when something breaks. Claude reads these results and fixes what failed.</p>
+    <div class="bar" aria-hidden="true"><span class="ok" id="barOk"></span><span class="bad" id="barBad"></span><span class="skip" id="barSkip"></span></div>
+    <div class="stats">
+      <span><span class="dot" style="background:var(--ok)"></span><b id="nOk">0</b> works</span>
+      <span><span class="dot" style="background:var(--bad)"></span><b id="nBad">0</b> broken</span>
+      <span><span class="dot" style="background:var(--skip)"></span><b id="nSkip">0</b> skipped</span>
+      <span><b id="nLeft">0</b> to go</span>
+      <span class="save-state" id="saveState">Loading saved results…</span>
+      <div class="filters" role="group" aria-label="Show">
+        <button class="chip" id="fAll" aria-pressed="true">All</button>
+        <button class="chip" id="fTodo" aria-pressed="false">Not tested</button>
+        <button class="chip" id="fBad" aria-pressed="false">Broken</button>
+      </div>
+    </div>
+  </header>
+  <main id="list"></main>
+</div>
+
+<script>
+// k(...) turns "Ctrl+R" style keys into key caps
+const TESTS = [
+ { g: "Start up", items: [
+  ["selftest", "Self-test (do this first)", "ROBLEND's Help menu > Run Self-Test. Wait about 10 seconds; don't click anything while it runs.", "Status bar says \"Self-test: N passed, 0 failed\". Output lists ROBLEND TEST lines (Claude reads them from your log)."],
+  ["open", "Open the window", "Click the ROBLEND button in the Plugins tab.", "The Blender-style window covers the 3D view: grey grid, red and blue axis lines, tool strip on the left, Outliner and Properties on the right."],
+  ["logo", "Logo", "Look at the toolbar button, the top bar and the bottom right corner.", "The yellow ROBLEND logo shows in all three places."],
+  ["tutorial", "Tutorial", "ROBLEND's own Help menu (next to the logo) > Tutorial. Do a couple of cards.", "A card bottom-left that turns green and moves on when you do each step."],
+  ["about", "About box", "Help > About ROBLEND.", "Logo, version 0.22.1, GPL licence, link to the GitHub repo."],
+  ["f3", "Search every command", "In Object Mode press [F3] and type join. Then [Tab] into Edit Mode on a mesh, [F3], type bevel, press [Enter].", "The list narrows as you type (Object Mode lists object commands, Edit Mode lists mesh commands); Enter runs the top one, here Bevel."],
+  ["studiokeys", "Studio shortcuts blocked", "In Edit Mode press number-row [1] [2] [3]. Try [Ctrl+D] in Object Mode too.", "ROBLEND switches point / edge / face select. Studio's Select / Move / Scale tools and its duplicate don't kick in."],
+  ["keys", "Show Key Presses", "Help > Show Key Presses, press a few keys, look at Studio's Output window.", "Each key prints a line like \"ROBLEND key: G\". Turn it off again after."],
+ ]},
+ { g: "Moving the view", items: [
+  ["orbit", "Orbit / pan / zoom", "Drag with the middle mouse button; [Shift] + middle drag; mouse wheel.", "Turns round the scene, slides sideways, zooms in and out smoothly."],
+  ["numviews", "Numpad views", "[Numpad 1] [Numpad 3] [Numpad 7], and with [Ctrl].", "Front / right / top (Ctrl = back / left / bottom), switching to orthographic. Top-left label says the view name."],
+  ["ortho", "Perspective / orthographic", "[Numpad 5]. Then orbit a little after a numpad view.", "Toggles flat (ortho) and perspective; orbiting after a numpad view goes back to perspective."],
+  ["steps", "Orbit in steps", "[Numpad 2] [Numpad 4] [Numpad 6] [Numpad 8], [Numpad 9].", "Turns 15 degrees each press; 9 flips to the opposite side."],
+  ["frame", "Frame all / selected", "[Home], then select something and press [Numpad .].", "Zooms to fit everything / just the selection."],
+  ["localview", "Local view", "Select a mesh, [Numpad /], then again.", "Only the selection shows; pressing again brings everything back."],
+  ["gizmo", "Navigation gizmo", "Click the X / Y / Z balls top-right; drag the gizmo; use the zoom and hand buttons.", "Snaps to that axis view; dragging orbits; the buttons zoom and pan."],
+  ["panels", "Toolbar and sidebar", "[T] and [N].", "Hides / shows the tool strip and the sidebar."],
+ ]},
+ { g: "Object Mode", items: [
+  ["addmesh", "Add meshes", "[Shift+A] > Mesh > each one: Plane, Cube, Circle, UV Sphere, Ico Sphere, Cylinder, Cone, Torus, Grid.", "Each appears at the 3D cursor, looks right, and shows in the Outliner."],
+  ["addcurve", "Add curves", "[Shift+A] > Curve > Bezier, Circle, Path.", "A smooth pipe (Tube modifier). Tab lets you move its points."],
+  ["addtext", "Add text", "[Shift+A] > Text, then Properties > Data > Text: change the words.", "Solid block letters; the mesh rebuilds with the new words."],
+  ["select", "Select objects", "Click a mesh, [Shift]+click another, click empty space.", "Orange outline on the selection; the last clicked is the active one; empty click deselects."],
+  ["objgrs", "Move / rotate / scale objects", "[G] [R] [S] with the mouse, then [X]/[Y]/[Z], type 2, [Enter]. [Esc] cancels.", "The part follows the mouse; axis keys lock it; typed numbers are exact; Esc puts it back."],
+  ["dup", "Duplicate / delete", "[Shift+D] then click; [X] > Delete.", "A copy follows the mouse; delete removes it (Ctrl Z brings it back)."],
+  ["join", "Join", "Select two meshes, [Ctrl+J].", "They become one mesh (the active one)."],
+  ["hide", "Hide / reveal", "[H], [Shift+H], [Alt+H]. Also the eye in the Outliner.", "Hides the selection / everything else / shows all again."],
+  ["clear", "Clear location / rotation", "[Alt+G], [Alt+R].", "Part jumps to 0,0,0 / its rotation resets."],
+  ["origin", "Set origin / apply", "Object > Set Origin (each option); Object > Apply > Rotation ([Ctrl+A]).", "The origin moves as named; Apply Rotation keeps the look and zeroes the rotation."],
+  ["shade", "Shade smooth / flat / auto", "Add a UV Sphere or Cylinder, then Object (header menu) > Shade Smooth, Shade Auto Smooth, Shade Flat.", "Smooth blends the faces; flat shows facets; auto keeps sharp corners crisp."],
+  ["outliner", "Outliner and Properties", "Click names in the Outliner; rename in Properties; type Location / Rotation / Dimensions.", "Selection follows the Outliner; the name and numbers change the real part."],
+ ]},
+ { g: "Edit any part (Convert)", items: [
+  ["convpart", "Convert a Part", "Insert a normal Part in Studio, select it, press [Tab] in the ROBLEND window.", "It becomes a ROBLEND mesh in the same place (same colour, material, name) and goes straight into Edit Mode."],
+  ["convshapes", "Wedge, corner wedge, ball, cylinder", "Same with a WedgePart, CornerWedgePart, a Ball and a Cylinder part.", "Each keeps its shape and size (cylinders lie along X like Roblox's)."],
+  ["convmesh", "Convert a MeshPart", "A MeshPart whose mesh you uploaded: Object > Convert to ROBLEND Mesh.", "Opens as one editable surface. Someone else's mesh gives a clear message instead."],
+  ["convundo", "Undo a convert", "[Ctrl+Z] right after converting.", "The original part comes back."],
+  ["convunion", "Union refused", "Try it on a Union.", "A message saying plugins can't read Unions; nothing changes."],
+ ]},
+ { g: "Edit Mode: selecting", items: [
+  ["modes", "Point / edge / face", "[Tab] into Edit Mode, then [1] [2] [3] (or the three header buttons).", "Dots / lines / face dots; the header button lights up."],
+  ["click", "Click, Shift-click, box", "Click elements, [Shift]+click, drag a box on empty space.", "Selected ones turn orange; box selects what's inside (visible ones unless X-ray)."],
+  ["allnone", "All / none / invert", "[A], [Alt+A], [Ctrl+I].", "Selects all, nothing, the opposite."],
+  ["loops", "Loops and rings", "[Alt]+click an edge, double-click an edge, [Ctrl+Alt]+click an edge.", "A whole edge loop / the same / an edge ring."],
+  ["path", "Shortest path", "Select a point, then [Ctrl]+click another far away.", "Everything along the shortest path gets selected."],
+  ["circle", "Circle and lasso", "[C] then paint, wheel to resize, [Esc]. [Ctrl]+right-drag a lasso.", "Paints a selection; the lasso selects inside the loop (Shift+Ctrl = deselect)."],
+  ["linked", "Linked", "Point at a piece and press [L]; [Ctrl+L] with something selected.", "The whole connected piece is selected."],
+  ["moreless", "More / less", "[Ctrl] + [+] and [Ctrl] + [-].", "The selection grows / shrinks by one ring."],
+  ["similar", "Similar and mirror", "[Shift+G] > pick an option; [Shift+Ctrl+M].", "Selects alike elements / the mirror side."],
+  ["bytrait", "Select menu extras", "Select > Random, Checker Deselect, All by Trait (Non Manifold, Loose, Faces by Sides), Sharp Edges.", "Each selects what its name says."],
+ ]},
+ { g: "Edit Mode: moving things", items: [
+  ["grs", "G / R / S", "Select some faces, [G], [R], [S] with the mouse; click to confirm, right-click or [Esc] to cancel.", "The selection follows the mouse smoothly; cancel puts it back."],
+  ["axis", "Axis lock, local axis, typed values", "[G] then [Z] (then [Z] again for local), type 1.5, [Enter].", "Moves exactly 1.5 along Z; the second Z uses the mesh's own axis."],
+  ["snap", "Snapping", "[Shift+Tab] or the magnet; its arrow: Increment / Vertex / Face; move with G.", "Snaps to whole studs / onto other points / onto faces."],
+  ["prop", "Proportional editing", "[O], then [G] and roll the wheel; try the falloff menu next to it.", "Nearby points follow in a smooth falloff; the wheel changes the circle size."],
+  ["pivot", "Pivot point", "[.] > 3D Cursor / Individual Origins, then [S] or [R].", "Scales/rotates round the cursor, or each piece round its own middle."],
+  ["snapmenu", "Snap menu", "[Shift+S]: Cursor to Selected, Selection to Cursor, Cursor to World Origin.", "The 3D cursor / selection jumps as named."],
+  ["deforms", "Shrink/Fatten, To Sphere, Shear, Push/Pull, Randomize, Mirror", "Mesh > Transform > each; [Alt+S], [Shift+Alt+S], [Shift+Ctrl+Alt+S].", "Each changes the shape as named, following the mouse."],
+  ["slide", "Edge slide / vertex slide", "[G] [G] on an edge loop; [Shift+V] on a point.", "Slides along the mesh without leaving its surface."],
+ ]},
+ { g: "Edit Mode: modelling tools", items: [
+  ["extrude", "Extrude", "Faces, then edges, then points: [E] and move.", "New geometry pulls out from the selection."],
+  ["extrudemore", "Extrude variants", "[Alt+E] > Along Normals / Individual Faces.", "Faces push out along their own directions / separately."],
+  ["ctrlrmb", "Extrude to mouse", "[Ctrl]+right-click in empty space (with and without a selection).", "Extrudes to where you clicked / adds a point there."],
+  ["inset", "Inset", "[I] and move; press [I] again for individual; hold [Ctrl] for depth.", "A smaller face inside the face(s); individual insets each face."],
+  ["bevel", "Bevel", "[Ctrl+B] on edges, roll the wheel; [Shift+Ctrl+B] on points.", "Rounded edges, more segments with the wheel; corner bevel on points."],
+  ["loopcut", "Loop Cut and Slide", "[Ctrl+R], point at an edge, wheel for more cuts, click, slide, click.", "Rings of new edges all the way round, then slid into place."],
+  ["offsetloop", "Offset edge loops", "Select an edge loop, [Shift+Ctrl+R].", "Two new loops either side."],
+  ["knife", "Knife", "[K], click points across faces, [Enter]. Try [C] (angle steps) and [Z] (cut through) while cutting.", "New edges along your clicks; C locks to 45 degree steps; Z also cuts the back."],
+  ["bisect", "Bisect", "Mesh > Bisect, drag a line across the mesh.", "The mesh is cut along that line through the view."],
+  ["spin", "Spin", "Select an edge / profile, run Spin from the menu or F3, move the mouse.", "The selection is swept round the 3D cursor."],
+  ["subdivide", "Subdivide", "Edge > Subdivide, and Subdivide Edge-Ring.", "Faces / the ring split into more."],
+  ["rotateedge", "Rotate edge", "Edge > Rotate Edge CW / CCW.", "The edge turns to the next pair of corners."],
+  ["bridge", "Bridge edge loops", "Select two open edge loops, Edge > Bridge Edge Loops; move the mouse right, wheel, [T].", "A tube joins them; mouse = curve (smoothness), wheel = more rings, T = twist."],
+  ["fill", "Fill / new face", "Select points or an open loop, [F]; [Alt+F] beautify.", "A new edge or face; beautify tidies triangles."],
+  ["connect", "Connect, rip, split, separate", "[J] on two points; [V] / [Alt+D]; [Y]; [P] > Selection / By Loose Parts.", "An edge between them; the mesh tears; faces detach; a new part is made."],
+  ["merge", "Merge", "[M] > At Center / At Cursor / Collapse / By Distance.", "Points join as named."],
+  ["delete", "Delete and dissolve", "[X] (each option), [Ctrl+X], [Ctrl+Delete].", "Removes as named; dissolve keeps the surface closed."],
+  ["facetools", "Face tools", "Face > Poke, Triangulate ([Ctrl+T]), Tris to Quads ([Alt+J]), Solidify, Wireframe.", "Each one changes the faces as named."],
+  ["hullsym", "Convex Hull, Symmetrize", "Mesh > Convex Hull / Symmetrize.", "A wrapped hull of the points / one half copied to the other."],
+  ["normals", "Normals", "Mesh > Normals > Flip, Recalculate Outside ([Shift+N]).", "Faces turn the other way / all point outward."],
+  ["marks", "Seams, sharp, crease", "Edge > Mark Seam, Mark Sharp; [Shift+E] crease (with a Subdivision modifier on).", "Red seams, cyan sharp, pink crease; creased edges stay sharp under subdivision."],
+  ["hideedit", "Hide in Edit Mode", "[H], [Shift+H], [Alt+H].", "Hides / reveals parts of the mesh."],
+  ["cleanup", "Clean Up", "Mesh > Clean Up: Delete Loose, Degenerate Dissolve, Limited Dissolve, Fill Holes, Merge by Distance.", "Each tidies the mesh as named."],
+  ["addinedit", "Add in Edit Mode", "[Shift+A] > Cube while in Edit Mode.", "A cube is added into this same mesh, selected."],
+  ["repeat", "Repeat last", "Do an extrude, then [Shift+R].", "Does it again."],
+  ["automerge", "Auto Merge and X mirror", "Header toggles; move a point onto another; edit with X mirror on.", "Points weld when they land together; the other side copies your edits."],
+ ]},
+ { g: "Modifiers (wrench tab)", items: [
+  ["modstack", "The stack", "Add two modifiers; use the eye, the edit toggle, up / down, Apply, X.", "Each button does what it says; Apply bakes it into the mesh."],
+  ["subsurf", "Subdivision Surface", "[Ctrl+1] to [Ctrl+4], [Ctrl+0].", "Smoother levels; 0 removes it."],
+  ["mirror", "Mirror", "Add Mirror on half a mesh; try Y / Z, Bisect.", "The other half appears, welded in the middle."],
+  ["array", "Array", "Count, axis, relative / constant offset, merge.", "Copies in a row."],
+  ["bevelmod", "Bevel", "Amount, segments, angle.", "Sharp edges get rounded."],
+  ["booleanmod", "Boolean", "Add Boolean, pick the other part (Use the other selected part), move that part.", "The cut appears and follows the other part when you move it."],
+  ["decimate", "Decimate", "Collapse with a ratio; Planar with an angle.", "Fewer triangles keeping the shape / flat areas joined."],
+  ["edgesplit", "Edge Split", "Angle and Sharp Edges.", "Faces come apart at sharp edges (crisp shading)."],
+  ["screw", "Screw", "On a profile line: angle, screw height, steps, axis.", "A lathe / spring shape."],
+  ["solidify", "Solidify", "On a plane: thickness, offset.", "The surface gets thickness."],
+  ["triangulate", "Triangulate", "Add it.", "Every face becomes triangles."],
+  ["tube", "Tube", "On a curve: radius, sides, resolution, caps.", "A round pipe along the path."],
+  ["weld", "Weld", "On a mesh with doubled points.", "Close points merge."],
+  ["wiremod", "Wireframe", "Thickness.", "Every edge becomes a beam."],
+  ["cast", "Cast", "Factor.", "The mesh pulls toward a sphere."],
+  ["displace", "Displace", "Strength, size, seed (on a subdivided mesh).", "Bumpy, rock-like surface."],
+  ["shrinkwrap", "Shrinkwrap", "Target another part (unique name); Surface / Vertex / Project; offset.", "Points wrap onto the other part."],
+  ["simpledeform", "Simple Deform", "Twist, Bend, Taper, Stretch; angle / factor; axis.", "Bends or twists the whole mesh."],
+  ["smoothmod", "Smooth", "Factor, repeat.", "The shape relaxes."],
+  ["wave", "Wave", "Height, width, offset, radial.", "Ripples across the surface."],
+ ]},
+ { g: "Boolean", items: [
+  ["objbool", "Object > Boolean", "Two overlapping parts: select the cutter, then [Shift]+click the one to keep. Object > Boolean > Difference, then try Union and Intersect.", "The kept part is cut / joined / trimmed; the cutter disappears (Ctrl Z brings it back)."],
+  ["boolplain", "With a normal Part", "Use a normal Studio Part as the cutter.", "Works the same (it's converted on the way)."],
+  ["editbool", "Intersect in Edit Mode", "Add a cube into the mesh (Shift A in Edit Mode), move it to overlap, keep it selected: Face > Intersect (Boolean) > Difference.", "The selected cube cuts the rest of the mesh."],
+  ["boolclean", "Clean result", "Tab into a Boolean result and look at it.", "Whole faces (not lots of slivers), no gaps or cracks."],
+ ]},
+ { g: "UVs and textures", items: [
+  ["projections", "Projections", "[U] > Cube (tiled / fit), Cylinder, Sphere, Top; set a texture id in Material > Texture.", "The texture wraps that way and follows edits."],
+  ["unwrap", "Unwrap with seams", "Mark seams (Edge > Mark Seam) round a cube like a box net, select all, [U] > Unwrap.", "Clean flat UVs with no stretching."],
+  ["smartuv", "Smart UV Project", "[U] > Smart UV Project on something round.", "Islands packed into the image; texture looks even."],
+  ["uveditor", "UV Editor", "[U] > UV Editor: click points, drag, box select, [A], [G] [S] [R], [L], Pack, Flip, Rotate 90.", "UV lines over the texture; everything moves as named; the mesh's texture updates."],
+  ["uvkeep", "UVs kept", "After unwrapping, move points with G, then Tab out and save.", "UVs stay on the mesh and still look right after saving."],
+ ]},
+ { g: "Sculpt Mode", items: [
+  ["sculptin", "Enter Sculpt Mode", "[Ctrl+Tab] > Sculpt Mode (or the mode dropdown).", "A brush circle follows the mouse; brush buttons appear."],
+  ["brushes", "Brushes", "Try each: Draw [X], Clay [C], Inflate [I], Grab [G], Smooth [S], Flatten [T], Pinch [P], Crease [Shift+C]. Hold [Ctrl] to invert.", "Each shapes the surface as named."],
+  ["brushsize", "Size and strength", "[F] and [Shift+F] then move the mouse; [[] and []].", "The circle grows / strength changes."],
+  ["sculptsym", "Symmetry and subdivide", "Symmetry X on; Sculpt > Subdivide.", "Strokes mirror; more detail to sculpt."],
+  ["sculptspeed", "Sculpt speed", "Sculpt on a subdivided sphere.", "Smooth, no stutter."],
+ ]},
+ { g: "Vertex Paint", items: [
+  ["paintin", "Enter Vertex Paint", "[Ctrl+Tab] > Vertex Paint.", "Colour swatches and a hex box appear."],
+  ["paintdraw", "Paint", "Pick a colour, paint; [Ctrl] paints white; [Shift] blurs.", "Colour spreads smoothly across faces."],
+  ["paintpick", "Pick, fill, clear", "[S] over painted colour; [Shift+K] fill; Paint > Clear Colours.", "Picks the colour / fills everything / clears it."],
+  ["paintsave", "Colours kept", "Tab out and save.", "The colours stay on the saved mesh."],
+ ]},
+ { g: "Collision and saving", items: [
+  ["collision", "Collision panel", "Properties > Object > Collision: Box / Hull / Default / Precise, Render detail, Can Collide, Anchored, Cast Shadow.", "Each changes the part (check in Studio's Properties); stays after editing the mesh."],
+  ["save", "Save to Roblox", "File > Save Mesh (needs the CreateAssetAsync beta).", "Status says Saved with an rbxassetid; the part keeps its look."],
+  ["autosave", "Auto save", "Edit something and press [Tab] to leave Edit Mode.", "It saves by itself."],
+  ["reopen", "After a restart", "Save the place, close Studio, open it again.", "The meshes are all still there and look right."],
+  ["bake", "Bake to Parts / Export .obj", "Mesh menu > Bake to Parts; Export .obj.", "A copy made of normal parts / an OBJ script to copy."],
+  ["undo", "Undo / redo", "[Ctrl+Z] and [Ctrl+Y] after edits, in both modes.", "Steps back and forward; the mesh reloads correctly."],
+  ["speed", "Speed on a big mesh", "Subdivide a sphere a few times, then G-drag a big selection.", "Moves smoothly (no rebuild stutter)."],
+ ]},
+];
+
+const ALL = [];
+TESTS.forEach(g => g.items.forEach(it => ALL.push(it[0])));
+const results = {};        // id -> {status, note}
+let filter = "all";
+let db = null;
+let saveMsg = document.getElementById("saveState");
+
+function keys(text) {
+  const frag = document.createDocumentFragment();
+  const parts = text.split(/(\[[^\]]+\])/g);
+  for (const p of parts) {
+    if (/^\[[^\]]+\]$/.test(p)) { const k = document.createElement("kbd"); k.textContent = p.slice(1, -1); frag.appendChild(k); }
+    else if (p) frag.appendChild(document.createTextNode(p));
+  }
+  return frag;
+}
+
+const collapsed = {};
+try { Object.assign(collapsed, JSON.parse(localStorage.getItem("rbt-collapsed") || "{}")); } catch (e) {}
+
+function render() {
+  const list = document.getElementById("list");
+  list.textContent = "";
+  let shown = 0;
+  TESTS.forEach((g, gi) => {
+    const sec = document.createElement("section"); sec.className = "group";
+    const head = document.createElement("button"); head.className = "head"; head.setAttribute("aria-expanded", collapsed[gi] ? "false" : "true");
+    const tri = document.createElement("span"); tri.className = "tri"; tri.textContent = collapsed[gi] ? "▸" : "▾";
+    const h2 = document.createElement("h2"); h2.textContent = g.g;
+    const cnt = document.createElement("span"); cnt.className = "count";
+    const done = g.items.filter(it => results[it[0]]).length;
+    const bad = g.items.filter(it => results[it[0]] && results[it[0]].status === "broken").length;
+    cnt.textContent = done + " / " + g.items.length;
+    if (bad) { const b = document.createElement("span"); b.className = "b"; b.textContent = "  · " + bad + " broken"; cnt.appendChild(b); }
+    head.append(tri, h2, cnt);
+    head.addEventListener("click", () => { collapsed[gi] = !collapsed[gi]; try { localStorage.setItem("rbt-collapsed", JSON.stringify(collapsed)); } catch (e) {} render(); });
+    sec.appendChild(head);
+    if (!collapsed[gi]) {
+      const box = document.createElement("div"); box.className = "items";
+      g.items.forEach(([id, name, how, expect]) => {
+        const r = results[id];
+        if (filter === "todo" && r) return;
+        if (filter === "bad" && !(r && r.status === "broken")) return;
+        shown++;
+        const row = document.createElement("div"); row.className = "item" + (r ? " st-" + r.status : "");
+        const txt = document.createElement("div"); txt.className = "txt";
+        const n = document.createElement("div"); n.className = "name"; n.textContent = name;
+        const h = document.createElement("div"); h.className = "how"; h.appendChild(keys(how));
+        const e = document.createElement("div"); e.className = "expect"; e.appendChild(keys(expect));
+        txt.append(n, h, e);
+        const btns = document.createElement("div"); btns.className = "btns";
+        [["works", "Works"], ["broken", "Broken"], ["skip", "Skip"]].forEach(([st, label]) => {
+          const b = document.createElement("button"); b.textContent = label; b.className = st + (r && r.status === st ? " on" : "");
+          b.setAttribute("aria-pressed", r && r.status === st ? "true" : "false");
+          b.addEventListener("click", () => setStatus(id, r && r.status === st ? null : st));
+          btns.appendChild(b);
+        });
+        row.append(txt, btns);
+        if (r && r.status !== "works" || (r && r.note)) {
+          const nb = document.createElement("div"); nb.className = "note";
+          const ta = document.createElement("textarea"); ta.id = "note-" + id;
+          ta.placeholder = r.status === "broken" ? "What happened? (what you did, what you saw, any message)" : "Note (optional)";
+          ta.value = (r && r.note) || "";
+          ta.addEventListener("change", () => setNote(id, ta.value));
+          nb.appendChild(ta); row.appendChild(nb);
+        }
+        box.appendChild(row);
+      });
+      if (!box.children.length) { const em = document.createElement("div"); em.className = "empty"; em.textContent = filter === "bad" ? "Nothing broken here." : "All tested here."; box.appendChild(em); }
+      sec.appendChild(box);
+    }
+    list.appendChild(sec);
+  });
+  totals();
+}
+
+function totals() {
+  let ok = 0, bad = 0, skip = 0;
+  for (const id of ALL) { const r = results[id]; if (!r) continue; if (r.status === "works") ok++; else if (r.status === "broken") bad++; else skip++; }
+  const n = ALL.length;
+  document.getElementById("nOk").textContent = ok;
+  document.getElementById("nBad").textContent = bad;
+  document.getElementById("nSkip").textContent = skip;
+  document.getElementById("nLeft").textContent = n - ok - bad - skip;
+  document.getElementById("barOk").style.width = (ok / n * 100) + "%";
+  document.getElementById("barBad").style.width = (bad / n * 100) + "%";
+  document.getElementById("barSkip").style.width = (skip / n * 100) + "%";
+}
+
+function cacheLocal() { try { localStorage.setItem("rbt-results", JSON.stringify(results)); } catch (e) {} }
+
+async function write(id) {
+  cacheLocal();
+  if (!db) return;
+  const r = results[id];
+  try {
+    saveMsg.textContent = "Saving…";
+    if (r) await db.doc("results/" + id).set({ status: r.status, note: r.note || "", updated: new Date().toISOString() });
+    else await db.doc("results/" + id).delete();
+    saveMsg.textContent = "Saved. Claude can read these.";
+  } catch (e) {
+    saveMsg.textContent = "Couldn't save to the shared results (" + (e && e.code || "error") + "); kept in this browser only.";
+  }
+}
+function setStatus(id, st) {
+  if (st) results[id] = Object.assign({}, results[id] || {}, { status: st });
+  else delete results[id];
+  render();
+  write(id);
+  if (st === "broken") { const ta = document.getElementById("note-" + id); if (ta) ta.focus(); }
+}
+function setNote(id, note) {
+  if (!results[id]) results[id] = { status: "broken" };
+  results[id].note = note;
+  write(id);
+}
+
+for (const [btnId, f] of [["fAll", "all"], ["fTodo", "todo"], ["fBad", "bad"]]) {
+  document.getElementById(btnId).addEventListener("click", () => {
+    filter = f;
+    for (const b of ["fAll", "fTodo", "fBad"]) document.getElementById(b).setAttribute("aria-pressed", b === btnId ? "true" : "false");
+    render();
+  });
+}
+
+// start with what this browser remembers, then the shared results
+try { Object.assign(results, JSON.parse(localStorage.getItem("rbt-results") || "{}")); } catch (e) {}
+render();
+(async () => {
+  try { db = window.claude && window.claude.use ? await window.claude.use("db") : null; } catch (e) { db = null; }
+  if (!db) { saveMsg.textContent = "Results are kept in this browser only."; return; }
+  db.collection("results").onSnapshot(snap => {
+    for (const k of Object.keys(results)) delete results[k];
+    snap.docs.forEach(d => { const v = d.data(); if (v && v.status) results[d.id] = { status: v.status, note: v.note || "" }; });
+    cacheLocal();
+    saveMsg.textContent = "Saved results loaded. Claude can read these.";
+    const active = document.activeElement && document.activeElement.tagName === "TEXTAREA" ? document.activeElement.id : null;
+    if (!active) render(); else totals();
+  }, () => { saveMsg.textContent = "Couldn't reach the shared results; kept in this browser only."; });
+})();
+</script>
