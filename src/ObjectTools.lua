@@ -251,6 +251,65 @@ function ObjectTools.new(C)
 		return made
 	end
 
+	-- Object > Boolean (like Blender's Boolean modifier applied, or the Bool Tool add-on): the active mesh is cut by /
+	-- joined with / trimmed to the other selected parts, which are then taken out (Ctrl Z brings everything back)
+	function OT.boolean(op)
+		if C.get().editing then setStatus("Object > Boolean works in Object Mode (Tab). In Edit Mode use Face > Intersect (Boolean).") return end
+		local ps = selectedParts()
+		local act = C.get().activeObj
+		if not (act and table.find(ps, act)) then act = nil end
+		act = act or ps[1]
+		if #ps < 2 or not act then setStatus("Select two or more parts: the one to keep last (it's the active one), then the cutters with Shift.") return end
+		if not isRB(act) then
+			local made = OT.convert({ act })
+			if not made[1] then return end
+			for i, q in ipairs(ps) do if q == act then ps[i] = made[1] end end
+			act = made[1]
+		end
+		local base = loadFrom(act)
+		local o = originOf(act)
+		local cutters, result, err = {}, base, nil
+		for _, q in ipairs(ps) do
+			if q ~= act and q:IsA("BasePart") then
+				local m, qo
+				if isRB(q) then
+					m, qo = C.evaluated(q, (loadFrom(q))), originOf(q)
+				else
+					m, err = C.Convert.meshOf(q, C.AssetService, C.BMesh, C.Ops, C.Mods, MT)
+					qo = q.CFrame
+				end
+				if m then
+					for v in pairs(m.verts) do v.co = o:PointToObjectSpace(qo * v.co) end
+					m:normalsUpdate()
+					local nb, why = C.Boolean.run(result, m, op, { BMesh = C.BMesh, triangulate = Display.triangulate })
+					if nb then
+						result = nb
+						cutters[#cutters + 1] = q
+					elseif op == "intersect" and why == "nothing left" then
+						setStatus("Intersect: those parts don't overlap, so nothing would be left.")
+						return
+					else
+						err = why
+					end
+				end
+			end
+		end
+		if #cutters == 0 then setStatus("Boolean: " .. tostring(err or "nothing to cut with")) return end
+		local name = ({ difference = "Difference", union = "Union", intersect = "Intersect" })[op] or op
+		record("Boolean " .. name, function()
+			dataOf(act).Value = encode(result)
+			local _, _, np = applyMesh(act, result, false)
+			act = np or act
+			for _, q in ipairs(cutters) do q.Parent = nil end
+		end)
+		if scene[act] then scene[act].data = nil end
+		Selection:Set({ act })
+		C.setActive(act)
+		C.dirtyCage()
+		setStatus(("Boolean %s: %s now has %d faces (%d cutter%s used and taken out - Ctrl Z brings them back)."):format(name, act.Name, result.nf, #cutters, #cutters == 1 and "" or "s"))
+		return act
+	end
+
 	return OT
 end
 

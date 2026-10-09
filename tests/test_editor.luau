@@ -1537,6 +1537,79 @@ check("Properties > Object > Collision: detail survives edits; Edit Mode preview
 	eq(p.RenderFidelity, Enum.RenderFidelity.Performance, "render detail kept")
 	MOCK.api.setStudioView(false) beat()
 end)
+-- ===== Boolean (0.18) =====
+local function volumeOf(p)
+	local vs, d = worldVerts(p)
+	local vol = 0
+	for _, f in ipairs(d.f) do
+		for i = 2, #f - 1 do vol += vs[f[1]]:Dot(vs[f[i]]:Cross(vs[f[i + 1]])) end
+	end
+	return vol / 6
+end
+check("Object > Boolean: Difference cuts the active mesh and takes the cutter out", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local cutter = S.Selection:Get()[1]
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local base = S.Selection:Get()[1]
+	beat()
+	base.CFrame = CFrame.new(V3(0, 10, 100))
+	cutter.CFrame = CFrame.new(V3(2, 12, 102))
+	S.Selection:Set({ cutter, base }) beat()
+	headerBtn("Object") menuItem("Boolean") menuItem("Difference")
+	eq(cutter.Parent, nil, "cutter taken out")
+	assert(near(volumeOf(base), 64 - 8, 1e-2), "volume " .. volumeOf(base))
+	local nv, nf = counts(base)
+	eq(nf, 9, "faces joined back up") eq(nv, 14, "points")
+	eq(S.Selection:Get()[1], base, "the result is selected")
+end)
+check("Object > Boolean: Union with an ordinary Part (converted on the way)", function()
+	local base = S.Selection:Get()[1]
+	local q = newPart("Part", "Lump", V3(2, 2, 2), base.CFrame.Position + V3(-2, -2, -2))
+	S.Selection:Set({ q, base }) beat()
+	MOCK.api.boolean("union") beat()
+	eq(q.Parent, nil, "the part was used")
+	assert(near(volumeOf(base), 56 + 8 - 1, 1e-2), "volume " .. volumeOf(base))
+end)
+check("Face > Intersect (Boolean): selected faces cut the rest in Edit Mode", function()
+	local p = editCube()
+	press("A", { "LeftShift" }) menuItem("Cube")
+	press("S") type_("0.5") press("Return") beat()
+	press("G") press("X") type_("2") press("Return") beat()
+	headerBtn("Face") menuItem("Intersect (Boolean)") menuItem("Difference")
+	assert(MOCK.status:find("Difference", 1, true), MOCK.status)
+	press("Tab") beat()
+	assert(near(volumeOf(p), 64 - 4, 1e-2), "volume " .. volumeOf(p))
+end)
+check("Boolean modifier: live cut by another part, follows it when it moves, Apply keeps it", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local cut = S.Selection:Get()[1]
+	cut.Name = "Cutter"
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local base = S.Selection:Get()[1]
+	beat()
+	base.CFrame = CFrame.new(V3(0, 10, 140))
+	cut.CFrame = CFrame.new(V3(2, 12, 142))
+	S.Selection:Set({ cut, base }) beat()
+	MOCK.api.modAdd("boolean") beat()
+	MOCK.api.modTargetFromSelection(1) beat()
+	eq(modsOf(base)[1].target, "Cutter", "points at the cutter")
+	assert(tris(base) > 12, "cut: " .. tris(base))
+	cut.CFrame = CFrame.new(V3(50, 0, 0))
+	for _ = 1, 6 do beat() end
+	eq(tris(base), 12, "the cutter moved away: a whole cube again")
+	cut.CFrame = CFrame.new(V3(2, 12, 142))
+	for _ = 1, 6 do beat() end
+	assert(tris(base) > 12, "cut again")
+	MOCK.api.modApply(1) beat()
+	eq(#modsOf(base), 0, "applied")
+	local _, nf = counts(base)
+	eq(nf, 9, "the cut is in the mesh now")
+	eq(cut.Parent, workspace, "the modifier keeps the cutter")
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

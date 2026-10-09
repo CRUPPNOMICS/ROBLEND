@@ -86,6 +86,15 @@ function ModStack.install(api, C)
 	api.modSet = function(i, key, value)
 		modEdit("modifier", function(list) if list[i] then list[i][key] = value end end)
 	end
+	-- Boolean modifier: point it at the other selected part
+	api.modTargetFromSelection = function(i)
+		local p = modTarget()
+		local other
+		for _, q in ipairs(C.selectedParts()) do if q ~= p and q:IsA("BasePart") then other = q break end end
+		if not other then setStatus("Shift click the other part too (keep this one active), then press this again.") return end
+		api.modSet(i, "target", other.Name)
+		setStatus(("The modifier now uses %s."):format(other.Name))
+	end
 	api.modToggle = function(i, key)
 		modEdit("modifier", function(list)
 			if list[i] then
@@ -115,7 +124,7 @@ function ModStack.install(api, C)
 		local base = (S.editing and p == S.obj) and S.bm or loadFrom(p)
 		local one = table.clone(m)
 		one.on = true
-		local ok, res = pcall(Mods.evaluate, base, { one })
+		local ok, res = pcall(Mods.evaluate, base, { one }, C.modEnv and C.modEnv(p))
 		if not ok or not res then setStatus("Couldn't apply: " .. tostring(res)) return end
 		if res == base then res = MT.fromSpec(MT.toSpec(base)) end
 		record("apply " .. (m.name or m.type), function()

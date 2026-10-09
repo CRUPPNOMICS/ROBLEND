@@ -28,7 +28,7 @@ def run(tag, src):
     return r.returncode
 
 
-engine = (rd('tests/mock.luau') + ''.join(mod(ALIAS[n], rd(f'src/{n}.lua')) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Sculpt', 'Paint', 'Font'))
+engine = (rd('tests/mock.luau') + ''.join(mod(ALIAS[n], rd(f'src/{n}.lua')) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Sculpt', 'Paint', 'Font', 'Boolean'))
           + 'do\n' + rd('tests/test_engine.luau') + '\nend\n' + rd('tests/test_tools.luau'))
 main = rd('src/Main.server.lua')
 for a, b in [('os.clock()', 'MOCK.t'), ('local function setStatus(t) status.Text = t', 'local function setStatus(t) status.Text = t MOCK.status = t'),
@@ -40,6 +40,6 @@ for file, alias in MODULES:
     main = main.replace(f'require(script.{file})', alias)
 assert 'require(script.' not in main, 'a require the test bundle does not know: ' + main[main.index('require(script.'):][:60]
 editor = (rd('tests/mock.luau') + rd('tests/studio_mock.luau') + 'MOCK.t = 0\n' + ''.join(mod(alias, rd(f'src/{file}.lua')) for file, alias in MODULES)
-          + 'do\n' + main + '\nend\n' + rd('tests/test_editor.luau'))
+          + ';(function()\n' + main + '\nend)()\n' + rd('tests/test_editor.luau'))  # own function: Main gets its own 200 locals
 rc = run('engine', engine) | run('editor', editor)
 sys.exit(rc)

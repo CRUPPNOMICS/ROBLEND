@@ -155,6 +155,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 |---|---|---|
 | Array | Repeats the mesh in a row | Count, axis, relative offset, constant offset, merge |
 | Bevel | Rounds every edge sharper than the angle | Amount, segments, angle |
+| Boolean | Cuts by, joins with or trims to another part, and follows it when it moves | Operation, object (by name, or "Use the other selected part") |
 | Decimate (Planar) | Joins faces that are flatter than the angle into bigger ones | Angle limit |
 | Mirror | Copies the mesh across its own X / Y / Z, welding the middle | Axis, merge, distance |
 | Screw | Spins the open edges (a profile line) round an axis: vases, springs, bolts | Angle, screw height, steps, axis |
@@ -267,6 +268,12 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - MeshParts are read with Roblox's `CreateEditableMeshAsync`, so only meshes you (or the experience's owner) uploaded can be opened. Unions can't be read by plugins.
 - A MeshPart's corners are welded back together so it edits as one surface; its old texture UVs aren't kept (use the UV menu).
 
+**Boolean**
+- Object > Boolean > Difference / Union / Intersect: select the cutters, then Shift click the part to keep (it's the active one). The cutters are used up and taken out; Ctrl Z brings them back. Ordinary Parts can be cutters or the base (they're converted).
+- The Boolean modifier does the same but stays live: move the cutter and the cut follows. Apply makes it permanent.
+- Face > Intersect (Boolean) in Edit Mode: the selected faces cut (or join, or trim) the rest of the mesh.
+- The result is cleaned up like Blender's: corners welded, no cracks, and each original face stays one face. Both shapes should be closed (no holes) for a clean cut.
+
 **Collision** (Properties > Object > Collision)
 - Collision detail (Box, Hull, Default, Precise), render detail (Auto, Fast, Precise), Can Collide, Anchored, Cast Shadow.
 - Your choice is kept every time the mesh changes. While you're in Edit Mode the part uses quick Box collision, and gets your choice back when you leave.
@@ -281,7 +288,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/BMesh.lua` | The mesh structure: verts, edges, loops and faces, with disk and radial cycles. Also the Euler ops (from `bmesh_core.cc` and `bmesh_structure.cc`). |
 | `src/Ops.lua` | Primitives, extrude, inset, edge ring and loop cut, subdivide, delete, merge, fill. |
 | `src/MeshTools.lua` | The Modeling tab's operators: bevel, knife, bisect, spin, smooth, rip, split, dissolve, bridge, poke, triangulate, solidify, hull, symmetrize, normals, selection tools. |
-| `src/Modifiers.lua` | The modifier stack (14 modifiers) and merge by distance. |
+| `src/Modifiers.lua` | The modifier stack (17 modifiers) and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
@@ -290,6 +297,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View, Convert. |
 | `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
+| `src/Boolean.lua` | Union, Difference and Intersect (BSP-tree CSG) plus the clean-up. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |

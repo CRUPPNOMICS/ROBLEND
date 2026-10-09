@@ -36,6 +36,7 @@ local V3 = Vector3.new
 Mods.TYPES = {
 	{ id = "array", name = "Array", group = "Generate", defaults = { count = 3, axis = "X", relative = 1, constant = 0, merge = false } },
 	{ id = "bevel", name = "Bevel", group = "Generate", defaults = { amount = 0.2, segments = 2, angle = 30 } },
+	{ id = "boolean", name = "Boolean", group = "Generate", defaults = { target = "", operation = "Difference" } },
 	{ id = "mirror", name = "Mirror", group = "Generate", defaults = { x = true, y = false, z = false, merge = true, mergeDist = 0.001, bisect = false } },
 	{ id = "solidify", name = "Solidify", group = "Generate", defaults = { thickness = 0.2, offset = -1 } },
 	{ id = "decimate", name = "Decimate", group = "Generate", defaults = { angle = 5 } },
@@ -641,17 +642,27 @@ function Mods.displace(bm, m)
 end
 
 -- run the whole stack (on = false ones are skipped); returns a new mesh, or `bm` itself when nothing ran
-function Mods.evaluate(bm, list)
+-- env (from the plugin): what modifiers that use another part can see -
+--   env.target(name) -> that part's mesh in this mesh's space (or nil), env.Boolean, env.triangulate
+function Mods.evaluate(bm, list, env)
 	if not list or #list == 0 then return bm end
 	local out = bm
 	for _, m in ipairs(list) do
 		if m.on ~= false and Mods[m.type] then
-			local ok, res = pcall(Mods[m.type], out, m)
+			local ok, res = pcall(Mods[m.type], out, m, env)
 			if ok and res then out = res end
 		end
 	end
 	if out ~= bm then out:normalsUpdate() end
 	return out
+end
+-- ===== Boolean (MOD_boolean.cc): cut by / join with / trim to another part, kept live =====
+function Mods.boolean(bm, m, env)
+	if not (env and env.target and env.Boolean) then return nil end
+	local t = env.target(m.target)
+	if not t then return nil end
+	local op = tostring(m.operation or "Difference"):lower()
+	return (env.Boolean.run(bm, t, op, { BMesh = BMesh, triangulate = env.triangulate }))
 end
 function Mods.active(list)
 	for _, m in ipairs(list or {}) do if m.on ~= false then return true end end

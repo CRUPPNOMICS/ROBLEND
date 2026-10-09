@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.17.0"
+local VERSION = "0.18.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -30,6 +30,7 @@ local Sculpt = require(script.Sculpt)
 local Paint = require(script.Paint)
 local Font = require(script.Font)
 local Convert = require(script.Convert)
+local Boolean = require(script.Boolean)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -204,8 +205,9 @@ local function setMods(p, list)
 	end
 	s.Value = HttpService:JSONEncode(list)
 end
+local modEnv, envKey -- (set further down, it needs loadFrom) what Boolean / Shrinkwrap modifiers can see of other parts
 -- the mesh as it looks with its modifiers (inEdit: only the ones shown in Edit Mode)
-local function evaluated(p, m, inEdit)
+local function evaluated(p, m, inEdit, depth)
 	local list = modsOf(p)
 	if #list == 0 then return m end
 	if inEdit then
@@ -213,7 +215,7 @@ local function evaluated(p, m, inEdit)
 		for _, md in ipairs(list) do if md.edit ~= false then l2[#l2 + 1] = md end end
 		list = l2
 	end
-	local ok, r = pcall(Mods.evaluate, m, list)
+	local ok, r = pcall(Mods.evaluate, m, list, modEnv and modEnv(p, depth or 0))
 	return ok and r or m
 end
 -- UVs (U menu): worked out at build time from the part's RB_UVMode / RB_UVScale
@@ -231,7 +233,8 @@ local function saveKey(p)
 	local d, s = p.RB_Data.Value, modsStr(p)
 	local u = uvKey(p)
 	if s == "" and u == "" then return d end
-	return d .. "|" .. s .. (u ~= "" and ("|uv:" .. u) or "")
+	local ek = envKey(p)
+	return d .. "|" .. s .. (u ~= "" and ("|uv:" .. u) or "") .. (ek ~= "" and ("|env:" .. ek) or "")
 end
 
 local function loadFrom(p)
@@ -256,6 +259,66 @@ end
 local function originOf(p)
 	local c = p:GetAttribute("RB_Center") or V3()
 	return p.CFrame * CFrame.new(-c)
+end
+-- the parts a Boolean / Shrinkwrap modifier points at, by name (a sibling first, then anywhere in the place),
+-- as meshes in the modified part's own space. Plain parts are converted (cached while they don't change)
+local targetMesh = setmetatable({}, { __mode = "k" })
+modEnv = function(p, depth)
+	return {
+		Boolean = Boolean, triangulate = Display.triangulate,
+		find = function(name)
+			if type(name) ~= "string" or name == "" then return nil end
+			local q = p.Parent and p.Parent:FindFirstChild(name)
+			if not (q and q:IsA("BasePart")) or q == p then q = workspace:FindFirstChild(name, true) end
+			if q == p or not (q and q:IsA("BasePart")) then return nil end
+			return q
+		end,
+		target = function(name)
+			if depth > 2 then return nil end
+			local env = modEnv(p, depth)
+			local q = env.find(name)
+			if not q then return nil end
+			local m, qo
+			if isRB(q) then
+				m, qo = evaluated(q, (loadFrom(q)), false, depth + 1), originOf(q)
+			else
+				local key = q.ClassName .. tostring(q.Size) .. tostring(q:IsA("Part") and q.Shape or "") .. tostring(q:IsA("MeshPart") and q.MeshId or "")
+				local c = targetMesh[q]
+				if not (c and c.key == key) then
+					local cm = Convert.meshOf(q, AssetService, BMesh, Ops, Mods, MT)
+					if not cm then return nil end
+					c = { key = key, data = cm:toData() }
+					targetMesh[q] = c
+				end
+				m, qo = BMesh.fromData(c.data), q.CFrame
+			end
+			local o = originOf(p)
+			for v in pairs(m.verts) do v.co = o:PointToObjectSpace(qo * v.co) end
+			m:normalsUpdate()
+			return m
+		end,
+	}
+end
+-- for the caches: a modifier that points at another part changes when that part moves or changes
+envKey = function(p)
+	local s = modsStr(p)
+	if not s:find('"target"', 1, true) then return "" end
+	local out = {}
+	local env = modEnv(p, 0)
+	for _, m in ipairs(modsOf(p)) do
+		if m.target and m.target ~= "" then
+			local q = env.find(m.target)
+			if q then
+				-- where the other part sits relative to this one (three of its points pin that down)
+				local o, qc = originOf(p), q.CFrame
+				local d = q:FindFirstChild("RB_Data")
+				out[#out + 1] = tostring(o:PointToObjectSpace(qc * V3())) .. tostring(o:PointToObjectSpace(qc * V3(1, 0, 0))) .. tostring(o:PointToObjectSpace(qc * V3(0, 1, 0))) .. tostring(q.Size) .. (d and tostring(#d.Value) .. modsStr(q) or "")
+			else
+				out[#out + 1] = "?"
+			end
+		end
+	end
+	return table.concat(out, ";")
 end
 
 -- put the mesh on the part (new look). Keeps the part where its origin is.
@@ -1517,7 +1580,7 @@ local function syncScene()
 			scene[p] = nil
 			changed = true
 		elseif not (editing and p == obj) then
-			local data, ms = p.RB_Data.Value, modsStr(p) .. uvKey(p)
+			local data, ms = p.RB_Data.Value, modsStr(p) .. uvKey(p) .. envKey(p)
 			local look = lookOf(p)
 			if r.hidden or r.localOut then
 				if r.shown then view:removeObject(p) r.shown = false changed = true end
@@ -1683,7 +1746,8 @@ local ctx = {
 	NAME = NAME, Selection = Selection, CHS = CHS, HttpService = HttpService, UIS = UIS, MT = MT, Display = Display, BMesh = BMesh, Ops = Ops, Mods = Mods,
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
-	Convert = Convert, AssetService = AssetService, VERSION = VERSION,
+	Convert = Convert, AssetService = AssetService, VERSION = VERSION, Boolean = Boolean, evaluated = evaluated,
+	modEnv = function(p) return modEnv(p, 0) end,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -2704,6 +2768,16 @@ local function modelingTools()
 		changed("Convex Hull")
 	end
 	O.SymmetrizeX = function() bm = MT.symmetrize(bm, "X") changed("Symmetrize") end
+	-- Face > Intersect (Boolean): the selected faces cut / join / trim the rest (both should be closed shapes)
+	for _, op in ipairs({ "Difference", "Union", "Intersect" }) do
+		O["Boolean" .. op] = function()
+			local nb, err = Boolean.split(bm, function(f) return f.sel == true and not f.hide end, op:lower(), { BMesh = BMesh, triangulate = Display.triangulate })
+			if not nb then setStatus("Intersect (Boolean): " .. tostring(err)) return end
+			bm = nb
+			changed("Intersect (Boolean) " .. op)
+			setStatus(("Intersect (Boolean) %s: %d faces."):format(op, bm.nf))
+		end
+	end
 	O.RecalcOutside = function()
 		local fs = MT.selFaces(bm)
 		bm = MT.recalcNormals(bm, next(fs) and fs or nil, false)
@@ -3212,6 +3286,7 @@ local TOOL = {
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
 TOOL.Join = function() if not editing and not modal then OT.join() end end
 TOOL.Convert = function() if not editing and not modal then OT.convert() end end
+for _, op in ipairs({ "Difference", "Union", "Intersect" }) do TOOL["ObjBoolean" .. op] = function() if not editing and not modal then OT.boolean(op:lower()) end end end
 TOOL.OriginToGeometry = function() OT.setOrigin("geometry") end
 TOOL.OriginToCursor = function() OT.setOrigin("cursor") end
 TOOL.GeometryToOrigin = function() OT.setOrigin("origin") end
@@ -3355,6 +3430,7 @@ api.setSnapTarget = function(m) EDIT.snapTarget = m EDIT.snap = true setStatus("
 api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
 api.join = OT.join
 api.convert = OT.convert
+api.boolean = OT.boolean
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
 	if modal then return end
@@ -4190,6 +4266,22 @@ RunService.Heartbeat:Connect(function()
 	else
 		MOD.lastAuto = nil
 	end
+	-- Boolean / Shrinkwrap modifiers follow the part they point at (the real part is redone once it stops moving)
+	MOD.envSeen = MOD.envSeen or setmetatable({}, { __mode = "k" })
+	for p in pairs(scene) do
+		if p.Parent and not (editing and p == obj) and modsStr(p):find('"target"', 1, true) then
+			local k = envKey(p)
+			local e = MOD.envSeen[p]
+			if not e then MOD.envSeen[p] = { key = k }
+			elseif e.key ~= k then e.key, e.t = k, now
+			elseif e.t and now - e.t > 0.3 then
+				e.t = nil
+				pcall(function() applyMesh(p, loadFrom(p), false) end)
+				if scene[p] then scene[p].data = nil end
+				if autoSave then MOD.modSave = MOD.modSave or {} MOD.modSave[p] = now end
+			end
+		end
+	end
 	if MOD.modSave then
 		for p, t0 in pairs(MOD.modSave) do
 			if now - t0 > 4 then
@@ -4200,7 +4292,7 @@ RunService.Heartbeat:Connect(function()
 	end
 	if editing and obj then
 		if not obj.Parent then exitEdit() return end
-		local ms = modsStr(obj)
+		local ms = modsStr(obj) .. envKey(obj)
 		if ms ~= MOD.modsSeen then MOD.modsSeen = ms dirtyMesh = true end
 		-- fast path: the mesh on screen is updated in place (no rebuild) while only points move / colours change
 		if dirtyFast and not dirtyMesh then

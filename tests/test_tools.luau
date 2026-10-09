@@ -694,5 +694,71 @@ check2("text: HI builds closed solid letters", function()
 	local cells, w = Font.cells("A B")
 	eq(w, 5 + 1 + 3 + 1 + 5, "a space is 3 blocks")
 end)
+-- ===== Boolean (0.18) =====
+local function volume(bm)
+	local vol = 0
+	for f in pairs(bm.faces) do
+		local vs = BMesh.faceVerts(f)
+		for i = 2, #vs - 1 do vol += vs[1].co:Dot(vs[i].co:Cross(vs[i + 1].co)) end
+	end
+	return vol / 6
+end
+local function boxAt(size, at)
+	local bm = BMesh.new()
+	Ops.cube(bm, 1)
+	for v in pairs(bm.verts) do v.co = v.co * size + at end
+	bm:normalsUpdate()
+	return bm
+end
+local BOPTS = { BMesh = BMesh, triangulate = fan }
+local function near(a, b, tol) return math.abs(a - b) < (tol or 1e-4) end
+check2("boolean difference: a corner notch, faces joined back up", function()
+	local nb = assert(Boolean.run(cube(), boxAt(Vector3.new(1, 1, 1), Vector3.new(1, 1, 1)), "difference", BOPTS))
+	nb:validate()
+	assert(near(volume(nb), 7.875), "volume " .. volume(nb))
+	closed(nb)
+	eq(nb.nf, 9, "faces (3 L-shapes + 3 untouched + 3 in the notch)")
+	eq(nb.nv, 14, "points")
+end)
+check2("boolean union and intersect", function()
+	local u = assert(Boolean.run(cube(), boxAt(Vector3.new(1, 1, 1), Vector3.new(1, 1, 1)), "union", BOPTS))
+	assert(near(volume(u), 8.875), "union volume " .. volume(u))
+	closed(u)
+	local i = assert(Boolean.run(cube(), boxAt(Vector3.new(1, 1, 1), Vector3.new(1, 1, 1)), "intersect", BOPTS))
+	assert(near(volume(i), 0.125), "intersect volume " .. volume(i))
+	closed(i) outward(i)
+	eq(i.nf, 6, "a little cube") eq(i.nv, 8, "8 corners")
+	local none = Boolean.run(cube(), boxAt(Vector3.new(1, 1, 1), Vector3.new(5, 0, 0)), "intersect", BOPTS)
+	eq(none, nil, "nothing in common")
+end)
+check2("boolean: a hole right through stays closed", function()
+	local nb = assert(Boolean.run(cube(), boxAt(Vector3.new(0.5, 4, 0.5), Vector3.new()), "difference", BOPTS))
+	nb:validate()
+	assert(near(volume(nb), 7.5), "volume " .. volume(nb))
+	closed(nb)
+end)
+check2("boolean of round shapes (sphere minus cylinder)", function()
+	local a = BMesh.new() Ops.uvSphere(a, 16, 8, 1.5)
+	local b = BMesh.new() Ops.cylinder(b, 12, 0.5, 4)
+	local nb = assert(Boolean.run(a, b, "difference", BOPTS))
+	nb:validate()
+	closed(nb)
+	assert(volume(nb) > 0 and volume(nb) < volume(a), "smaller than the sphere")
+end)
+check2("Intersect (Boolean) in Edit Mode: the selected faces cut the rest", function()
+	local bm = cube()
+	local cut = boxAt(Vector3.new(1, 1, 1), Vector3.new(1, 1, 1))
+	local map = {}
+	for v in pairs(cut.verts) do map[v] = bm:vertCreate(v.co) end
+	for f in pairs(cut.faces) do
+		local vs = {}
+		for i, v in ipairs(BMesh.faceVerts(f)) do vs[i] = map[v] end
+		bm:faceCreate(vs).sel = true
+	end
+	bm:normalsUpdate()
+	local nb = assert(Boolean.split(bm, function(f) return f.sel == true end, "difference", BOPTS))
+	assert(near(volume(nb), 7.875), "volume " .. volume(nb))
+	closed(nb)
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

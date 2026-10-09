@@ -905,6 +905,23 @@ local MOD_FIELDS = {
 			{ "X", ax == "X", function() api.modSet(i, "axis", "X") end }, { "Y", ax == "Y", function() api.modSet(i, "axis", "Y") end }, { "Z", ax == "Z", function() api.modSet(i, "axis", "Z") end } })
 		label(b, { LayoutOrder = 6, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Spins the mesh's open edges (a profile line) round the axis through the origin." })
 	end,
+	boolean = function(self, b, i, m, api, num)
+		local op = m.operation or "Difference"
+		self:toggleRow(b, 2, "Operation", {
+			{ "Difference", op == "Difference", function() api.modSet(i, "operation", "Difference") end },
+			{ "Union", op == "Union", function() api.modSet(i, "operation", "Union") end },
+			{ "Intersect", op == "Intersect", function() api.modSet(i, "operation", "Intersect") end } })
+		local r = make("Frame", { LayoutOrder = 3, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
+		label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Object", TextXAlignment = Enum.TextXAlignment.Right })
+		local tb = make("TextBox", { Name = "RB_ModTarget" .. i, Position = UDim2.new(0.38, 0, 0, 0), Size = UDim2.new(0.62, 0, 1, 0), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12,
+			TextColor3 = T.text, Text = m.target or "", PlaceholderText = "the cutter part's name", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, r)
+		corner(tb, 4)
+		make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, tb)
+		tb.FocusLost:Connect(function() if tb.Text ~= (m.target or "") then self:safe(function() api.modSet(i, "target", tb.Text) end) end end)
+		self:wideButton(b, 4, "Use the other selected part", function() self:safe(function() api.modTargetFromSelection(i) end) end)
+		label(b, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+			Text = "Stays live: move the other part and the cut follows. Both should be closed shapes. Apply makes it permanent; Object > Boolean does it in one go and removes the cutter." })
+	end,
 	simpledeform = function(self, b, i, m, api, num)
 		local me = m.method or "Twist"
 		self:toggleRow(b, 2, "Method", {
@@ -1348,6 +1365,11 @@ function UI:objectMenu()
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		{ "Join", "Ctrl J", function() api.tool("Join") end },
 		{ "Convert to ROBLEND Mesh", "", function() api.tool("Convert") end },
+		{ "Boolean", "", nil, sub = function() return {
+			{ "Difference", "", function() api.tool("ObjBooleanDifference") end },
+			{ "Union", "", function() api.tool("ObjBooleanUnion") end },
+			{ "Intersect", "", function() api.tool("ObjBooleanIntersect") end },
+		} end },
 		"-",
 		{ "Set Origin", "", nil, sub = function() return {
 			{ "Geometry to Origin", "", function() api.tool("GeometryToOrigin") end },
@@ -1692,6 +1714,12 @@ function UI:faceMenu()
 		"-",
 		{ "Fill", "F", t("Fill") },
 		{ "Beautify Faces", "Alt F", t("BeautyFill") },
+		"-",
+		{ "Intersect (Boolean)", "", nil, sub = function() return {
+			{ "Difference", "", t("BooleanDifference") },
+			{ "Union", "", t("BooleanUnion") },
+			{ "Intersect", "", t("BooleanIntersect") },
+		} end },
 		"-",
 		{ "Shade Smooth", "", t("ShadeSmooth") },
 		{ "Shade Flat", "", t("ShadeFlat") },
