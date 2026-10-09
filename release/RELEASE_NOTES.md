@@ -1,4 +1,4 @@
-# ROBLEND 0.21.5
+# ROBLEND 0.21.6
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.

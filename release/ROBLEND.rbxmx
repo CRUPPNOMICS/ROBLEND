@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.5"
+local VERSION = "0.21.6"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -11212,6 +11212,7 @@ return Tutorial
 ]]
 
 local UI = {}
+local TextService = game:GetService("TextService")
 UI.__index = UI
 
 local function rgb(hex) return Color3.fromRGB(bit32.rshift(hex, 16) % 256, bit32.rshift(hex, 8) % 256, hex % 256) end
@@ -12420,8 +12421,23 @@ function UI:openMenu(items, at, title, isSub)
 		if isSub then x, y = at.AbsolutePosition.X + at.AbsoluteSize.X + 2, at.AbsolutePosition.Y - 4
 		else x, y = at.AbsolutePosition.X, at.AbsolutePosition.Y + at.AbsoluteSize.Y + 2 end
 	end
+	-- wide enough for the longest name plus its shortcut (they used to run into each other)
+	local function textW(text, size, font)
+		local ok, v = pcall(function() return TextService:GetTextSize(text, size, font, Vector2.new(2000, 40)) end)
+		return ok and v and v.X or #text * size * 0.55
+	end
 	local W = 230
-	local m = make("Frame", { ZIndex = isSub and 24 or 20, BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Size = UDim2.fromOffset(W, 0), AutomaticSize = Enum.AutomaticSize.Y }, nil)
+	for _, it in ipairs(items) do
+		if type(it) == "table" and it[1] then
+			local need = 26 + textW(it[1], 12, FONT) + 24 + textW(it.sub and ">" or (it[2] or ""), 11, FONT) + 18
+			W = math.max(W, math.ceil(need))
+		end
+	end
+	W = math.min(W, 560)
+	-- a scrolling list, so a long menu never runs off the screen
+	local m = make("ScrollingFrame", { ZIndex = isSub and 24 or 20, BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Size = UDim2.fromOffset(W, 0),
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y, ScrollBarThickness = 4, ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarImageColor3 = T.textDim }, nil)
 	corner(stroke(m, T.menuOutline), 5)
 	vlist(m, 0)
 	make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, m)
@@ -12469,10 +12485,13 @@ function UI:openMenu(items, at, title, isSub)
 		end
 	end
 	local scr = self.gui.AbsoluteSize
+	local H = h
 	if scr and scr.X > 0 then
+		H = math.min(h, math.max(120, scr.Y - 8))
 		x = math.clamp(x, 0, math.max(0, scr.X - W))
-		y = math.clamp(y, 0, math.max(0, scr.Y - h))
+		y = math.clamp(y, 0, math.max(0, scr.Y - H))
 	end
+	m.Size = UDim2.fromOffset(W, H)
 	m.Position = UDim2.fromOffset(x, y)
 	m.Parent = self.gui
 	if isSub then self.subOpen = m else self.menuOpen = m end

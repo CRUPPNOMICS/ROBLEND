@@ -1820,6 +1820,15 @@ check("ROBLEND holds the keyboard so Studio's 1 2 3 4 / Ctrl D etc. don't fire; 
 	headerBtn("Edit") menuItem("Block Studio Shortcuts")
 	assert(MOCK.api.state().blockKeys and not KC.failed, "can be switched back on")
 end)
+check("menus are wide enough for their shortcuts (Help list doesn't overlap)", function()
+	headerBtn("Help")
+	local m = find("ScrollingFrame", function(d) return d.ZIndex == 20 end)
+	assert(m, "menu open")
+	local w = m.Size[2]
+	-- "Loop / Ring select" + "Double click / Ctrl Alt click" needs more than the old 230
+	assert(w > 300, "wider menu: " .. w)
+	press("Escape") beat()
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

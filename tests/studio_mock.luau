@@ -367,8 +367,11 @@ function Inst.UnionAsync(_, first, rest)
 	return { u }
 end
 
+local TextSvc = svc("TextService")
+function Inst.GetTextSize(_, text, size) return Vector2.new(#text * size * 0.55, size) end
+MOCK.textService = TextSvc
 local services = { Selection = Selection, UserInputService = UIS, RunService = RunService, ChangeHistoryService = CHS,
-	HttpService = Http, CoreGui = CoreGui, AssetService = Asset, GeometryService = Geo, Workspace = workspace }
+	HttpService = Http, CoreGui = CoreGui, TextService = TextSvc, AssetService = Asset, GeometryService = Geo, Workspace = workspace }
 game = newInst("DataModel")
 function Inst.GetService(_, n) return assert(services[n], "no service " .. n) end
 MOCK.services = services
