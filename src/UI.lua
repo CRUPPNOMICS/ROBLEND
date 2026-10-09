@@ -1417,7 +1417,13 @@ function UI:uvItems()
 	local api = self.api
 	local s = api.state()
 	local cur = s.uv and s.uv.mode
-	local items = { { header = "Unwrap (follows your edits)" } }
+	local items = {
+		{ "Unwrap", "", function() api.uvUnwrap("unwrap") end, check = cur == "unwrap" },
+		{ "Smart UV Project", "", function() api.uvUnwrap("smart") end },
+		{ "UV Editor", "", function() api.uvEditor() end },
+		"-",
+		{ header = "Projection (follows your edits)" },
+	}
 	for _, m in ipairs(api.uvModes or {}) do items[#items + 1] = { m[2], "", function() api.setUV(m[1]) end, check = cur == m[1] } end
 	items[#items + 1] = "-"
 	items[#items + 1] = { "Clear UVs", "", function() api.setUV("") end }
@@ -1924,6 +1930,7 @@ function UI:inCanvas(p)
 	for _, f in ipairs({ self.toolbarFrame, self.gizmo, self.navFrame, self.sidebarFrame, self.opHeader }) do
 		if inside(f, p) then return false end
 	end
+	if self.uvFrame and self.uvFrame.Visible and inside(self.uvFrame, p) then return false end
 	return true
 end
 function UI:overUI(p) return not self:inCanvas(p) end

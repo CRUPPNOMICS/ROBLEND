@@ -49,6 +49,39 @@ function ModStack.install(api, C)
 		local u = uvOf(p)
 		setStatus(u and ("UVs: " .. u.mode .. (u.mode == "box" and (" (repeats every %g studs)"):format(u.scale) or "") .. ". Set a texture in Material > Texture.") or "UVs cleared.")
 	end
+	-- U > Unwrap / Smart UV Project: real stored UVs (cut at seams / grouped by direction), packed into the
+	-- 0-1 square. In Edit Mode: the selected faces (or all); in Object Mode: the whole mesh
+	api.uvUnwrap = function(kind)
+		local S = C.get()
+		local UVT = C.UVTools
+		local opts = { BMesh = C.BMesh, margin = 0.02 }
+		local name = kind == "smart" and "Smart UV Project" or "Unwrap"
+		local fn = kind == "smart" and UVT.smartProject or UVT.unwrap
+		local n, closed
+		if S.editing and S.bm then
+			local fs = MT.selFaces(S.bm)
+			n, closed = fn(S.bm, next(fs) and fs or nil, opts)
+			S.obj:SetAttribute("RB_UVMode", "unwrap")
+			C.dirtyMesh()
+			C.commit(name)
+		else
+			local p = modTarget()
+			if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
+			local m = loadFrom(p)
+			n, closed = fn(m, nil, opts)
+			record(name, function()
+				dataOf(p).Value = encode(m)
+				p:SetAttribute("RB_UVMode", "unwrap")
+				modsChanged(p)
+			end)
+		end
+		local msg = ("%s: %d island%s packed into the image."):format(name, n, n == 1 and "" or "s")
+		if closed and closed > 0 then
+			msg ..= (" %d closed piece%s had no seams, so %s Smart Projected - mark seams (Edge > Mark Seam) where the mesh should open, then Unwrap again."):format(closed, closed == 1 and "" or "s", closed == 1 and "it was" or "they were")
+		end
+		setStatus(msg .. " UV Editor: U > UV Editor.")
+		if C.uvEditorRefresh then C.uvEditorRefresh() end
+	end
 	api.setTexture = function(id)
 		local p = modTarget()
 		if not p then return end

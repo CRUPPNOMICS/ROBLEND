@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.18.0"
+local VERSION = "0.19.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -31,6 +31,8 @@ local Paint = require(script.Paint)
 local Font = require(script.Font)
 local Convert = require(script.Convert)
 local Boolean = require(script.Boolean)
+local UVTools = require(script.UVTools)
+local UVEditor = require(script.UVEditor)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1747,7 +1749,7 @@ local ctx = {
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
 	Convert = Convert, AssetService = AssetService, VERSION = VERSION, Boolean = Boolean, evaluated = evaluated,
-	modEnv = function(p) return modEnv(p, 0) end,
+	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -1771,6 +1773,7 @@ ctx.rayMesh, ctx.camera = rayMesh, camera
 function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) end
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
+local UVE = UVEditor.new(ctx)
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3431,6 +3434,9 @@ api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true en
 api.join = OT.join
 api.convert = OT.convert
 api.boolean = OT.boolean
+api.uvEditor = function() UVE.toggle() end
+api.uvEditorState = function() return UVE end
+ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
 	if modal then return end
@@ -3856,6 +3862,7 @@ end
 
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
+	if UVE.mouseDown(mp) then return end
 	if ui:overUI(mp) then return end
 	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
 		local ok, err = pcall(brushCtl().press, mp)
@@ -3885,6 +3892,7 @@ mouse.Button1Down:Connect(function()
 end)
 mouse.Button1Up:Connect(function()
 	if uiOn then ui:mouseUp() end
+	if UVE.mouseUp(mousePos()) then return end
 	if paintMode and editing then
 		local ok, err = pcall(brushCtl().release)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
@@ -3957,6 +3965,7 @@ mouse.Button1Up:Connect(function()
 	if not ok then warn(NAME .. ": " .. tostring(err)) end
 end)
 mouse.Button2Down:Connect(function()
+	if UVE.rightClick() then return end
 	if modal then pcall(finishModal, true) return end
 	if paintMode and brushCtl().adjust then brushCtl().finishAdjust(true) return end
 	local mp = mousePos()
@@ -3994,6 +4003,7 @@ end)
 mouse.Move:Connect(function()
 	local mp = mousePos()
 	if uiOn then pcall(function() ui:step(mp) end) end
+	if UVE.mouseMove(mp) then return end
 	if lasso then
 		local last = lasso.pts[#lasso.pts]
 		local d = (mp - last).Magnitude
@@ -4156,6 +4166,7 @@ UIS.InputBegan:Connect(function(input, gp)
 		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return
 	end
+	if UVE.key(k, shift, ctrl, alt) then return end
 	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
 	if k == Enum.KeyCode.Tab and ctrl and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
 	if k == Enum.KeyCode.Tab and shift and not ctrl and not alt and uiOn then
@@ -4282,6 +4293,7 @@ RunService.Heartbeat:Connect(function()
 			end
 		end
 	end
+	pcall(UVE.tick)
 	if MOD.modSave then
 		for p, t0 in pairs(MOD.modSave) do
 			if now - t0 > 4 then

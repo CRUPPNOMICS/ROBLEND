@@ -419,6 +419,18 @@ function BMesh:toData()
 		vc[vi[v]] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or 0xFFFFFF
 	end
 	if anyCol then d.vc = vc end
+	-- UVs (Unwrap / Smart UV Project): per face, u v for each corner in face order (0 = this face has none)
+	local uvs, anyUV = {}, false
+	for i, f in ipairs(fOrder) do
+		local list, all = {}, true
+		for _, l in ipairs(BMesh.faceLoops(f)) do
+			if not l.uv then all = false break end
+			list[#list + 1] = math.floor(l.uv.X * 100000 + 0.5) / 100000
+			list[#list + 1] = math.floor(l.uv.Y * 100000 + 0.5) / 100000
+		end
+		if all then uvs[i] = list anyUV = true else uvs[i] = 0 end
+	end
+	if anyUV then d.uv = uvs end
 	if #sm > 0 then d.s = sm end
 	if #sh > 0 then d.sh = sh end
 	if #se > 0 then d.se = se end
@@ -444,6 +456,14 @@ function BMesh.fromData(d)
 	local es = d.e or {}
 	for i = 1, #es, 2 do if vs[es[i]] and vs[es[i + 1]] then bm:edgeCreate(vs[es[i]], vs[es[i + 1]], true) end end
 	for _, i in ipairs(d.s or {}) do if fl[i] then fl[i].smooth = true end end
+	if d.uv and Vector2 then
+		for i, list in ipairs(d.uv) do
+			local f = fl[i]
+			if f and type(list) == "table" and #list == f.len * 2 then
+				for j, l in ipairs(BMesh.faceLoops(f)) do l.uv = Vector2.new(list[2 * j - 1], list[2 * j]) end
+			end
+		end
+	end
 	for key, list in pairs({ sharp = d.sh or {}, seam = d.se or {}, crease = d.cr or {} }) do
 		for i = 1, #list, 2 do
 			local a, b = vs[list[i]], vs[list[i + 1]]

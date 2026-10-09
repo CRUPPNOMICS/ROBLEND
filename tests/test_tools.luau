@@ -760,5 +760,85 @@ check2("Intersect (Boolean) in Edit Mode: the selected faces cut the rest", func
 	assert(near(volume(nb), 7.875), "volume " .. volume(nb))
 	closed(nb)
 end)
+-- ===== UVs (0.19) =====
+local UVO = { BMesh = BMesh, margin = 0.02 }
+local function allUV(bm)
+	for f in pairs(bm.faces) do
+		for _, l in ipairs(BMesh.faceLoops(f)) do
+			assert(l.uv, "every corner has a UV")
+			assert(l.uv.X > -1e-6 and l.uv.X < 1 + 1e-6 and l.uv.Y > -1e-6 and l.uv.Y < 1 + 1e-6, "inside 0-1: " .. l.uv.X .. ", " .. l.uv.Y)
+		end
+	end
+end
+local function uvSquare(f)
+	local ls = BMesh.faceLoops(f)
+	assert(#ls == 4, "quad")
+	local a, b, c, d = ls[1].uv, ls[2].uv, ls[3].uv, ls[4].uv
+	local s1, s2 = (b - a), (c - b)
+	local l1, l2 = math.sqrt(s1:Dot(s1)), math.sqrt(s2:Dot(s2))
+	assert(math.abs(l1 / l2 - 1) < 0.02, "square sides " .. l1 .. " " .. l2)
+	assert(math.abs(s1:Dot(s2)) < 0.02 * l1 * l2, "right angle")
+	-- not mirrored: corners go round the same way as the face
+	assert(s1.X * s2.Y - s1.Y * s2.X > 0, "not mirrored")
+	return l1
+end
+local function boxesOverlap(bm)
+	-- islands are separate faces here: no two faces' UV boxes overlap
+	local boxes = {}
+	for f in pairs(bm.faces) do
+		local lx, ly, hx, hy = math.huge, math.huge, -math.huge, -math.huge
+		for _, l in ipairs(BMesh.faceLoops(f)) do lx, ly, hx, hy = math.min(lx, l.uv.X), math.min(ly, l.uv.Y), math.max(hx, l.uv.X), math.max(hy, l.uv.Y) end
+		boxes[#boxes + 1] = { lx + 1e-4, ly + 1e-4, hx - 1e-4, hy - 1e-4 }
+	end
+	for i = 1, #boxes do for j = i + 1, #boxes do
+		local a, b = boxes[i], boxes[j]
+		if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4] then return true end
+	end end
+	return false
+end
+check2("Unwrap: a cube cut at seams opens flat into 6 equal squares", function()
+	local bm = cube()
+	local function faceN(n) for f in pairs(bm.faces) do if f.no:Dot(n) > 0.9 then return f end end end
+	local F, B, T, D, L, R = faceN(Vector3.new(0, 0, -1)), faceN(Vector3.new(0, 0, 1)), faceN(Vector3.new(0, 1, 0)), faceN(Vector3.new(0, -1, 0)), faceN(Vector3.new(-1, 0, 0)), faceN(Vector3.new(1, 0, 0))
+	local hinge = { { F, T }, { F, D }, { F, L }, { F, R }, { T, B } }
+	for e in pairs(bm.edges) do
+		local fs = BMesh.edgeFaces(e)
+		local isHinge = false
+		for _, h in ipairs(hinge) do if (fs[1] == h[1] and fs[2] == h[2]) or (fs[1] == h[2] and fs[2] == h[1]) then isHinge = true end end
+		e.seam = not isHinge or nil
+	end
+	local n, closedN = UVTools.unwrap(bm, nil, UVO)
+	eq(n, 1, "one island") eq(closedN, 0, "nothing closed")
+	allUV(bm)
+	local side
+	for f in pairs(bm.faces) do
+		local s = uvSquare(f)
+		side = side or s
+		assert(math.abs(s / side - 1) < 0.02, "same size squares")
+	end
+end)
+check2("Unwrap without seams (closed) falls back to Smart Project; Smart UV Project packs without overlaps", function()
+	local bm = cube()
+	local n, closedN = UVTools.unwrap(bm, nil, UVO)
+	eq(closedN, 1, "the cube is closed") eq(n, 6, "6 islands")
+	allUV(bm)
+	for f in pairs(bm.faces) do uvSquare(f) end
+	assert(not boxesOverlap(bm), "islands don't overlap")
+	local sp = BMesh.new() Ops.uvSphere(sp, 16, 8, 2)
+	local k = UVTools.smartProject(sp, nil, UVO)
+	assert(k > 2, "a sphere splits into several islands")
+	allUV(sp)
+end)
+check2("Unwrap a flat grid: squares stay square; UVs survive save / load and mesh tools", function()
+	local bm = BMesh.new() Ops.grid(bm, 4, 4, 4)
+	UVTools.unwrap(bm, nil, UVO)
+	allUV(bm)
+	for f in pairs(bm.faces) do uvSquare(f) end
+	local back = BMesh.fromData(bm:toData())
+	allUV(back)
+	local spec = MT.fromSpec(MT.toSpec(back))
+	allUV(spec)
+	for f in pairs(spec.faces) do uvSquare(f) end
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

@@ -76,9 +76,12 @@ function MT.toSpec(bm)
 		spec.vi[v] = #spec.verts
 	end
 	for f in pairs(bm.faces) do
-		local idx = {}
-		for i, v in ipairs(fverts(f)) do idx[i] = spec.vi[v] end
-		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, src = f }
+		local idx, uvk = {}, {}
+		for i, l in ipairs(BMesh.faceLoops(f)) do
+			idx[i] = spec.vi[l.v]
+			if uvk and l.uv then uvk[idx[i]] = l.uv else uvk = nil end
+		end
+		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, src = f, uvk = uvk }
 	end
 	for e in pairs(bm.edges) do
 		local a, b = spec.vi[e.v1], spec.vi[e.v2]
@@ -106,7 +109,7 @@ function MT.fromSpec(spec)
 			local uniq, ok = {}, #list >= 3
 			for _, k in ipairs(list) do if uniq[k] then ok = false end uniq[k] = true end
 			if ok then
-				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth }
+				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth, uvk = f.uvk }
 				for _, k in ipairs(list) do used[k] = true end
 			end
 		end
@@ -127,7 +130,15 @@ function MT.fromSpec(spec)
 		local list = {}
 		for j, k in ipairs(f.v) do list[j] = vs[k] end
 		local nf = nb:faceCreate(list)
-		if nf then nf.sel = f.sel == true nf.smooth = f.smooth fl[i] = nf end
+		if nf then
+			nf.sel = f.sel == true nf.smooth = f.smooth fl[i] = nf
+			-- UVs come along when every corner still has one
+			if f.uvk then
+				local all = true
+				for _, k in ipairs(f.v) do if not f.uvk[k] then all = false break end end
+				if all then for j, l in ipairs(BMesh.faceLoops(nf)) do l.uv = f.uvk[f.v[j]] end end
+			end
+		end
 	end
 	for _, e in ipairs(spec.edges) do
 		if not e.dead and vs[e[1]] and vs[e[2]] and e[1] ~= e[2] then

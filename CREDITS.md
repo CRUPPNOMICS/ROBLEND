@@ -30,7 +30,9 @@ The Blender source files used are:
 | `source/blender/editors/mesh/editmesh_select_similar.cc`, `source/blender/editors/object/object_transform.cc` | Select Similar; Set Origin and Apply Rotation |
 | `source/blender/modifiers/intern/MOD_boolean.cc`, `source/blender/editors/mesh/editmesh_intersect.cc` | The Boolean modifier's settings and Edit Mode's Intersect (Boolean) (the solid geometry itself is done differently, see below) |
 | `source/blender/editors/object/object_convert.cc` | The idea of Object > Convert (turning other objects into editable meshes) |
-| `source/blender/editors/uvedit/uvedit_unwrap_ops.cc`, `source/blender/blenlib/intern/uvproject.cc` | Cube, cylinder and sphere UV projection |
+| `source/blender/editors/uvedit/uvedit_unwrap_ops.cc`, `source/blender/blenlib/intern/uvproject.cc` | Cube, cylinder and sphere UV projection; Unwrap and Smart UV Project |
+| `source/blender/geometry/intern/uv_parametrizer.cc`, `uv_pack.cc` | Unwrap's least squares conformal maps (LSCM, Levy et al. 2002) and Pack Islands (cut down to shelf packing) |
+| `source/blender/editors/uvedit/uvedit_select.cc`, `uvedit_ops.cc`, `scripts/startup/bl_ui/space_image.py` | The UV Editor: picking, box and linked select, the UV menu |
 | `source/blender/editors/sculpt_paint/brushes/*.cc`, `sculpt.cc` | Sculpt brushes (draw, clay strips, inflate, grab, smooth, flatten, pinch, crease), area normal, falloff, symmetry |
 | `source/blender/editors/sculpt_paint/paint_vertex.cc` | Vertex Paint (draw, blur, average, fill, sample, front faces only) |
 | `source/blender/blenkernel/intern/curve_bevel.cc`, `displist.cc` | The Tube modifier (a curve's round bevel swept along a path) |

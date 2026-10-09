@@ -302,7 +302,15 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 		if lo then
 			uvids = {}
 			pcall(function()
-				for i, p in ipairs(Display.faceUVs(uv, vs, f.no, lo, size)) do uvids[i] = em:AddUV(p) end
+				-- unwrapped: the stored UVs (Blender's way up, so flip V for Roblox); faces without any get a box projection
+				local stored = uv.mode == "unwrap" and {} or nil
+				if stored then
+					for i, l in ipairs(BMesh.faceLoops(f)) do
+						if not l.uv then stored = nil break end
+						stored[i] = Vector2.new(l.uv.X, 1 - l.uv.Y)
+					end
+				end
+				for i, p in ipairs(stored or Display.faceUVs(uv.mode == "unwrap" and { mode = "box", scale = uv.scale } or uv, vs, f.no, lo, size)) do uvids[i] = em:AddUV(p) end
 			end)
 		end
 		for _, t in ipairs(Display.triangulate(vs, f.no)) do
@@ -333,7 +341,7 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 	end)
 	if not okM then pcall(function() em:Destroy() end) return nil, c, tostring(mp) end
 	Display.emOf[mp] = em
-	Display.maps[em] = { v = vmap, t = tmap, c = c, nv = bm.nv, white = white, sel = sel, colIds = colIds, uv = lo ~= nil }
+	Display.maps[em] = { v = vmap, t = tmap, c = c, nv = bm.nv, white = white, sel = sel, colIds = colIds, uv = lo ~= nil and uv.mode ~= "unwrap" }
 	return mp, c, nil, em
 end
 

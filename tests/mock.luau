@@ -34,3 +34,14 @@ CFrame = { fromAxisAngle = function(axis, ang) return setmetatable({ axis = axis
 
 -- Color3 stand-in for engine tests (Vertex Paint)
 Color3 = { new = function(r, g, b) return { R = r, G = g, B = b } end, fromRGB = function(r, g, b) return { R = r / 255, G = g / 255, B = b / 255 } end }
+
+-- Vector2 stand-in (UVs); the Studio mock replaces it with a fuller one
+local V2m = {}
+V2m.__index = V2m
+function V2m.new(x, y) return setmetatable({ X = x or 0, Y = y or 0 }, V2m) end
+V2m.__add = function(a, b) return V2m.new(a.X + b.X, a.Y + b.Y) end
+V2m.__sub = function(a, b) return V2m.new(a.X - b.X, a.Y - b.Y) end
+V2m.__mul = function(a, b) if type(b) == "number" then return V2m.new(a.X * b, a.Y * b) end return V2m.new(a.X * b.X, a.Y * b.Y) end
+V2m.__eq = function(a, b) return a.X == b.X and a.Y == b.Y end
+function V2m.Dot(a, b) return a.X * b.X + a.Y * b.Y end
+Vector2 = { new = V2m.new, zero = V2m.new(0, 0) }

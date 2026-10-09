@@ -245,6 +245,10 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - Modifiers work on text too (Bevel to round it off, Array, Wave, ...).
 
 **Textures and UVs**
+- U > Unwrap: real UVs, cut open at the seams you mark (Edge > Mark Seam), flattened keeping angles (Blender's conformal unwrap) and packed into the image. A closed piece with no seams is Smart Projected instead.
+- U > Smart UV Project: faces grouped by which way they face, each group laid flat and packed. No seams needed.
+- In Edit Mode these unwrap the selected faces (or all of them); in Object Mode, the whole mesh. The UVs are saved with the mesh and stay put while you move points (add or cut faces and the new faces get a box projection until you unwrap again).
+- U > UV Editor: a 2D window with the UVs over the texture. Click a point (Shift adds), drag to move, drag on empty space to box select; G / S / R move, scale and rotate, A selects all, L the island under the mouse. Buttons: Unwrap, Smart, Pack, Flip, Rotate 90, All.
 - U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
 - Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
 - Saving uploads the UVs with the mesh.
@@ -297,6 +301,8 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View, Convert. |
 | `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
+| `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |
+| `src/UVEditor.lua` | The UV Editor window. |
 | `src/Boolean.lua` | Union, Difference and Intersect (BSP-tree CSG) plus the clean-up. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
