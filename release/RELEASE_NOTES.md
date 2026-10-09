@@ -1,4 +1,4 @@
-# ROBLEND 0.23.4
+# ROBLEND 0.23.5
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.23.5:** Bring things in from the Explorer: click a part or model in Studio's Explorer while ROBLEND is open and a "Bring in" button appears at the top of the view. Edit in ROBLEND and Place in Studio can also be given keyboard shortcuts (File > Advanced > Customize Shortcuts).
 
 **0.23.4:** Vertex Paint works on plain shapes: on a cube (only 8 corner points) painting the middle of a face colours that face.
 

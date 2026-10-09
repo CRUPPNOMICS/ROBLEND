@@ -135,7 +135,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
+local SIGNALS = { SelectionChanged = true, Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
@@ -301,7 +301,7 @@ SIGNALS.Heartbeat = true
 local sel = {}
 local Selection = svc("Selection")
 function Inst.Get(o) if o == Selection then return table.clone(sel) end end
-function Inst.Set(o, t) if o == Selection then sel = table.clone(t) end end
+function Inst.Set(o, t) if o == Selection then sel = table.clone(t) if o.SelectionChanged then o.SelectionChanged:Fire() end end end
 
 local CHS = svc("ChangeHistoryService")
 MOCK.recordings = {}

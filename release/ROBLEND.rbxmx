@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.4"
+local VERSION = "0.23.5"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3694,6 +3694,8 @@ pluginAction("VertexSelect", "Vertex Select (1)", "ROBLEND Edit Mode: point sele
 pluginAction("EdgeSelect", "Edge Select (2)", "ROBLEND Edit Mode: edge select. Give it the 2 key here.", selectModeAction("edge", "Edge"))
 pluginAction("FaceSelect", "Face Select (3)", "ROBLEND Edit Mode: face select. Give it the 3 key here.", selectModeAction("face", "Face"))
 pluginAction("EditMode", "Edit / Object Mode (Tab)", "ROBLEND: Tab in and out of Edit Mode.", function() if uiOn and not modal then if editing then exitEdit() else toggleEdit() end end end)
+pluginAction("EditInRoblend", "Edit in ROBLEND", "Bring the parts / models selected in the Explorer into ROBLEND to edit. Give it a key here.", function() importSelected() end)
+pluginAction("PlaceInStudio", "Place in Studio", "Pick up the selected ROBLEND work and place it on your map.", function() api.exportSelected() end)
 api.keyCapture = function() return KC end
 -- Help > Run Self-Test: checks the features inside this real Studio and prints a report to Output
 api.selfTest = function() task.spawn(function() local ok, err = pcall(SelfTest.run, ctx, api) if not ok then SelfTest.running = false warn(NAME .. " self-test: " .. tostring(err)) end end) end
@@ -3822,6 +3824,42 @@ importSelected = function(list)
 		#plain > 60 and (" - " .. #plain .. " normal parts is a lot, so they weren't turned into ROBLEND meshes (Tab one to edit it)") or ""))
 end
 api.importSelected = function(list) importSelected(list) end
+-- click something in Studio's Explorer while ROBLEND is open: a "Bring in" button appears at the top of the view
+-- (Roblox doesn't let plugins add to the Explorer's own right-click menu)
+local bringBtn
+local function updateBringIn()
+	local function hide() if bringBtn then bringBtn.Visible = false end end
+	if not (uiOn and ui and ui.canvas and workshopOn) or placing or modal then return hide() end
+	local up = {}
+	for _, x in ipairs(topLevel(Selection:Get())) do
+		local probe = x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x
+		if probe and not shownHere(probe) then up[#up + 1] = x end
+	end
+	if #up == 0 then return hide() end
+	if not bringBtn then
+		bringBtn = Instance.new("TextButton")
+		bringBtn.Name = "RB_BringIn"
+		bringBtn.AnchorPoint = Vector2.new(0.5, 0)
+		bringBtn.Position = UDim2.new(0.5, 0, 0, 12)
+		bringBtn.Size = UDim2.fromOffset(0, 30)
+		bringBtn.AutomaticSize = Enum.AutomaticSize.X
+		bringBtn.BackgroundColor3 = Color3.fromRGB(230, 160, 30)
+		bringBtn.TextColor3 = Color3.fromRGB(25, 25, 25)
+		bringBtn.Font = Enum.Font.GothamBold
+		bringBtn.TextSize = 13
+		bringBtn.ZIndex = 55
+		bringBtn.AutoButtonColor = true
+		local pad = Instance.new("UIPadding") pad.PaddingLeft = UDim.new(0, 16) pad.PaddingRight = UDim.new(0, 16) pad.Parent = bringBtn
+		local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 15) c.Parent = bringBtn
+		bringBtn.Activated:Connect(function() bringBtn.Visible = false importSelected() end)
+		bringBtn.Parent = ui.canvas
+		if ui.blockers then table.insert(ui.blockers, bringBtn) end
+	end
+	bringBtn.Text = ("Bring in  \"%s\"%s"):format(up[1].Name, #up > 1 and ("  + " .. (#up - 1) .. " more") or "")
+	bringBtn.Visible = true
+end
+pcall(function() Selection.SelectionChanged:Connect(function() pcall(updateBringIn) end) end)
+api.bringInButton = function() return bringBtn end
 -- the things to send up: selected Models / parts that are down in the workshop
 local function workshopThings(list)
 	local things = {}
@@ -4207,6 +4245,8 @@ setUIOn = function(on)
 		elseif firstRun then
 			task.defer(function() if uiOn then TUT.openTutorial() end end)
 		end
+		-- something on the map already selected in the Explorer: offer to bring it in
+		task.defer(function() pcall(updateBringIn) end)
 	else
 		if view then view:beginCage() view:endCage() end
 		plugin:Deactivate()

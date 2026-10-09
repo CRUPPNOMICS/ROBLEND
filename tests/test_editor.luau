@@ -2003,9 +2003,13 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	local q = Instance.new("Part")
 	q.Name, q.Size, q.CFrame, q.Anchored = "MapRock", Vector3.new(4, 2, 4), CFrame.new(50, 5, 0), true
 	q.Parent = workspace
-	S.Selection:Set({ q })
-	assert(MOCK.toolbarButtons.RB_Import and MOCK.toolbarButtons.RB_Export, "Studio toolbar has Import and Export")
-	MOCK.toolbarButtons.RB_Import.Click:Fire() beat() beat()
+	-- clicking it in the Explorer while ROBLEND is open: a "Bring in" button appears; one click brings it in
+	S.Selection:Set({ q }) beat()
+	local bb = api.bringInButton()
+	assert(bb and bb.Visible and bb.Text:find("MapRock"), "Bring in button: " .. tostring(bb and bb.Text))
+	assert(MOCK.toolbarButtons.RB_Import and MOCK.toolbarButtons.RB_Export, "Studio toolbar has Edit in ROBLEND and Place")
+	bb.Activated:Fire() beat() beat()
+	assert(not bb.Visible, "button goes once it's in")
 	local rock = workspace:FindFirstChild("MapRock")
 	assert(rock and rock:FindFirstChild("RB_Data"), "converted")
 	assert(rock.CFrame.Position.Y < -9000, "sent down: " .. tostring(rock.CFrame.Position))
