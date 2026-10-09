@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.8"
+local VERSION = "0.22.9"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1695,6 +1695,13 @@ local function syncScene()
 					changed = true
 				end
 			end
+		end
+	end
+	-- a picture in the view whose part is gone (or was swapped for another): take it out
+	for key in pairs(view.objects) do
+		if not scene[key] and key ~= obj then
+			view:removeObject(key)
+			changed = true
 		end
 	end
 	-- the mesh being edited follows colour / x-ray / shading changes too

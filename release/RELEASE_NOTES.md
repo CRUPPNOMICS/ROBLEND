@@ -1,4 +1,4 @@
-# ROBLEND 0.22.8
+# ROBLEND 0.22.9
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.22.9:** Fixed: a shape could stay drawn in ROBLEND's view after its part was gone (and couldn't be clicked or deleted); such leftovers are now cleared straight away.
 
 **0.22.8:** Add > Text is now a menu: Type Your Own... (a box to type in) or a ready-made word, and it's there in Edit Mode and the right-click menu too. Properties > Data > Change Text... types new words; changing the words works from Edit Mode as well.
 

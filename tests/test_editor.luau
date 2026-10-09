@@ -1909,6 +1909,14 @@ check("a big sculpt (over Roblox's 200,000-character string limit) is stored in 
 	api.toggleEdit() beat()
 	p.Parent = nil
 end)
+check("a picture left in the view with no part behind it is cleared (0.22.9)", function()
+	if inEdit() then press("Tab") beat() end
+	local ghost = Instance.new("Part")
+	view:setObject(ghost, ghost, CFrame.new(), nil)
+	assert(view.objects[ghost], "ghost shown")
+	for _ = 1, 12 do MOCK.t += 0.05 beat() end
+	assert(view.objects[ghost] == nil, "ghost cleared")
+end)
 check("Help > Quick Test sets up and shows every item, then tidies up", function()
 	if inEdit() then press("Tab") beat() end
 	local mine = workspace:FindFirstChild("Crate Lid", true)
