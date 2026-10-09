@@ -1721,6 +1721,8 @@ check("Help > Tutorial: each card waits for the real action, then moves on", fun
 	waitFor("Edit Mode")
 	press("Tab") beat()
 	waitFor("Face select")
+	beat()
+	assert(find("TextLabel", function(d) return (d.Text or ""):find("Right now: point select", 1, true) ~= nil end), "live hint shows the current mode")
 	press("Three") beat()
 	waitFor("Pick a face")
 	view.yaw, view.pitch = math.rad(35), math.rad(30) view.focus = p.CFrame.Position view.dist = 16 view:update() beat()

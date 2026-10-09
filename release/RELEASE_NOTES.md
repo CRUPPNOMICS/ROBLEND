@@ -1,4 +1,4 @@
-# ROBLEND 0.21.0
+# ROBLEND 0.21.1
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.21.1:** the tutorial's Face select card shows which select mode you're in right now, and explains the number-row 3 vs the numpad 3.
 
 **0.21: Tutorial**
 - Help > Tutorial: step cards that wait for you to really do each thing (add a cube, look around, Edit Mode, face select, extrude, inset, loop cut, back to Object Mode, a modifier, saving). It opens by itself the first time.

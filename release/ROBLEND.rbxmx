@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.0"
+local VERSION = "0.21.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -10903,8 +10903,12 @@ Tutorial.STEPS = {
 		check = function(st, s0) return st.camCF ~= s0.camCF end },
 	{ title = "Edit Mode", text = "Press Tab with the cube selected. You're now editing its points, edges and faces.",
 		check = function(st) return st.editing == true end },
-	{ title = "Face select", text = "Press 3 for face select mode (1 = points, 2 = edges).",
-		check = function(st) return st.editing == true and st.mode == "face" end },
+	{ title = "Face select", text = "Press 3 on the number row above the letters (the numpad 3 turns the view instead), or click the third of the three little square buttons in the header.",
+		check = function(st) return st.editing == true and st.mode == "face" end,
+		hint = function(st)
+			if st.editing ~= true then return "You're not in Edit Mode: press Tab first." end
+			return "Right now: " .. (({ vert = "point", edge = "edge", face = "face" })[st.mode] or tostring(st.mode)) .. " select."
+		end },
 	{ title = "Pick a face", text = "Click a face of the cube. It turns orange.",
 		check = function(st) return st.editing == true and st.stats ~= nil and st.stats.fs >= 1 end },
 	{ title = "Extrude", text = "Press E and move the mouse: the face pulls out with new sides. Click to finish.",
@@ -10952,7 +10956,7 @@ function Tutorial.new(C)
 		local st = C.get()
 		local gui = st.ui and st.ui.gui
 		if not gui then return false end
-		card = mk("Frame", { Name = "RB_Tutorial", Size = UDim2.fromOffset(310, 128), Position = UDim2.new(0, 60, 1, -190), BackgroundColor3 = Color3.fromRGB(40, 40, 46),
+		card = mk("Frame", { Name = "RB_Tutorial", Size = UDim2.fromOffset(330, 150), Position = UDim2.new(0, 60, 1, -212), BackgroundColor3 = Color3.fromRGB(40, 40, 46),
 			BorderSizePixel = 0, ZIndex = 60, Active = true }, gui)
 		mk("UICorner", { CornerRadius = UDim.new(0, 8) }, card)
 		mk("UIStroke", { Color = Color3.fromRGB(71, 114, 179), Thickness = 2 }, card)
@@ -10960,7 +10964,7 @@ function Tutorial.new(C)
 			TextColor3 = Color3.fromRGB(150, 160, 180), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 61, Text = "" }, card)
 		title = mk("TextLabel", { Name = "RB_TutorialTitle", Size = UDim2.new(1, -20, 0, 18), Position = UDim2.fromOffset(10, 20), BackgroundTransparency = 1, Font = Enum.Font.GothamMedium,
 			TextSize = 14, TextColor3 = Color3.fromRGB(240, 240, 240), TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 61, Text = "" }, card)
-		body = mk("TextLabel", { Size = UDim2.new(1, -20, 0, 54), Position = UDim2.fromOffset(10, 40), BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
+		body = mk("TextLabel", { Size = UDim2.new(1, -20, 0, 76), Position = UDim2.fromOffset(10, 40), BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 12,
 			TextColor3 = Color3.fromRGB(205, 205, 210), TextWrapped = true, TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 61, Text = "" }, card)
 		back = btn(card, "Back", -200, function() T.go(T.step - 1) end)
 		skip = btn(card, "Skip", -134, function() T.go(T.step + 1) end)
@@ -11004,7 +11008,13 @@ function Tutorial.new(C)
 			if now - T.doneAt > 0.6 then T.go(T.step + 1) end
 			return
 		end
-		local ok, done = pcall(function() return s.check(Tutorial.snapshot(C.api), T.start) end)
+		local st
+		local ok, done = pcall(function() st = Tutorial.snapshot(C.api) return s.check(st, T.start) end)
+		-- a live line under the step (so you can see whether a key landed)
+		if s.hint and st and body then
+			local okH, h = pcall(s.hint, st)
+			body.Text = s.text .. ((okH and h) and ("\n" .. h) or "")
+		end
 		if ok and done then
 			T.doneAt = now
 			if card then card.BackgroundColor3 = Color3.fromRGB(38, 92, 52) title.Text = "Done: " .. s.title end
