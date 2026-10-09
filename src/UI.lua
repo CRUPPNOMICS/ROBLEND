@@ -1138,6 +1138,7 @@ function UI:buildPropContent()
 				corner(tb, 4)
 				make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, tb)
 				tb.FocusLost:Connect(function() if tb.Text ~= s.text then self:safe(function() api.setText("text", tb.Text) end) end end)
+				self:wideButton(b, 5, "Change Text...", function() self:openTextPrompt("Change the text", s.text, function(t) api.setText("text", t) end) end)
 				self:numField(b, 2, "Block Size", "p_textpx", function(st) return st.textPixel end, function(v) api.setText("pixel", v) end)
 				self:numField(b, 3, "Depth", "p_textdepth", function(st) return st.textDepth end, function(v) api.setText("depth", v) end)
 				label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
@@ -1353,12 +1354,14 @@ function UI:addItems()
 		items[#items + 1] = "-"
 		items[#items + 1] = { header = "Curve paths (a Tube modifier makes them pipes)" }
 		for _, it in ipairs(self:addCurveItems()) do items[#items + 1] = it end
+		items[#items + 1] = "-"
+		items[#items + 1] = { "Text (new object)", "", nil, sub = function() return self:addTextItems() end, icon = "annotate" }
 		return items, "Add Mesh"
 	end
 	return {
 		{ "Mesh", "", nil, sub = function() return self:addMeshItems() end, icon = "mesh" },
 		{ "Curve", "", nil, sub = function() return self:addCurveItems() end, icon = "spin" },
-		{ "Text", "", function() api.add("Text") end, icon = "annotate" },
+		{ "Text", "", nil, sub = function() return self:addTextItems() end, icon = "annotate" },
 	}, "Add"
 end
 function UI:openAddMenu(at)
@@ -1534,7 +1537,7 @@ function UI:searchItems()
 		roots = { { "Mesh", self:meshMenu() }, { "Vertex", self:vertexMenu() }, { "Edge", self:edgeMenu() }, { "Face", self:faceMenu() },
 			{ "Select", self:selectMenuEdit() }, { "Add", self:addMeshItems() }, { "View", self:viewMenu() } }
 	else
-		roots = { { "Object", self:objectMenu() }, { "Select", self:selectMenu() }, { "Add", self:addMeshItems() }, { "View", self:viewMenu() } }
+		roots = { { "Object", self:objectMenu() }, { "Select", self:selectMenu() }, { "Add", self:addMeshItems() }, { "Add Text", self:addTextItems() }, { "View", self:viewMenu() } }
 	end
 	local out, seen = {}, {}
 	local function walk(prefix, items, depth)
@@ -1602,6 +1605,48 @@ function UI:openSearch()
 	refresh()
 	pcall(function() box:CaptureFocus() end)
 	return fr
+end
+-- a small box to type into (Add > Text > Type Your Own..., Properties > Change Text...): Enter = done
+function UI:openTextPrompt(title, default, onDone)
+	self:closeMenu()
+	local mp = self.api.mousePos()
+	local W = 320
+	local fr = make("Frame", { Name = "RB_TextPrompt", ZIndex = 40, BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Position = UDim2.fromOffset(math.max(4, mp.X - W / 2), math.max(4, mp.Y - 14)),
+		Size = UDim2.fromOffset(W, 0), AutomaticSize = Enum.AutomaticSize.Y }, self.gui)
+	corner(stroke(fr, T.menuOutline), 5)
+	vlist(fr, 4)
+	make("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 6) }, fr)
+	label(fr, { LayoutOrder = 0, ZIndex = 41, Size = UDim2.new(1, 0, 0, 16), Text = title, TextColor3 = T.textMenu })
+	local box = make("TextBox", { Name = "RB_TextPromptBox", LayoutOrder = 1, ZIndex = 41, Size = UDim2.new(1, 0, 0, 26), BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 13,
+		TextColor3 = T.text, Text = default or "", PlaceholderText = "Type here, then press Enter", ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, fr)
+	corner(box, 4)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, box)
+	label(fr, { LayoutOrder = 2, ZIndex = 41, Size = UDim2.new(1, 0, 0, 14), TextSize = 10, TextColor3 = T.textDim, Text = "Enter = done, Esc or click outside = cancel" })
+	local function close() fr.Parent = nil if self.searchFrame == fr then self.searchFrame = nil end self.catcher.Visible = false end
+	box.FocusLost:Connect(function(enter)
+		if not enter then close() return end
+		local t = box.Text
+		close()
+		if t ~= "" then self:safe(function() onDone(t) end) end
+		self:refresh(true)
+	end)
+	self.searchFrame = fr
+	self.catcher.Visible = true
+	pcall(function() box:CaptureFocus() box.CursorPosition = #box.Text + 1 end)
+	self.promptBox = box
+	return fr, box
+end
+-- Add > Text: type your own words, or a ready-made one
+function UI:addTextItems()
+	local api = self.api
+	local items = {
+		{ "Type Your Own...", "", function() self:openTextPrompt("New text", "", function(t) api.addText(t) end) end, icon = "annotate" },
+		"-",
+	}
+	for _, w in ipairs({ "Text", "HELLO", "ROBLEND", "GAME OVER", "123", "VIP" }) do
+		items[#items + 1] = { w, "", function() api.addText(w) end }
+	end
+	return items
 end
 -- the interaction modes (header dropdown, Ctrl Tab)
 function UI:modeItems()
@@ -1902,6 +1947,7 @@ function UI:openContextMenu(at)
 	end
 	return self:openMenu({
 		{ "Add", "", nil, sub = function() return self:addMeshItems() end },
+		{ "Add Text", "", nil, sub = function() return self:addTextItems() end },
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		{ "Join", "Ctrl J", function() api.tool("Join") end },

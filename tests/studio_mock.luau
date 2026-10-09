@@ -241,7 +241,10 @@ function Inst.GetKeysPressed() local o = {} for k, v in pairs(MOCK.held) do if v
 function Inst.GetFocusedTextBox() return MOCK.focused end
 -- (only ROBLEND's invisible keyboard box keeps focus in the fake; other boxes are driven by their events)
 function Inst.CaptureFocus(o) if o._p.Name == "RB_KeyCapture" then MOCK.focused = o MOCK.captures = (MOCK.captures or 0) + 1 end end
-function Inst.ReleaseFocus(o) if MOCK.focused == o then MOCK.focused = nil end end
+function Inst.ReleaseFocus(o, submitted)
+	if MOCK.focused == o then MOCK.focused = nil end
+	if o._p.Name ~= "RB_KeyCapture" and o.FocusLost then o.FocusLost:Fire(submitted == true) end
+end
 function Inst.IsFocused() return false end
 function Inst.SetActive(o, on) o._p.ActiveState = on end
 

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.7"
+local VERSION = "0.22.8"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3699,10 +3699,19 @@ api.sculptSet = function(key, value)
 	elseif key == "symmetryX" then B.symmetryX = value == true end
 end
 -- Text objects (Add > Text): change the words / block size / depth, the mesh is rebuilt
+-- Add > Text: a new text object with these words
+api.addText = function(words)
+	if modal then return end
+	if editing then exitEdit() end
+	addShape("Text")
+	sceneAdd(Selection:Get()[1])
+	if words and words ~= "" and words ~= "Text" then api.setText("text", words) end
+end
 api.setText = function(key, value)
 	local p = modTarget()
 	if not (p and p:GetAttribute("RB_Text")) then return end
-	if editing and p == obj then setStatus("Leave Edit Mode (Tab) to change the text.") return end
+	-- (changing the words rebuilds the letters, so Edit Mode is left first)
+	if editing and p == obj then exitEdit() end
 	local text = p:GetAttribute("RB_Text")
 	local px = p:GetAttribute("RB_TextPixel") or 0.5
 	local depth = p:GetAttribute("RB_TextDepth") or 1

@@ -271,10 +271,24 @@ function AutoTest.run(C, api, only)
 		check(C.scene[p].hidden ~= true, "Alt H didn't bring it back")
 	end)
 	T("addtext", function()
-		local p = addObj("Text")
+		-- Add > Text > a ready-made word, even from Edit Mode
+		edit("Cube", "face", "none")
+		api.addText("HELLO") beat(2)
+		local p = obj()
+		check(p and p:GetAttribute("RB_Text") == "HELLO" and not api.state().editing, "Add > Text > HELLO: " .. tostring(p and p:GetAttribute("RB_Text")))
+		p.Name = "QT_Text"
+		-- Type Your Own... / Change Text...: the typing box
+		local ui = C.get().ui
+		ui:openTextPrompt("Change the text", "HELLO", function(t) api.setText("text", t) end)
+		check(ui.promptBox and ui.promptBox.Parent, "the typing box opens")
+		ui.promptBox.Text = "ROBLEND 2"
+		ui.promptBox:ReleaseFocus(true) beat(2)
+		p = obj()
+		check(p:GetAttribute("RB_Text") == "ROBLEND 2", "typed text: " .. tostring(p:GetAttribute("RB_Text")))
+		-- the words change from Edit Mode too
+		api.toggleEdit() beat()
 		api.setText("text", "HI") beat(2)
-		check(p:GetAttribute("RB_Text") == "HI", "text is " .. tostring(p:GetAttribute("RB_Text")))
-		return "you: typing into the Properties text box (Studio's text boxes) needs a person"
+		check(obj():GetAttribute("RB_Text") == "HI", "changing the words in Edit Mode")
 	end)
 	T("shade", function()
 		local p = addObj("Sphere")

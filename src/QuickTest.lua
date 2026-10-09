@@ -204,9 +204,9 @@ add(G, "join", "Join", "Both cubes are selected. Press Ctrl J.",
 add(G, "hide", "Hide / reveal", "Press H, then Alt H.",
 	"H hides the cube (it's not deleted: it's still in the Outliner). Alt H brings it back.",
 	function(H) local p = H.add("Cube") H.select({ p }) H.frame() end)
-add(G, "addtext", "Text", "Properties on the right: the green triangle tab (Data). Click the Text box, type a word, press Enter.",
-	"The 3D text changes to your word. (The letters are blocky on purpose.)",
-	function(H) local p = H.add("Text") H.select({ p }) H.frame() end)
+add(G, "addtext", "Text", "Header Add > Text > Type Your Own..., type a word, press Enter. Then Properties > green triangle tab > Change Text... to change it.",
+	"Your word appears as 3D letters, then changes. (The letters are blocky on purpose.)",
+	function(H) H.clean() end)
 add(G, "shade", "Shade smooth / flat", "Object menu (in the header) > Shade Smooth, then Shade Flat, then Shade Auto Smooth.",
 	"Smooth: the sphere looks round. Flat: you see the little flat faces. Auto: round, but sharp corners stay sharp.",
 	function(H) local p = H.add("Sphere") H.select({ p }) H.frame() end, function(H) H.tool("ObjShadeSmooth") end)

@@ -1370,10 +1370,10 @@ check("Add > Curve makes a pipe you can edit as points; Add > Text, change the w
 	assert(tris(cv) > 100, "still a pipe after the edit")
 	-- text
 	S.Selection:Set({}) beat()
-	press("A", { "LeftShift" }) menuItem("Text")
+	press("A", { "LeftShift" }) menuItem("Text") menuItem("VIP")
 	local tx = S.Selection:Get()[1]
 	beat()
-	eq(tx:GetAttribute("RB_Text"), "Text", "default words")
+	eq(tx:GetAttribute("RB_Text"), "VIP", "Add > Text > a ready-made word")
 	propTab(3)
 	local body = find("TextBox", function(d) return d.Name == "RB_TextBody" end)
 	assert(body, "text box in the Data tab")
