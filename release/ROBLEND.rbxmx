@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.1"
+local VERSION = "0.24.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3831,18 +3831,6 @@ boxOf = function(list)
 	end
 	return lo, hi
 end
--- where Studio's camera looks (on the map), for things made in ROBLEND that never came from the map
-local function studioSpawn(ignore)
-	local cam = workspace.CurrentCamera
-	local sc = MOD.savedCam
-	local cf = (sc and sc.cf) or (cam and cam.CFrame) or CFrame.new(0, 20, 20)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = ignore or {}
-	local res = workspace:Raycast(cf.Position, cf.LookVector * 600, params)
-	local p = res and res.Position or (cf.Position + cf.LookVector * 30)
-	return V3(math.floor(p.X + 0.5), math.floor(p.Y + 0.5), math.floor(p.Z + 0.5))
-end
 -- a thing's first part (to tell where it is), and moving any of them (a Folder moves everything in it)
 local function probeOf(x)
 	if x:IsA("BasePart") then return x end
@@ -3941,6 +3929,7 @@ end
 -- click something in Studio's Explorer while ROBLEND is open: a "Bring in" button appears at the top of the view
 -- (Roblox doesn't let plugins add to the Explorer's own right-click menu)
 local bringBtn
+local placing = nil -- (Place in Studio: further down)
 local function updateBringIn()
 	local function hide() if bringBtn then bringBtn.Visible = false end end
 	if not (uiOn and ui and ui.canvas and workshopOn) or placing or modal then return hide() end
@@ -3988,7 +3977,6 @@ local function workshopThings(list)
 end
 -- Place in Studio: ROBLEND closes and the work is "in your hand" in Studio's own view - it follows the mouse,
 -- click places it, R turns it, Enter puts things back exactly where they came from, Esc sends it back down
-local placing = nil
 local function placeUpdate()
 	local P = placing
 	if not P then return end

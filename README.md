@@ -20,7 +20,9 @@ The mesh engine is Blender's BMesh, converted to Luau and cut down to fit a Robl
 python3 tools/build.py   # makes build/ROBLEND.rbxmx
 ```
 
-Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow Mesh / Image APIs*.
+**Before you start:** ROBLEND needs two things switched on, and checks them itself when it opens. Until both are on, a *Before you start* screen shows a tick or a cross for each, with how to turn it on:
+1. **Mesh / Image APIs** for the game: *Game Settings > Security > Allow Mesh / Image APIs* (once per game).
+2. Studio's **CreateAssetAsync Luau API** beta: *File > Beta Features*, then restart Studio (saving meshes to Roblox needs it).
 
 **Studio's shortcuts:** while your mouse is in the ROBLEND window, Studio's own shortcuts (the 1 2 3 4 build tools, Ctrl D, Delete...) are blocked so ROBLEND's keys work like Blender's. Ctrl Z / Ctrl Y still undo and redo. Edit > Block Studio Shortcuts turns this off.
 
@@ -129,6 +131,18 @@ The 3D view only shows ROBLEND meshes. To edit in Studio's own 3D view instead, 
 | Ctrl+Z | Undo. Every edit is one Studio undo step. |
 
 Studio's own camera keys (W A S D Q E) still move the camera, so tap those keys quickly. The panel buttons do the same jobs.
+
+## The workshop: bringing things in and out
+
+ROBLEND works in its own space 10,000 studs under your map, so models you're making never get mixed up with the map.
+
+- **Import from Studio** (top bar) lists what's on your map, like the Explorer: click one, or drag it into the 3D view. Or click something in Studio's Explorer while ROBLEND is open and press the **Bring in** button that appears. It comes down to the ROBLEND scene, centred, and the view frames it. Parts, meshes, unions, models and groups (folders) all come in as they are; **Tab** on a part turns it into a ROBLEND mesh to edit. (Roblox doesn't let plugins read a union's shape, so unions can be moved and placed but not edited.)
+- **Place in Studio** (top bar) closes ROBLEND with your work in your hand in Studio's view: it follows the mouse, **click** to place it, **R** turns it, **Enter** puts things back exactly where they came from, **Esc** cancels.
+- **Back to Studio** closes ROBLEND; Studio's camera is where you left it.
+- Studio's Plugins tab also has **Edit in ROBLEND** and **Place**, and both can be given keys in *File > Advanced > Customize Shortcuts*.
+- Anything left in the workshop saves and publishes with your place, so place finished work before publishing. *Edit > Workshop Under the Map* turns the workshop off.
+
+**Q** opens the mode menu (Object / Edit / Sculpt / Vertex Paint); Studio keeps Ctrl Tab for itself. In Vertex Paint the colour square opens a honeycomb colour picker.
 
 ## Saving (needs a Studio beta)
 
@@ -297,6 +311,13 @@ Paint colours onto the mesh's points; the colour blends across each face.
 **Speed**
 - Moving points (G / R / S), sculpting and painting update the mesh that's already on screen instead of building a new one each frame. Modifiers and texture UVs still rebuild it.
 
+## Checking it works
+
+The Help menu has three ways to test ROBLEND in your own Studio, each printing its results to the Output window:
+- **Run Self-Test**: about 20 checks of the mesh engine (`ROBLEND TEST` lines).
+- **Run Auto-Test**: about 100 features, done by a pretend mouse and keyboard through the same controls you use, then checked (`ROBLEND AUTO` lines). Hands off for about 30 seconds; it finishes with a painted block. Nothing is uploaded and your own parts aren't touched.
+- **Quick Test**: a card for each feature that sets it up, says what to press and what should happen, with Works / Broken / Skip buttons (`ROBLEND CHECK` lines).
+
 ## What's in it
 
 | Path | What it holds |
@@ -316,6 +337,10 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |
 | `src/UVEditor.lua` | The UV Editor window. |
 | `src/Tutorial.lua` | Help > Tutorial: the step cards. |
+| `src/Setup.lua` | "Before you start": checks the Mesh / Image APIs and the CreateAssetAsync beta, and waits until both are on. |
+| `src/SelfTest.lua` | Help > Run Self-Test. |
+| `src/AutoTest.lua` | Help > Run Auto-Test: about 100 features driven by a pretend mouse and keyboard. |
+| `src/QuickTest.lua` | Help > Quick Test: a card per feature with Works / Broken / Skip. |
 | `src/KeyCapture.lua` | Holds the keyboard so Studio's own shortcuts don't fire inside ROBLEND. |
 | `src/Boolean.lua` | Union, Difference and Intersect (BSP-tree CSG) plus the clean-up. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
