@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - modifiers: a non-destructive stack on each mesh (Blender's Properties > Modifiers)
+	ROBLEND - modifiers: a non-destructive stack on each mesh (Blender's Properties > Modifiers)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
 	Converted to Luau (and cut down) from Blender's modifiers:

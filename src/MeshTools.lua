@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - Edit Mode mesh tools (the Modeling tab)
+	ROBLEND - Edit Mode mesh tools (the Modeling tab)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
 	Converted to Luau (and cut down) from Blender's BMesh tools + operators:

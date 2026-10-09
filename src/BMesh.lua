@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - BMesh (the mesh engine)
+	ROBLEND - BMesh (the mesh engine)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
 	Converted to Luau (and cut down) from Blender's BMesh:

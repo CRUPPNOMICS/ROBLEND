@@ -1,4 +1,4 @@
-# ROBLENDER
+# ROBLEND
 
 A free, open-source mesh editor for Roblox Studio, with Blender-style edit mode.
 The mesh engine is Blender's BMesh, converted to Luau and cut down to fit a Roblox plugin.
@@ -8,30 +8,30 @@ The mesh engine is Blender's BMesh, converted to Luau and cut down to fit a Robl
 ## Install
 
 **From a release file**
-1. Download `ROBLENDER.rbxmx`.
+1. Download `ROBLEND.rbxmx`.
 2. Put it in your Studio plugins folder (Studio: *Plugins > Plugins Folder*).
 3. Restart Studio.
 
 **From source** (needs Python 3)
 
 ```
-python3 tools/build.py   # makes build/ROBLENDER.rbxmx
+python3 tools/build.py   # makes build/ROBLEND.rbxmx
 ```
 
 Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow Mesh / Image APIs*.
 
 ## Use
 
-Click the **ROBLENDER** button in the Plugins tab. A Blender-style window opens over Studio:
+Click the **ROBLEND** button in the Plugins tab. A Blender-style window opens over Studio:
 
 | Part of the window | What's in it |
 |---|---|
 | Top bar | File, Edit and Help menus. The Layout tab is Object Mode and the Modeling tab is Edit Mode. |
-| 3D view | ROBLENDER's own 3D view: Blender's grey background, the grid and axis lines. |
+| 3D view | ROBLEND's own 3D view: Blender's grey background, the grid and axis lines. |
 | 3D view header | Mode dropdown; View, Select, Add and Object / Mesh / Vertex / Edge / Face menus; X-Ray; Wireframe and Solid. |
 | Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
 | Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
-| Outliner | Every ROBLENDER mesh in the place. Click a row to select it; the eye hides or shows it. |
+| Outliner | Every ROBLEND mesh in the place. Click a row to select it; the eye hides or shows it. |
 | Properties | Object tab: name, location, rotation, size. Modifiers tab (wrench): the modifier stack. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
 | Status bar | Mouse hints and the last message. |
 
@@ -100,7 +100,7 @@ The header also has toggles for snapping, proportional editing (O; the mouse whe
 
 Object Mode keys: G, R and S move, rotate and scale whole parts. X deletes. Shift D duplicates. A, Alt A and Ctrl I select all, none and invert.
 
-The 3D view only shows ROBLENDER meshes. To edit in Studio's own 3D view instead, use **Edit > Use Studio's 3D View**.
+The 3D view only shows ROBLEND meshes. To edit in Studio's own 3D view instead, use **Edit > Use Studio's 3D View**.
 
 | Key | What it does |
 |---|---|
@@ -124,11 +124,11 @@ Studio's own camera keys (W A S D Q E) still move the camera, so tap those keys 
 
 ## Saving (needs a Studio beta)
 
-ROBLENDER saves each mesh to Roblox as a real **Mesh asset**, using `AssetService:CreateAssetAsync`, so the mesh stays in the place and publishes like any imported mesh.
+ROBLEND saves each mesh to Roblox as a real **Mesh asset**, using `AssetService:CreateAssetAsync`, so the mesh stays in the place and publishes like any imported mesh.
 
 **Set it up once**
 1. In Studio, open File > Beta Features and turn on **CreateAssetAsync Luau API**, then restart Studio.
-2. Install ROBLENDER as a **local plugin** (the .rbxmx in your Plugins folder). Roblox only allows this API in local plugins, not in plugins installed from the Creator Store.
+2. Install ROBLEND as a **local plugin** (the .rbxmx in your Plugins folder). Roblox only allows this API in local plugins, not in plugins installed from the Creator Store.
 
 **When it saves**
 - Automatically when you leave Edit Mode, if the mesh changed. You can turn this off under File > Auto Save.
@@ -231,7 +231,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | `src/Modifiers.lua` | The modifier stack (14 modifiers) and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
-| `src/View.lua` | ROBLENDER's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
+| `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
 

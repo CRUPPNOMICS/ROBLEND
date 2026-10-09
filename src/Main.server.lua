@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - a free, open-source mesh editor for Roblox Studio
+	ROBLEND - a free, open-source mesh editor for Roblox Studio
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Mesh engine converted from Blender's BMesh
 	(Copyright (C) Blender Authors, GPL-2.0-or-later). Not made or endorsed by the Blender Foundation.
@@ -14,8 +14,8 @@
 	| E extrude | I inset | Ctrl+R loop cut | X / Delete delete | M merge | F fill | Alt+Z x-ray
 ]]
 
-local NAME = "ROBLENDER"
-local VERSION = "0.12.0"
+local NAME = "ROBLEND"
+local VERSION = "0.12.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -58,7 +58,7 @@ local uiOn = false
 local useStudio = false   -- true = edit in Studio's own 3D view instead of ours
 local shading = "solid"   -- solid / wire
 local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
-local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
+local scene = {}          -- ROBLEND parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
 local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment", pivot = "median" }
@@ -279,7 +279,7 @@ local function saveMesh(p, quiet, silent)
 			if not silent then setStatus("Saving " .. p.Name .. " to Roblox...") end
 			local data = saveKey(p)
 			local m = evaluated(p, (loadFrom(p)))
-			local params = { Name = p.Name, Description = "Made with ROBLENDER (free, open source mesh editor)" }
+			local params = { Name = p.Name, Description = "Made with ROBLEND (free, open source mesh editor)" }
 			pcall(function()
 				if game.CreatorType == Enum.CreatorType.Group and game.CreatorId > 0 then
 					params.CreatorId = game.CreatorId
@@ -299,7 +299,7 @@ local function saveMesh(p, quiet, silent)
 			end
 			if p.Parent and not (editing and p == obj and not ownView()) and saveKey(p) == data then
 				local rec
-				pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER save") end)
+				pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND save") end)
 				applyBuilt(p, real, c)
 				p:SetAttribute("RB_SavedHash", dataHash(data))
 				if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
@@ -313,7 +313,7 @@ local function saveMesh(p, quiet, silent)
 		if not ok then setStatus("Couldn't save " .. p.Name .. ": " .. tostring(err)) end
 	end)
 end
--- a ROBLENDER part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
+-- a ROBLEND part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
 -- from RB_Data (only once per session, and only for parts not saved to Roblox)
 local fixedLook = setmetatable({}, { __mode = "k" })
 local function fixUnsaved(p)
@@ -567,7 +567,7 @@ end
 local function commit(what)
 	if not (obj and bm) then return end
 	local rec
-	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. what) end)
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND " .. what) end)
 	local val = encode(bm)
 	lastWritten = val
 	dataOf(obj).Value = val
@@ -578,7 +578,7 @@ local function commit(what)
 	end
 	worldTris = nil
 	showEdit()
-	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. what) end
+	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND " .. what) end
 	dirtyCage = true
 	lastBuild = os.clock()
 	dirtyMesh = false
@@ -709,7 +709,7 @@ local function addShape(kind)
 		return
 	end
 	local rec
-	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER add " .. kind) end)
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND add " .. kind) end)
 	mp.Name = NAME .. " " .. kind
 	mp.Anchored = true
 	mp.Color = Color3.fromRGB(200, 200, 205)
@@ -723,10 +723,10 @@ local function addShape(kind)
 	sv.Parent = mp
 	mp:SetAttribute("RB_Center", c)
 	mp:SetAttribute("RB_Size", mp.Size)
-	mp:SetAttribute("ROBLENDER", VERSION)
+	mp:SetAttribute("ROBLEND", VERSION)
 	mp.Parent = workspace
 	Display.adopt(mp, Display.emOf[mp])
-	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
+	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND add") end
 	Selection:Set({ mp })
 	activeObj = mp
 	setStatus("Added a " .. kind .. ". Press Tab (or Edit) to edit it.")
@@ -911,7 +911,7 @@ local function startObjTransform(kind)
 	for _, p in ipairs(ps) do orig[p] = { cf = p.CFrame, size = p.Size } c += p.CFrame.Position end
 	c = c / #ps
 	local rec
-	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. kind) end)
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND " .. kind) end)
 	modal = { kind = kind, obj = true, parts = ps, orig = orig, cw = c, cs = toScreen(c), m0 = mousePos(), ray0 = getRay(), num = "", rec = rec }
 	setStatus(({ G = "Move", S = "Resize", R = "Rotate" })[kind] .. ": move the mouse. X / Y / Z = axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
 end
@@ -977,7 +977,7 @@ local function finishObjModal(M, cancel)
 	if M.rec then
 		CHS:FinishRecording(M.rec, cancel and Enum.FinishRecordingOperation.Cancel or Enum.FinishRecordingOperation.Commit)
 	elseif not cancel then
-		CHS:SetWaypoint("ROBLENDER " .. M.kind)
+		CHS:SetWaypoint("ROBLEND " .. M.kind)
 	end
 	setStatus(cancel and "Cancelled." or "Done.")
 	dirtyCage = true
@@ -1327,7 +1327,7 @@ function Tools.bake()
 	local o = (p == obj) and origin or originOf(p)
 	setStatus("Baking to parts...")
 	local rec
-	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER bake") end)
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND bake") end)
 	local model = Display.bake(m, o, p, true)
 	model.Name = p.Name .. " (baked)"
 	model.Parent = p.Parent
@@ -1398,13 +1398,13 @@ local function selectedPart()
 end
 local function record(what, fn)
 	local rec
-	pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER " .. what) end)
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND " .. what) end)
 	local ok, err = pcall(fn)
-	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER " .. what) end
+	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND " .. what) end
 	if not ok then warn(NAME .. ": " .. tostring(err)) end
 end
 
--- ----- the scene: every ROBLENDER part, shown in our 3D view -----
+-- ----- the scene: every ROBLEND part, shown in our 3D view -----
 local function sceneAdd(p)
 	if p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data") and not scene[p] then scene[p] = { part = p } end
 end
@@ -2231,7 +2231,7 @@ local function modelingTools()
 		local mp, c, err = Display.build(m)
 		if not mp then setStatus("Couldn't make the mesh: " .. tostring(err)) return end
 		local rec
-		pcall(function() rec = CHS:TryBeginRecording("ROBLENDER", "ROBLENDER add") end)
+		pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND add") end)
 		mp.Name = name
 		mp.Anchored = true
 		mp.Color = Color3.fromRGB(200, 200, 205)
@@ -2243,10 +2243,10 @@ local function modelingTools()
 		sv.Parent = mp
 		mp:SetAttribute("RB_Center", c)
 		mp:SetAttribute("RB_Size", mp.Size)
-		mp:SetAttribute("ROBLENDER", VERSION)
+		mp:SetAttribute("ROBLEND", VERSION)
 		mp.Parent = workspace
 		Display.adopt(mp, Display.emOf[mp])
-		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLENDER add") end
+		if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND add") end
 		sceneAdd(mp)
 		return mp
 	end
@@ -3603,7 +3603,7 @@ end
 ui = UI.new(api, CoreGui)
 pcall(function() useStudio = plugin:GetSetting("RB_StudioView") == true end)
 
--- Studio's own camera: saved when ROBLENDER opens, held still while our 3D view covers it, put back on close
+-- Studio's own camera: saved when ROBLEND opens, held still while our 3D view covers it, put back on close
 local function saveStudioCam()
 	local cam = workspace.CurrentCamera
 	if cam then MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus } end
@@ -3635,7 +3635,7 @@ setStudioView = function(b)
 		if b then plugin:Deactivate() else plugin:Activate(true) end
 	end
 	dirtyCage = true
-	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLENDER 3D view.")
+	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLEND 3D view.")
 end
 setUIOn = function(on)
 	if not on then
@@ -3669,7 +3669,7 @@ setUIOn = function(on)
 		MOD.savedCam = nil
 		local n = 0
 		for q in pairs(scene) do if q.Parent and not isSaved(q) then n += 1 end end
-		if n > 0 then setStatus(("%d mesh%s not saved to Roblox yet - open ROBLENDER and use File > Save All Meshes."):format(n, n == 1 and "" or "es")) end
+		if n > 0 then setStatus(("%d mesh%s not saved to Roblox yet - open ROBLEND and use File > Save All Meshes."):format(n, n == 1 and "" or "es")) end
 	end
 	dirtyCage = true
 end
@@ -4234,7 +4234,7 @@ end)
 end
 window()
 
--- after Studio opens a place: rebuild the look of ROBLENDER meshes that were never saved to Roblox
+-- after Studio opens a place: rebuild the look of ROBLEND meshes that were never saved to Roblox
 task.delay(3, function()
 	for _, d in ipairs(workspace:GetDescendants()) do
 		if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") then fixUnsaved(d) end

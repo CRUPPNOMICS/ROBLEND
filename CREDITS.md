@@ -2,14 +2,14 @@
 
 ## Blender
 
-ROBLENDER's mesh engine is converted to Luau, and cut down, from Blender's source code:
+ROBLEND's mesh engine is converted to Luau, and cut down, from Blender's source code:
 - Copyright (C) Blender Authors, https://www.blender.org
 - Licence: GPL-2.0-or-later
 - Source: https://projects.blender.org/blender/blender
 
 The Blender source files used are:
 
-| Blender source file | What ROBLENDER uses from it |
+| Blender source file | What ROBLEND uses from it |
 |---|---|
 | `source/blender/bmesh/intern/bmesh_structure.cc` | Disk and radial cycles |
 | `source/blender/bmesh/intern/bmesh_core.cc` | Create, kill, split edge, split face |
@@ -37,9 +37,9 @@ The Blender source files used are:
 
 Blender's icon images are not included; the icons are drawn from simple shapes.
 
-ROBLENDER is not made, endorsed or supported by the Blender Foundation.
+ROBLEND is not made, endorsed or supported by the Blender Foundation.
 
-## ROBLENDER
+## ROBLEND
 
 - Copyright (C) 2026 Cruppnomics (Roblox: Giga_gad27)
 - Licence: GPL-2.0-or-later

@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
+	ROBLEND - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
 	axis lines and a headlight, plus the edit cage (lines + dots drawn as depth-tested parts).
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Colours from Blender's default theme

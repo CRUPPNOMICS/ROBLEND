@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - mesh operators
+	ROBLEND - mesh operators
 	SPDX-License-Identifier: GPL-2.0-or-later
 
 	Converted to Luau (and cut down) from Blender's BMesh operators:

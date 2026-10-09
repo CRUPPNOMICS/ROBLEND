@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - showing a BMesh in Roblox (EditableMesh -> MeshPart), triangulating n-gons, baking to parts
+	ROBLEND - showing a BMesh in Roblox (EditableMesh -> MeshPart), triangulating n-gons, baking to parts
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Ear clipping follows the idea of Blender's
 	BLI_polyfill_2d (source/blender/blenlib/intern/polyfill_2d.cc, GPL-2.0-or-later, Blender Authors), cut down.
@@ -320,7 +320,7 @@ end
 function Display.bake(bm, origin, look, glue)
 	local GeometryService = game:GetService("GeometryService")
 	local model = Instance.new("Model")
-	model.Name = "ROBLENDER_Baked"
+	model.Name = "ROBLEND_Baked"
 	local _, size = Display.bounds(bm)
 	local thick = math.clamp(math.max(size.X, size.Y, size.Z) * 0.004, 0.05, 0.2)
 	for _, t in ipairs(Display.triangles(bm)) do
@@ -351,7 +351,7 @@ end
 
 -- ===== .obj text (1-based, verts then faces) =====
 function Display.toOBJ(bm, name)
-	local lines = { "# ROBLENDER export", "o " .. (name or "ROBLENDER") }
+	local lines = { "# ROBLEND export", "o " .. (name or "ROBLEND") }
 	local idx, n = {}, 0
 	for v in pairs(bm.verts) do
 		n += 1

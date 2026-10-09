@@ -1,5 +1,5 @@
 --[[
-	ROBLENDER - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
+	ROBLEND - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
 	Outliner, Properties editor and status bar.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -228,7 +228,7 @@ function UI.new(api, parentGui)
 	local self = setmetatable({ api = api, on = false, menuOpen = nil, subOpen = nil, sidebar = false, toolbar = true,
 		hover = {}, report = "", drag = nil, propTab = "object", panelsOpen = { transform = true, vis = false, mesh = true, surface = true, save = true, keep = false },
 		fields = {}, outRows = {}, version = api.version or "" }, UI)
-	local gui = make("ScreenGui", { Name = "ROBLENDER_UI", Enabled = false, IgnoreGuiInset = true, DisplayOrder = 50, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false }, parentGui)
+	local gui = make("ScreenGui", { Name = "ROBLEND_UI", Enabled = false, IgnoreGuiInset = true, DisplayOrder = 50, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, ResetOnSpawn = false }, parentGui)
 	self.gui = gui
 	self:buildTopBar()
 	self:buildView()
@@ -250,7 +250,7 @@ end
 function UI:safe(fn, ...)
 	if not fn then return end
 	local ok, err = pcall(fn, ...)
-	if not ok then warn("ROBLENDER UI: " .. tostring(err)) end
+	if not ok then warn("ROBLEND UI: " .. tostring(err)) end
 	self:refresh(true)
 end
 
@@ -324,7 +324,7 @@ function UI:buildTopBar()
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
 		"-",
-		{ "Close ROBLENDER", "", function() api.close() end },
+		{ "Close ROBLEND", "", function() api.close() end },
 	} end)
 	menu("Edit", function() return {
 		{ "Undo", "Ctrl Z", function() api.undo() end },
@@ -871,7 +871,7 @@ end
 function UI:buildModifiers(s)
 	local api = self.api
 	if not s.isRB then
-		label(self.propScroll, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Modifiers work on ROBLENDER meshes. Add one with Shift A." })
+		label(self.propScroll, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim, Text = "Modifiers work on ROBLEND meshes. Add one with Shift A." })
 		return
 	end
 	self:wideButton(self.propScroll, 1, "Add Modifier   v", function(btn) self:openMenu(self:modifierItems(), btn, "Add Modifier") end)
@@ -1118,7 +1118,7 @@ function UI:openMenu(items, at, title, isSub)
 	return m
 end
 
--- ===== menu contents (from space_view3d.py, only what ROBLENDER can do) =====
+-- ===== menu contents (from space_view3d.py, only what ROBLEND can do) =====
 function UI:addMeshItems()
 	local api = self.api
 	local items = {}
@@ -1796,7 +1796,7 @@ function UI:refresh(force)
 	else
 		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Object Context Menu      <b>Shift A</b> Add"
 	end
-	self.reportLbl.Text = (self.report ~= "" and (self.report .. "      ") or "") .. "ROBLENDER " .. self.version
+	self.reportLbl.Text = (self.report ~= "" and (self.report .. "      ") or "") .. "ROBLEND " .. self.version
 end
 
 function UI:destroy() self.gui.Parent = nil end
