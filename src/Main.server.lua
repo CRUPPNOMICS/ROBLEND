@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.20.0"
+local VERSION = "0.21.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -33,6 +33,7 @@ local Convert = require(script.Convert)
 local Boolean = require(script.Boolean)
 local UVTools = require(script.UVTools)
 local UVEditor = require(script.UVEditor)
+local Tutorial = require(script.Tutorial)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1774,6 +1775,7 @@ function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:Is
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
 local UVE = UVEditor.new(ctx)
+local TUT = Tutorial.new(ctx)
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3509,6 +3511,8 @@ api.convert = OT.convert
 api.boolean = OT.boolean
 api.uvEditor = function() UVE.toggle() end
 api.uvEditorState = function() return UVE end
+api.tutorial = function() TUT.toggle() end
+api.tutorialState = function() return TUT end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
@@ -3784,6 +3788,13 @@ setUIOn = function(on)
 		if ownView() then plugin:Activate(true) end
 		local hasApi = pcall(function() assert(AssetService.CreateAssetAsync) end)
 		setStatus(hasApi and ("Welcome to " .. NAME .. ". Shift A = add, click a mesh + Tab = edit, MMB / RMB drag = orbit, wheel = zoom.") or BETA_MSG)
+		-- the first time ever: open the tutorial (Help > Tutorial brings it back)
+		local seen
+		pcall(function() seen = plugin:GetSetting("RB_TutorialSeen") end)
+		if not seen then
+			pcall(function() plugin:SetSetting("RB_TutorialSeen", true) end)
+			task.defer(function() if uiOn then TUT.openTutorial() end end)
+		end
 	else
 		if view then view:beginCage() view:endCage() end
 		plugin:Deactivate()
@@ -4368,6 +4379,7 @@ RunService.Heartbeat:Connect(function()
 		end
 	end
 	pcall(UVE.tick)
+	pcall(TUT.tick, now)
 	if MOD.modSave then
 		for p, t0 in pairs(MOD.modSave) do
 			if now - t0 > 4 then

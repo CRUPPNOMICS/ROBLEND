@@ -10,7 +10,7 @@ The mesh engine is Blender's BMesh, converted to Luau and cut down to fit a Robl
 ## Install
 
 **From a release file**
-1. Download `ROBLEND.rbxmx`.
+1. Download `ROBLEND.rbxmx` from the [Releases page](https://github.com/CRUPPNOMICS/ROBLEND/releases) (or `release/ROBLEND.rbxmx` in this repo).
 2. Put it in your Studio plugins folder (Studio: *Plugins > Plugins Folder*).
 3. Restart Studio.
 
@@ -21,6 +21,8 @@ python3 tools/build.py   # makes build/ROBLEND.rbxmx
 ```
 
 Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow Mesh / Image APIs*.
+
+**New to it?** The first time you open ROBLEND a tutorial starts: short cards that wait for you to do each step (add a cube, Tab into Edit Mode, extrude, inset, loop cut, a modifier, saving). Help > Tutorial runs it again.
 
 ## Use
 
@@ -309,10 +311,12 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
 | `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |
 | `src/UVEditor.lua` | The UV Editor window. |
+| `src/Tutorial.lua` | Help > Tutorial: the step cards. |
 | `src/Boolean.lua` | Union, Difference and Intersect (BSP-tree CSG) plus the clean-up. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
+| `release/` | The current plugin file and release notes. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
 
 ## Licensing & Attribution

@@ -379,7 +379,7 @@ function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") 
 function Inst.GetMouse() return mouse end
 function Inst.Activate(o) o._p.Active = true end
 function Inst.IsActivated(o) return o._p.Active == true end
-local settings = {}
+local settings = { RB_TutorialSeen = true } -- (the first-run tutorial is tested on its own)
 function Inst.GetSetting(_, k) return settings[k] end
 function Inst.SetSetting(_, k, v) settings[k] = v end
 function Inst.Deactivate(o) o._p.Active = false end
