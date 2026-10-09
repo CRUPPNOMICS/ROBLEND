@@ -3,7 +3,7 @@
 A free, open-source mesh editor for Roblox Studio, with Blender-style edit mode.
 The mesh engine is Blender's BMesh, converted to Luau and cut down to fit a Roblox plugin.
 
-> ROBLENDER is not made, endorsed or supported by the Blender Foundation. "Blender" is a trademark of the Blender Foundation.
+> ROBLEND is not affiliated with or endorsed by the Blender Foundation. "Blender" is a trademark of the Blender Foundation. See [Licensing & Attribution](#licensing--attribution).
 
 ## Install
 
@@ -235,12 +235,21 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
 
-## Licence
+## Licensing & Attribution
 
-GPL-2.0-or-later (see `LICENSE`), the same as Blender, which this code is converted from.
-You may use, change and share it, including selling it. If you pass it on, changed or not, you must:
+ROBLEND is an independent, free and open-source Roblox Studio modelling plugin developed under the Cruppnomics brand.
+
+Portions of ROBLEND are derived from Blender source code, licensed under the GNU General Public License (GPL), version 2 or later.
+
+Blender is developed by the Blender Foundation and its contributors. ROBLEND is not affiliated with or endorsed by the Blender Foundation.
+
+See the `LICENSE` file and relevant source-code notices for licensing details.
+
+### What the GPL means for you
+
+ROBLEND is licensed GPL-2.0-or-later, the same as Blender. You may use, change and share it, including selling it. If you pass it on, changed or not, you must:
 - keep it under the GPL
 - keep the copyright notices
 - make the source available
 
-See `CREDITS.md`.
+`CREDITS.md` lists the Blender source files each part is converted from.
