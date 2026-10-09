@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.0"
+local VERSION = "0.23.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3802,42 +3802,108 @@ importSelected = function(list)
 	if not uiOn then setUIOn(true) end
 	dirtyCage = true
 	task.defer(function() pcall(frameSelected) end)
-	setStatus(("Imported %d into the workshop (10,000 studs under the map)%s. Export sends %s back where %s came from."):format(#up,
-		#plain > 60 and (" - " .. #plain .. " normal parts is a lot, so they weren't turned into ROBLEND meshes (Tab one to edit it)") or "", #up == 1 and "it" or "them", #up == 1 and "it" or "they"))
+	setStatus(("Brought %d in to edit%s. When you're done: Place in Studio (top bar)."):format(#up,
+		#plain > 60 and (" - " .. #plain .. " normal parts is a lot, so they weren't turned into ROBLEND meshes (Tab one to edit it)") or ""))
 end
 api.importSelected = function(list) importSelected(list) end
-api.exportSelected = function(list)
-	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map).") return end
-	if modal then return end
-	if editing then exitEdit() end
+-- the things to send up: selected Models / parts that are down in the workshop
+local function workshopThings(list)
 	local things = {}
 	for _, x in ipairs(topLevel(list or Selection:Get())) do
 		if shownHere(x:IsA("Model") and (x.PrimaryPart or x:FindFirstChildWhichIsA("BasePart", true)) or x) then things[#things + 1] = x end
 	end
-	if #things == 0 then setStatus("Select what to send back up to the map (click it, or pick it in the Outliner), then Export.") return end
-	local fresh = {}
-	for _, x in ipairs(things) do if typeof(x:GetAttribute("RB_Home")) ~= "CFrame" then fresh[#fresh + 1] = x end end
-	-- new things go where Studio's camera is looking, keeping their layout
-	local delta
-	if #fresh > 0 then
-		local lo, hi = boxOf(fresh)
-		delta = (studioSpawn(fresh) + V3(0, (hi.Y - lo.Y) / 2, 0)) - (lo + hi) / 2
-	end
-	record("Export to map", function()
-		for _, x in ipairs(things) do
-			local back = x:GetAttribute("RB_Home")
-			if typeof(back) == "CFrame" then
-				x:PivotTo(back)
-				x:SetAttribute("RB_Home", nil)
-			else
-				x:PivotTo(x:GetPivot() + delta)
-			end
-		end
-	end)
-	Selection:Set(things)
-	dirtyCage = true
-	setStatus(("Sent %d back up to the map%s."):format(#things, #fresh > 0 and " (new ones are where Studio's camera is looking)" or ""))
 	return things
+end
+-- Place in Studio: ROBLEND closes and the work is "in your hand" in Studio's own view - it follows the mouse,
+-- click places it, R turns it, Enter puts things back exactly where they came from, Esc sends it back down
+local placing = nil
+local function placeHint(text)
+	local g = CoreGui:FindFirstChild("ROBLEND_PlaceHint")
+	if not text then if g then g.Parent = nil end return end
+	if not g then
+		g = Instance.new("ScreenGui")
+		g.Name = "ROBLEND_PlaceHint"
+		g.DisplayOrder = 60
+		local l = Instance.new("TextLabel")
+		l.Name = "Hint"
+		l.AnchorPoint = Vector2.new(0.5, 0)
+		l.Position = UDim2.new(0.5, 0, 0, 12)
+		l.Size = UDim2.fromOffset(620, 30)
+		l.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
+		l.BackgroundTransparency = 0.1
+		l.TextColor3 = Color3.fromRGB(240, 240, 240)
+		l.Font = Enum.Font.GothamMedium
+		l.TextSize = 13
+		l.Parent = g
+		local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = l
+		local st = Instance.new("UIStroke") st.Color = Color3.fromRGB(230, 180, 40) st.Thickness = 1.5 st.Parent = l
+		g.Parent = CoreGui
+	end
+	g.Hint.Text = text
+end
+local function placeUpdate()
+	local P = placing
+	if not P then return end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = P.things
+	local ray = getRay()
+	local res = workspace:Raycast(ray.Origin, ray.Direction * 3000, params)
+	local p = res and res.Position or (ray.Origin + ray.Direction * 40)
+	local g = 1
+	pcall(function() if plugin.GridSize and plugin.GridSize > 0 then g = plugin.GridSize end end)
+	p = V3(math.floor(p.X / g + 0.5) * g, p.Y, math.floor(p.Z / g + 0.5) * g)
+	local cf = CFrame.new(p + V3(0, P.h, 0)) * CFrame.fromAxisAngle(V3(0, 1, 0), P.rot)
+	for x, rel in pairs(P.rel) do x:PivotTo(cf * rel) end
+end
+local function finishPlacing(how)
+	local P = placing
+	if not P then return end
+	placing = nil
+	placeHint(nil)
+	if how == "cancel" then
+		for x, cf in pairs(P.orig) do x:PivotTo(cf) end
+	else
+		for _, x in ipairs(P.things) do
+			local back = x:GetAttribute("RB_Home")
+			if how == "home" and typeof(back) == "CFrame" then x:PivotTo(back) end
+			x:SetAttribute("RB_Home", nil)
+		end
+	end
+	if P.rec then CHS:FinishRecording(P.rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND Place in Studio") end
+	pcall(function() plugin:Deactivate() end)
+	if how == "cancel" then
+		print(NAME .. ": placing cancelled - it's back in the workshop (open ROBLEND to see it).")
+	else
+		Selection:Set(P.things)
+	end
+end
+api.exportSelected = function(list)
+	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map).") return end
+	if modal or placing then return end
+	if editing then exitEdit() end
+	local things = workshopThings(list)
+	if #things == 0 then setStatus("Select what to place in Studio (click it, or pick it in the Outliner), then Place in Studio.") return end
+	local lo, hi = boxOf(things)
+	local anchor = CFrame.new((lo + hi) / 2)
+	local P = { things = things, rel = {}, orig = {}, rot = 0, h = (hi.Y - lo.Y) / 2 }
+	for _, x in ipairs(things) do
+		P.orig[x] = x:GetPivot()
+		P.rel[x] = anchor:Inverse() * x:GetPivot()
+	end
+	pcall(function() P.rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND Place in Studio") end)
+	if uiOn then setUIOn(false) end
+	placing = P
+	pcall(function() plugin:Activate(true) end)
+	placeHint("Click to place  -  R = turn  -  Enter = back where it came from  -  Esc = cancel")
+	placeUpdate()
+	return things
+end
+api.placing = function() return placing end
+api.finishPlacing = function(how) finishPlacing(how or "place") end
+api.placeKey = function(name)
+	if not placing then return end
+	if name == "R" then placing.rot += math.pi / 2 placeUpdate() end
 end
 api.backToStudio = function() setUIOn(false) end
 api.setWorkshop = function(on)
@@ -4080,6 +4146,7 @@ setStudioView = function(b)
 	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLEND 3D view.")
 end
 setUIOn = function(on)
+	if on and placing then finishPlacing("place") end
 	-- Studio's own tool (Select / Move / Scale / Rotate): remembered on open, put back on close, so Studio's
 	-- move arrows don't appear on parts after leaving ROBLEND
 	if on and not uiOn then
@@ -4125,7 +4192,7 @@ setUIOn = function(on)
 		if workshopOn then
 			local up = 0
 			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
-			if up > 0 then setStatus(("Workshop (10,000 studs under the map). %d ROBLEND mesh%s up on the map: select in Studio, then Import (Plugins tab or File menu) to edit here."):format(up, up == 1 and " is" or "es are")) end
+			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: select it in Studio and press Edit in ROBLEND (Plugins tab) to edit it here."):format(up, up == 1 and " is" or "es are")) end
 		end
 		-- the first time ever: open the tutorial (Help > Tutorial brings it back)
 		local seen
@@ -4148,10 +4215,10 @@ end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
 -- Studio toolbar: Import (selected -> ROBLEND's workshop) and Export (back up to the map)
 pcall(function()
-	local bi = toolbar:CreateButton("RB_Import", "Send the selected parts / models down to ROBLEND's workshop (10,000 studs under the map) and edit them", "", "Import")
+	local bi = toolbar:CreateButton("RB_Import", "Edit the selected parts / models in ROBLEND", "", "Edit in ROBLEND")
 	bi.ClickableWhenViewportHidden = true
 	bi.Click:Connect(function() pcall(function() bi:SetActive(false) end) importSelected() end)
-	local be = toolbar:CreateButton("RB_Export", "Send the selected ROBLEND work back up to the map (to where it came from)", "", "Export")
+	local be = toolbar:CreateButton("RB_Export", "Pick up the selected ROBLEND work and place it on your map", "", "Place")
 	be.ClickableWhenViewportHidden = true
 	be.Click:Connect(function() pcall(function() be:SetActive(false) end) api.exportSelected() end)
 end)
@@ -4293,6 +4360,7 @@ local function finishLasso()
 end
 
 hook("Button1Down", mouse.Button1Down, function()
+	if placing then finishPlacing("place") return end
 	local mp = mousePos()
 	-- (only in the 3D view itself: a click on a text box in Properties must keep the keyboard for typing)
 	if uiOn and ownView() and ui:inCanvas(mp) then task.defer(KC.grab) end
@@ -4435,6 +4503,7 @@ pcall(function()
 	hook("WheelBackward", mouse.WheelBackward, function() wheelFromMouse = true wheel(-1) end)
 end)
 hook("Move", mouse.Move, function()
+	if placing then placeUpdate() return end
 	local mp = mousePos()
 	if uiOn and ownView() and ui:inCanvas(mp) then KC.grab() end
 	if uiOn then pcall(function() ui:step(mp) end) end
@@ -4588,6 +4657,14 @@ local function objectKey(k, shift, ctrl, alt)
 	end
 end
 hook("InputBegan", UIS.InputBegan, function(input, gp)
+	-- holding work to place in Studio (Place in Studio)
+	if placing and input.UserInputType == Enum.UserInputType.Keyboard then
+		local k = input.KeyCode
+		if k == Enum.KeyCode.Escape then finishPlacing("cancel")
+		elseif k == Enum.KeyCode.Return or k == Enum.KeyCode.KeypadEnter then finishPlacing("home")
+		elseif k == Enum.KeyCode.R then api.placeKey("R") end
+		return
+	end
 	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
 	local focusBox = UIS:GetFocusedTextBox()
 	if KC.showKeys and input.UserInputType == Enum.UserInputType.Keyboard then

@@ -332,8 +332,8 @@ function UI:buildTopBar()
 		return b
 	end
 	menu("File", function() return {
-		{ "Import Selected from Studio", "", function() api.importSelected() end },
-		{ "Export to Map", "", function() api.exportSelected() end },
+		{ "Bring Studio Selection Here", "", function() api.importSelected() end },
+		{ "Place in Studio", "", function() api.exportSelected() end },
 		{ "Back to Studio", "", function() api.backToStudio() end },
 		"-",
 		{ "Save Mesh to Roblox", "", function() api.tool("Save") end },
@@ -385,9 +385,8 @@ function UI:buildTopBar()
 	n += 1
 	make("Frame", { LayoutOrder = n, BackgroundTransparency = 1, Size = UDim2.fromOffset(18, 1) }, row)
 	for _, t in ipairs({
-		{ "Import", "Import Selected", "Send the parts / models selected in Studio down to the workshop (10,000 studs under the map) to edit", function() api.importSelected() end, rgb(0x3d5a80) },
-		{ "Export", "Export to Map", "Send the selected meshes back up to the map, to where they came from (new ones go where Studio's camera looks)", function() api.exportSelected() end, rgb(0x3d5a80) },
-		{ "Back to Studio", "Back to Studio", "Close ROBLEND; Studio's camera is where you left it", function() api.backToStudio() end, rgb(0x2e6b3f) },
+		{ "Place in Studio", "Place in Studio", "Go back to Studio holding the selected work: click to place it, R turns it, Enter puts it back where it came from", function() api.exportSelected() end, rgb(0x3d5a80) },
+		{ "Back to Studio", "Back to Studio", "Close ROBLEND (your Studio camera is where you left it)", function() api.backToStudio() end, rgb(0x2e6b3f) },
 	}) do
 		n += 1
 		local b = self:btn(row, { Name = "RB_Top" .. t[1]:gsub(" ", ""), LayoutOrder = n, Size = UDim2.fromOffset(#t[1] * 7 + 20, 20), Text = t[1], BackgroundColor3 = t[5], TextColor3 = rgb(0xeeeeee) }, function() self:safe(t[4]) end, "regular")

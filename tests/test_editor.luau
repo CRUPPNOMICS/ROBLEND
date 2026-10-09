@@ -1987,20 +1987,31 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	local listed = false
 	for _, row in ipairs(api.outliner()) do if row.key == rock then listed = true end end
 	assert(listed, "in the Outliner")
-	-- Export (top bar button) puts it back exactly
+	-- Place in Studio (top bar): ROBLEND closes, the work is in your hand; Enter puts it back where it came from
 	S.Selection:Set({ rock })
-	local eb = find("TextButton", function(d) return d.Name == "RB_TopExport" end)
-	assert(eb, "Export button in the top bar")
-	eb.Activated:Fire() beat() beat()
-	assert((rock.CFrame.Position - Vector3.new(50, 5, 0)).Magnitude < 1e-3, "back where it was: " .. tostring(rock.CFrame.Position))
+	local pb = find("TextButton", function(d) return d.Name == "RB_TopPlaceinStudio" end)
+	assert(pb, "Place in Studio button in the top bar")
+	pb.Activated:Fire() beat()
+	assert(api.placing() and not gui.Enabled, "back in Studio, holding it")
+	press("Return") beat()
+	assert(not api.placing(), "placed")
+	assert((rock.CFrame.Position - Vector3.new(50, 5, 0)).Magnitude < 1e-3, "Enter: back where it was: " .. tostring(rock.CFrame.Position))
 	assert(rock:GetAttribute("RB_Home") == nil, "home cleared")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
 	for _ = 1, 6 do MOCK.t += 0.05 beat() end
 	for _, row in ipairs(api.outliner()) do assert(row.key ~= rock, "gone from the workshop list") end
-	-- something new made in ROBLEND goes where Studio's camera looks
+	-- something new: it follows the mouse, R turns it, a click drops it on the map
 	S.Selection:Set({ c })
 	api.exportSelected() beat()
-	assert(c.CFrame.Position.Y > -5000, "new work exported up to the map: " .. tostring(c.CFrame.Position))
-	-- a Model with two parts comes down together
+	assert(api.placing(), "holding the new cube")
+	mouse.Move:Fire() beat()
+	local r0 = c.CFrame.Rotation
+	press("R") beat()
+	assert(c.CFrame.Rotation ~= r0, "R turns it")
+	mouse.Button1Down:Fire() mouse.Button1Up:Fire() beat()
+	assert(not api.placing() and c.CFrame.Position.Y > -5000, "placed on the map: " .. tostring(c.CFrame.Position))
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	-- a Model with two parts comes down together; Esc while holding sends it back down
 	local m = Instance.new("Model") m.Name = "Hut" m.Parent = workspace
 	for i = 1, 2 do local pp = Instance.new("Part") pp.Name = "Wall" .. i pp.Size = Vector3.new(2, 2, 2) pp.CFrame = CFrame.new(100 + i * 3, 1, 0) pp.Anchored = true pp.Parent = m end
 	S.Selection:Set({ m })
@@ -2008,7 +2019,13 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000 and m:FindFirstChild("Wall1"):FindFirstChild("RB_Data"), "model came down, parts editable")
 	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
 	S.Selection:Set({ m }) api.exportSelected() beat()
-	assert(math.abs(m.Wall1.CFrame.Position.Y - 1) < 1e-3, "model back up")
+	press("Escape") beat()
+	assert(not api.placing() and m.Wall1.CFrame.Position.Y < -9000, "Esc: back in the workshop")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	S.Selection:Set({ m }) api.exportSelected() beat()
+	press("Return") beat()
+	assert(math.abs(m.Wall1.CFrame.Position.Y - 1) < 1e-3, "model back up where it was")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
 	-- Tab on a part up on the map brings it down and edits it
 	local r2 = Instance.new("Part") r2.Name = "MapCrate" r2.Size = Vector3.new(2, 2, 2) r2.CFrame = CFrame.new(-40, 1, 0) r2.Anchored = true r2.Parent = workspace
 	S.Selection:Set({ r2 }) beat()
