@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.3"
+local VERSION = "0.23.4"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)

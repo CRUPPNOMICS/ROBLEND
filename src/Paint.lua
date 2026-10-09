@@ -88,6 +88,32 @@ function Paint.dab(bm, c, r, color, strength, opts)
 	return n
 end
 
+-- a brush too small to reach any point (a plain cube has only its 8 corners): colour the corners of the face
+-- under the brush instead, so low-detail shapes can still be painted
+function Paint.dabFace(bm, c, color, strength, opts)
+	opts = opts or {}
+	local BMesh = opts.BMesh
+	local best, bd
+	for f in pairs(bm.faces) do
+		if not f.hide and (not opts.facing or f.no:Dot(opts.facing) > 0) then
+			local vs = BMesh.faceVerts(f)
+			-- the face whose plane the hit point lies on, nearest its middle
+			local d = math.abs(f.no:Dot(c - vs[1].co))
+			if d < 0.05 then
+				local m = Vector3.new()
+				for _, v in ipairs(vs) do m += v.co end
+				local dist = (m / #vs - c).Magnitude
+				if not bd or dist < bd then best, bd = f, dist end
+			end
+		end
+	end
+	if not best then return 0 end
+	local target = opts.erase and Color3.new(1, 1, 1) or color
+	local n = 0
+	for _, v in ipairs(BMesh.faceVerts(best)) do v.col = mix(v.col, target, math.clamp(strength or 1, 0, 1)) n += 1 end
+	return n
+end
+
 -- Paint > Fill: the colour on every point (or just the ones in `verts`)
 function Paint.fill(bm, color, verts)
 	local n = 0
@@ -148,7 +174,14 @@ function Paint.new(C)
 		if not c then return false end
 		local st = C.get()
 		local opts = { BMesh = BMesh, brush = C.shiftDown() and "blur" or P.brush, erase = C.ctrlDown(), facing = facing }
-		Paint.dab(st.bm, c, r, P.color, P.strength, opts)
+		local n = Paint.dab(st.bm, c, r, P.color, P.strength, opts)
+		if n == 0 and (opts.brush == "draw") then
+			n = Paint.dabFace(st.bm, c, P.color, P.strength, opts)
+			if n > 0 and not P.toldFew and st.bm.nv < 200 then
+				P.toldFew = true
+				C.setStatus(("This shape only has %d points, so whole faces get painted. For finer painting: Q > Sculpt Mode > Sculpt > Subdivide, then Q > Vertex Paint."):format(st.bm.nv))
+			end
+		end
 		if P.symmetryX then
 			opts.facing = nil
 			Paint.dab(st.bm, V3(-c.X, c.Y, c.Z), r, P.color, P.strength, opts)
