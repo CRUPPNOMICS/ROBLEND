@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.1"
+local VERSION = "0.23.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3817,37 +3817,18 @@ end
 -- Place in Studio: ROBLEND closes and the work is "in your hand" in Studio's own view - it follows the mouse,
 -- click places it, R turns it, Enter puts things back exactly where they came from, Esc sends it back down
 local placing = nil
-local function placeHint(text)
-	local g = CoreGui:FindFirstChild("ROBLEND_PlaceHint")
-	if not text then if g then g.Parent = nil end return end
-	if not g then
-		g = Instance.new("ScreenGui")
-		g.Name = "ROBLEND_PlaceHint"
-		g.DisplayOrder = 60
-		local l = Instance.new("TextLabel")
-		l.Name = "Hint"
-		l.AnchorPoint = Vector2.new(0.5, 0)
-		l.Position = UDim2.new(0.5, 0, 0, 12)
-		l.Size = UDim2.fromOffset(620, 30)
-		l.BackgroundColor3 = Color3.fromRGB(30, 30, 34)
-		l.BackgroundTransparency = 0.1
-		l.TextColor3 = Color3.fromRGB(240, 240, 240)
-		l.Font = Enum.Font.GothamMedium
-		l.TextSize = 13
-		l.Parent = g
-		local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0, 6) c.Parent = l
-		local st = Instance.new("UIStroke") st.Color = Color3.fromRGB(230, 180, 40) st.Thickness = 1.5 st.Parent = l
-		g.Parent = CoreGui
-	end
-	g.Hint.Text = text
-end
 local function placeUpdate()
 	local P = placing
 	if not P then return end
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = P.things
-	local ray = getRay()
+	local ray
+	pcall(function()
+		local m = UIS:GetMouseLocation()
+		ray = workspace.CurrentCamera:ScreenPointToRay(m.X, m.Y)
+	end)
+	ray = ray or getRay()
 	local res = workspace:Raycast(ray.Origin, ray.Direction * 3000, params)
 	local p = res and res.Position or (ray.Origin + ray.Direction * 40)
 	local g = 1
@@ -3860,7 +3841,6 @@ local function finishPlacing(how)
 	local P = placing
 	if not P then return end
 	placing = nil
-	placeHint(nil)
 	if how == "cancel" then
 		for x, cf in pairs(P.orig) do x:PivotTo(cf) end
 	else
@@ -3895,7 +3875,6 @@ api.exportSelected = function(list)
 	if uiOn then setUIOn(false) end
 	placing = P
 	pcall(function() plugin:Activate(true) end)
-	placeHint("Click to place  -  R = turn  -  Enter = back where it came from  -  Esc = cancel")
 	placeUpdate()
 	return things
 end
@@ -4658,6 +4637,11 @@ local function objectKey(k, shift, ctrl, alt)
 end
 hook("InputBegan", UIS.InputBegan, function(input, gp)
 	-- holding work to place in Studio (Place in Studio)
+	if placing and input.UserInputType == Enum.UserInputType.MouseButton1 then
+		placeUpdate()
+		finishPlacing("place")
+		return
+	end
 	if placing and input.UserInputType == Enum.UserInputType.Keyboard then
 		local k = input.KeyCode
 		if k == Enum.KeyCode.Escape then finishPlacing("cancel")
@@ -4818,6 +4802,7 @@ local function catchRibbonTool()
 end
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
+	if placing then pcall(placeUpdate) end
 	if uiOn and ownView() then catchRibbonTool() end
 	if uiOn and now - lastUI > 0.1 then
 		lastUI = now

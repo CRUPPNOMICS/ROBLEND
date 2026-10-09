@@ -2008,8 +2008,12 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	local r0 = c.CFrame.Rotation
 	press("R") beat()
 	assert(c.CFrame.Rotation ~= r0, "R turns it")
-	mouse.Button1Down:Fire() mouse.Button1Up:Fire() beat()
+	-- (a click in Studio's view: it may only come through UserInputService)
+	S.UserInputService.InputBegan:Fire({ UserInputType = Enum.UserInputType.MouseButton1, KeyCode = Enum.KeyCode.Unknown }, true) beat()
 	assert(not api.placing() and c.CFrame.Position.Y > -5000, "placed on the map: " .. tostring(c.CFrame.Position))
+	local placedAt = c.CFrame
+	press("Escape") beat() beat()
+	assert(c.CFrame == placedAt, "Esc after placing leaves it where it is")
 	MOCK.toolbarButton.Click:Fire() beat() beat()
 	-- a Model with two parts comes down together; Esc while holding sends it back down
 	local m = Instance.new("Model") m.Name = "Hut" m.Parent = workspace

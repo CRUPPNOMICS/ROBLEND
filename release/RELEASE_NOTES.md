@@ -1,4 +1,4 @@
-# ROBLEND 0.23.1
+# ROBLEND 0.23.2
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.23.2:** Place in Studio: a click in Studio's view always places it (and it stays - Esc afterwards does nothing to it); no hint bar.
 
 **0.23.1:** Place in Studio: ROBLEND closes and your work is in your hand in Studio's view - it follows the mouse, click to place, R turns it, Enter puts it back exactly where it came from, Esc cancels. Buttons renamed: Studio's toolbar has Edit in ROBLEND and Place; ROBLEND's top bar has Place in Studio and Back to Studio.
 
