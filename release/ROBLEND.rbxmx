@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.4"
+local VERSION = "0.21.5"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -93,7 +93,11 @@ local FALLOFF_ORDER = { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
-local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - free, open-source 3D modelling for Roblox Studio", "rbxassetid://0", NAME)
+-- the button starts with the logo saved last time (or no icon yet: never a made-up id, Studio logs an error for that)
+local savedIconId
+pcall(function() savedIconId = plugin:GetSetting("RB_IconId") end)
+local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - free, open-source 3D modelling for Roblox Studio",
+	(type(savedIconId) == "number" or type(savedIconId) == "string") and savedIconId ~= "" and ("rbxassetid://" .. tostring(savedIconId)) or "", NAME)
 btnMain.ClickableWhenViewportHidden = true
 -- the ROBLEND logo: shown in the window straight from the plugin (an EditableImage), and uploaded once as an
 -- Image asset for the toolbar button (needs the same "CreateAssetAsync" beta as saving meshes; the id is remembered)
