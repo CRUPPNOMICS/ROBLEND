@@ -1,4 +1,4 @@
-<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0023"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0024"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - a free, open-source mesh editor for Roblox Studio
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Mesh engine converted from Blender's BMesh
@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.2"
+local VERSION = "0.23.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -37,6 +37,7 @@ local Tutorial = require(script.Tutorial)
 local KeyCapture = require(script.KeyCapture)
 local SelfTest = require(script.SelfTest)
 local QuickTest = require(script.QuickTest)
+local Setup = require(script.Setup)
 local AutoTest = require(script.AutoTest)
 local Mods = require(script.Modifiers)
 
@@ -477,11 +478,18 @@ end
 -- a ROBLEND part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
 -- from RB_Data (only once per session, and only for parts not saved to Roblox)
 local fixedLook = setmetatable({}, { __mode = "k" })
+-- can this game make meshes? (Game Settings > Security > Mesh / Image APIs) nil = not known yet. While it can't,
+-- ROBLEND doesn't keep trying (Studio prints a warning for every try) - "Before you start" explains it
+local meshApiOK = nil
+local function meshRefused(e) return e ~= nil and tostring(e):find("not accessible", 1, true) ~= nil end
 local function fixUnsaved(p)
+	if meshApiOK == false then return end
 	if fixedLook[p] or not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) then return end
 	fixedLook[p] = true
 	if isSaved(p) or Display.partEm[p] then return end
-	pcall(function() applyMesh(p, loadFrom(p), false) end)
+	local okC, okA, errA = pcall(function() return applyMesh(p, loadFrom(p), false) end)
+	local e = (not okC and okA) or errA
+	if meshRefused(e) then meshApiOK = false fixedLook[p] = nil end
 end
 -- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
 local function restoreSaved(p)
@@ -1666,7 +1674,7 @@ local function featureEdges(m, all)
 	return out
 end
 local function syncScene()
-	if not ownView() then return false end
+	if not ownView() or meshApiOK == false then return false end
 	local changed = false
 	for p, r in pairs(scene) do
 		if not p.Parent or not p:FindFirstChild("RB_Data") or (not shownHere(p) and not (editing and p == obj)) then
@@ -1881,6 +1889,13 @@ function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
 local KC = KeyCapture.new(ctx)
 local QT = QuickTest.new(ctx)
+local SETUP = Setup.new(ctx)
+SETUP.onMesh = function(ok)
+	local was = meshApiOK
+	meshApiOK = ok
+	-- switched on just now: show what's in the workshop
+	if ok and was == false then fixedLook = setmetatable({}, { __mode = "k" }) if ownView() then pcall(syncScene) dirtyCage = true end end
+end
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3649,6 +3664,7 @@ api.toScreen = function(wp) return toScreen(wp) end
 api.W = function(co) return W(co) end
 api.camera = function() return camera() end
 api.quickTestState = function() return QT end
+api.setupState = function() return SETUP end
 api.setBlockKeys = function(on) KC.setEnabled(on) end
 -- Help > Show Key Presses: every key ROBLEND receives is printed to Output (to find keys Studio keeps for itself)
 api.toggleShowKeys = function()
@@ -4173,11 +4189,22 @@ setUIOn = function(on)
 			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
 			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: select it in Studio and press Edit in ROBLEND (Plugins tab) to edit it here."):format(up, up == 1 and " is" or "es are")) end
 		end
-		-- the first time ever: open the tutorial (Help > Tutorial brings it back)
+		-- the first time ever: open the tutorial (Help > Tutorial brings it back) - after "Before you start"
+		-- has checked the two switches ROBLEND needs (it covers everything until they're on)
 		local seen
 		pcall(function() seen = plugin:GetSetting("RB_TutorialSeen") end)
-		if not seen then
-			pcall(function() plugin:SetSetting("RB_TutorialSeen", true) end)
+		local firstRun = not seen
+		if firstRun then pcall(function() plugin:SetSetting("RB_TutorialSeen", true) end) end
+		SETUP.onDone = function()
+			if firstRun and uiOn then TUT.openTutorial() end
+			firstRun = false
+			setStatus("All set. Shift A = add, click a mesh + Tab = edit, Q = modes, F3 = search every command.")
+		end
+		local ready = SETUP.ready()
+		meshApiOK = SETUP.mesh
+		if not ready then
+			SETUP.open()
+		elseif firstRun then
 			task.defer(function() if uiOn then TUT.openTutorial() end end)
 		end
 	else
@@ -4636,6 +4663,8 @@ local function objectKey(k, shift, ctrl, alt)
 	end
 end
 hook("InputBegan", UIS.InputBegan, function(input, gp)
+	-- "Before you start" is up: ROBLEND waits until the two switches are on
+	if SETUP.isOpen and uiOn and not placing then return end
 	-- holding work to place in Studio (Place in Studio)
 	if placing and input.UserInputType == Enum.UserInputType.MouseButton1 then
 		placeUpdate()
@@ -4815,7 +4844,9 @@ RunService.Heartbeat:Connect(function()
 		if now - lastSync > 0.2 then
 			lastSync = now
 			local ok, changed = pcall(syncScene)
-			if ok and changed then dirtyCage = true elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
+			if ok and changed then dirtyCage = true
+			elseif not ok and meshRefused(changed) then meshApiOK = false if not SETUP.isOpen then SETUP.open() end
+			elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
 		end
 	end
 	-- timed save while editing in our view, so a crash loses little
@@ -4846,6 +4877,7 @@ RunService.Heartbeat:Connect(function()
 	end
 	pcall(UVE.tick)
 	pcall(TUT.tick, now)
+	pcall(SETUP.tick, now)
 	if MOD.modSave then
 		for p, t0 in pairs(MOD.modSave) do
 			if now - t0 > 4 then
@@ -13640,7 +13672,148 @@ function SelfTest.run(C, api)
 end
 
 return SelfTest
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
+	ROBLEND - "Before you start": ROBLEND needs two things switched on, and this screen checks them itself.
+	  1. Mesh / Image APIs for this game (Game Settings > Security) - without it Roblox won't let any plugin make meshes.
+	  2. Studio's "CreateAssetAsync Luau API" beta (File > Beta Features) - saving meshes to Roblox needs it.
+	Until both are on, the screen covers ROBLEND; when they are, Start lets you in.
+	SPDX-License-Identifier: GPL-2.0-or-later
+	Copyright (C) 2026 Cruppnomics (Giga_gad27).
+
+	Setup.new(C) -> S ; S.ready() / S.open() / S.close() / S.check() ; S.onDone = fn
+]]
+local Setup = {}
+
+function Setup.new(C)
+	local S = { isOpen = false, mesh = false, beta = false, onDone = nil }
+	local AssetService = C.AssetService
+	local overlay, card, rows, startBtn, note
+
+	-- the beta: the method only exists when it's switched on (Studio has to be restarted after ticking it)
+	function S.checkBeta()
+		local ok, has = pcall(function() return AssetService.CreateAssetAsync ~= nil end)
+		S.beta = ok and has == true
+		return S.beta
+	end
+	-- Mesh / Image APIs: try to make (and free) a tiny editable mesh
+	function S.checkMesh()
+		local ok = pcall(function()
+			local em = AssetService:CreateEditableMesh()
+			if not em then error("no mesh") end
+			pcall(function() em:Destroy() end)
+		end)
+		S.mesh = ok
+		if S.onMesh then pcall(S.onMesh, ok) end
+		return ok
+	end
+	function S.check()
+		S.checkBeta()
+		S.checkMesh()
+		S.refresh()
+		return S.mesh and S.beta
+	end
+	function S.ready() return S.check() end
+
+	local function mk(class, props, parent)
+		local o = Instance.new(class)
+		for k, v in pairs(props) do o[k] = v end
+		o.Parent = parent
+		return o
+	end
+	local function text(parent, props)
+		local d = { BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 13, TextColor3 = Color3.fromRGB(215, 215, 220), TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top, ZIndex = 92, Text = "" }
+		for k, v in pairs(props) do d[k] = v end
+		return mk("TextLabel", d, parent)
+	end
+	local function button(parent, label, pos, size, col, fn)
+		local b = mk("TextButton", { Position = pos, Size = size, BackgroundColor3 = col, BorderSizePixel = 0, AutoButtonColor = true, Font = Enum.Font.GothamMedium, TextSize = 13,
+			TextColor3 = Color3.fromRGB(240, 240, 240), Text = label, ZIndex = 92 }, parent)
+		mk("UICorner", { CornerRadius = UDim.new(0, 5) }, b)
+		b.Activated:Connect(fn)
+		return b
+	end
+	local STEPS = {
+		{ key = "mesh", title = "Mesh / Image APIs  (this game)",
+			how = "Home tab > Game Settings > Security > turn on \"Allow Mesh / Image APIs\" > Save. Every game needs this once." },
+		{ key = "beta", title = "CreateAssetAsync beta  (Studio)",
+			how = "File > Beta Features > tick \"CreateAssetAsync Luau API\" > Save, then close and reopen Studio." },
+	}
+	local function build()
+		local st = C.get()
+		local gui = st.ui and st.ui.gui
+		if not gui then return false end
+		overlay = mk("Frame", { Name = "RB_Setup", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.fromRGB(0, 0, 0), BackgroundTransparency = 0.35,
+			BorderSizePixel = 0, ZIndex = 90, Active = true }, gui)
+		-- (a big invisible button underneath, so clicks never reach ROBLEND behind the screen)
+		mk("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 90, AutoButtonColor = false }, overlay)
+		card = mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(520, 330), BackgroundColor3 = Color3.fromRGB(36, 36, 42),
+			BorderSizePixel = 0, ZIndex = 91, Active = true }, overlay)
+		mk("UICorner", { CornerRadius = UDim.new(0, 10) }, card)
+		mk("UIStroke", { Color = Color3.fromRGB(230, 180, 40), Thickness = 2 }, card)
+		text(card, { Position = UDim2.fromOffset(22, 18), Size = UDim2.new(1, -44, 0, 26), Font = Enum.Font.GothamBold, TextSize = 20, TextColor3 = Color3.fromRGB(245, 245, 245),
+			Text = "Before you start" })
+		text(card, { Position = UDim2.fromOffset(22, 50), Size = UDim2.new(1, -44, 0, 36), TextColor3 = Color3.fromRGB(180, 180, 190),
+			Text = "ROBLEND needs these two switched on. Turn them on, then press Check again - each one goes green when it's done." })
+		rows = {}
+		for i, s in ipairs(STEPS) do
+			local y = 96 + (i - 1) * 84
+			local row = mk("Frame", { Position = UDim2.fromOffset(18, y), Size = UDim2.new(1, -36, 0, 74), BackgroundColor3 = Color3.fromRGB(28, 28, 33), BorderSizePixel = 0, ZIndex = 91 }, card)
+			mk("UICorner", { CornerRadius = UDim.new(0, 6) }, row)
+			local badge = mk("TextLabel", { Name = "Badge", Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(26, 26), BackgroundColor3 = Color3.fromRGB(165, 55, 55), BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = Color3.new(1, 1, 1), Text = "X", ZIndex = 92 }, row)
+			mk("UICorner", { CornerRadius = UDim.new(1, 0) }, badge)
+			text(row, { Position = UDim2.fromOffset(50, 10), Size = UDim2.new(1, -60, 0, 18), Font = Enum.Font.GothamBold, TextSize = 14, TextColor3 = Color3.fromRGB(240, 240, 240), Text = s.title })
+			text(row, { Position = UDim2.fromOffset(50, 30), Size = UDim2.new(1, -60, 0, 40), TextSize = 12, Text = s.how })
+			rows[s.key] = badge
+		end
+		note = text(card, { Position = UDim2.fromOffset(22, 268), Size = UDim2.new(1, -300, 0, 40), TextSize = 11, TextColor3 = Color3.fromRGB(150, 150, 160), Text = "" })
+		button(card, "Check again", UDim2.new(1, -264, 1, -50), UDim2.fromOffset(116, 32), Color3.fromRGB(70, 70, 80), function() S.check() end)
+		startBtn = button(card, "Start", UDim2.new(1, -138, 1, -50), UDim2.fromOffset(116, 32), Color3.fromRGB(46, 130, 70), function()
+			if S.check() then S.close(true) end
+		end)
+		if st.ui.blockers then table.insert(st.ui.blockers, overlay) end
+		return true
+	end
+	function S.refresh()
+		if not card then return end
+		for key, badge in pairs(rows) do
+			local on = S[key] == true
+			badge.Text = on and "OK" or "X"
+			badge.TextSize = on and 11 or 15
+			badge.BackgroundColor3 = on and Color3.fromRGB(46, 150, 80) or Color3.fromRGB(165, 55, 55)
+		end
+		local both = S.mesh and S.beta
+		startBtn.BackgroundColor3 = both and Color3.fromRGB(46, 150, 80) or Color3.fromRGB(60, 60, 66)
+		startBtn.TextColor3 = both and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(130, 130, 135)
+		note.Text = both and "All set - press Start." or (not S.beta and "The beta only shows up after Studio is restarted." or "")
+	end
+	function S.open()
+		if not card then if not build() then return end end
+		overlay.Visible = true
+		S.isOpen = true
+		S.refresh()
+	end
+	function S.close(done)
+		S.isOpen = false
+		if overlay then overlay.Visible = false end
+		if done and S.onDone then pcall(S.onDone) end
+	end
+	-- every couple of seconds while it's open: the beta check is free (the mesh one only runs on Check again,
+	-- because Studio prints a warning each time it's refused)
+	function S.tick(now)
+		if not S.isOpen then return end
+		if not S.lastTick or now - S.lastTick > 2 then
+			S.lastTick = now
+			local was = S.beta
+			if S.checkBeta() ~= was then S.refresh() end
+		end
+	end
+	return S
+end
+
+return Setup
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Tutorial: step cards that wait for you to actually do each thing.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -13783,7 +13956,7 @@ function Tutorial.new(C)
 end
 
 return Tutorial
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
 	Outliner, Properties editor and status bar.
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -16013,7 +16186,7 @@ end
 function UI:destroy() self.gui.Parent = nil end
 
 return UI
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the UV Editor: a 2D window showing the UVs of the faces being edited over the texture,
 	where UV points are selected and moved (Blender's UV Editor, cut down).
 	Converted to Luau from Blender's UV editor behaviour:
@@ -16516,7 +16689,7 @@ function UVEditor.new(C)
 end
 
 return UVEditor
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - UV unwrapping: Unwrap (angle-preserving, cut at seams), Smart UV Project and Pack Islands.
 	Converted to Luau (and cut down) from Blender's UV tools:
 	  source/blender/editors/uvedit/uvedit_unwrap_ops.cc (unwrap / smart project operators)
@@ -16915,7 +17088,7 @@ function UV.facesWithUV(BMesh, bm)
 end
 
 return UV
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0023"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
 	axis lines and a headlight, plus the edit cage (lines + dots drawn as depth-tested parts).
 	SPDX-License-Identifier: GPL-2.0-or-later

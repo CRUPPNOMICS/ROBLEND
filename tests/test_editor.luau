@@ -1919,6 +1919,32 @@ check("a picture left in the view with no part behind it is cleared (0.22.9)", f
 	for _ = 1, 12 do MOCK.t += 0.05 beat() end
 	assert(view.objects[ghost] == nil, "ghost cleared")
 end)
+check("Before you start: ROBLEND waits until Mesh APIs and the CreateAssetAsync beta are on (0.23.3)", function()
+	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
+	if gui and gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	MOCK.noMeshApi, MOCK.noAssetBeta = true, true
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	local SU = MOCK.api.setupState()
+	assert(SU.isOpen, "the setup screen covers ROBLEND")
+	local ov = gui:FindFirstChild("RB_Setup")
+	assert(ov and ov.Visible, "shown")
+	-- keys don't do anything behind it
+	local n0 = #MOCK.api.outliner()
+	press("A", { "LeftShift" }) beat()
+	assert(not MOCK.api.state().editing and #MOCK.api.outliner() == n0, "blocked")
+	-- Start does nothing yet; turn on one, then the other
+	local startB = find("TextButton", function(d) return d.Text == "Start" and d:IsDescendantOf(ov) end)
+	startB.Activated:Fire() beat()
+	assert(SU.isOpen, "still waiting")
+	MOCK.noMeshApi = false
+	find("TextButton", function(d) return d.Text == "Check again" and d:IsDescendantOf(ov) end).Activated:Fire() beat()
+	assert(SU.mesh and not SU.beta and SU.isOpen, "mesh on, beta still off")
+	MOCK.noAssetBeta = false
+	for _ = 1, 50 do MOCK.t += 0.1 beat() end
+	assert(SU.beta, "the beta is noticed by itself")
+	startB.Activated:Fire() beat()
+	assert(not SU.isOpen and not ov.Visible, "Start lets you in")
+end)
 check("Help > Quick Test sets up and shows every item, then tidies up", function()
 	if inEdit() then press("Tab") beat() end
 	local mine = workspace:FindFirstChild("Crate Lid", true)

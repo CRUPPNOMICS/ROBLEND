@@ -141,6 +141,8 @@ local function newInst(class)
 	return setmetatable(o, Inst)
 end
 Inst.__index = function(o, k)
+	-- (Studio's CreateAssetAsync only exists with its beta switched on)
+	if k == "CreateAssetAsync" and MOCK.noAssetBeta then error("CreateAssetAsync is not a valid member of AssetService", 2) end
 	local m = rawget(Inst, k)
 	if m then return m end
 	if SIGNALS[k] then o._sig[k] = o._sig[k] or Signal.new() return o._sig[k] end
@@ -338,7 +340,9 @@ local Asset = svc("AssetService")
 local EM = {}
 EM.__index = EM
 MOCK.emAlive = 0
-function Inst.CreateEditableMesh() MOCK.emAlive += 1 return setmetatable({ v = {}, t = {}, c = 0, __kind = "EditableMesh" }, EM) end
+function Inst.CreateEditableMesh()
+	if MOCK.noMeshApi then error("EditableMesh is not accessible. Go to the Security Tab in Experience Settings to enable this API.") end
+	MOCK.emAlive += 1 return setmetatable({ v = {}, t = {}, c = 0, __kind = "EditableMesh" }, EM) end
 function EM:AddVertex(p)
 	assert(p.X == p.X and p.Y == p.Y and p.Z == p.Z, "NaN vertex sent to EditableMesh")
 	self.v[#self.v + 1] = p

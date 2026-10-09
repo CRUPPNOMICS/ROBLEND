@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.23.2"
+local VERSION = "0.23.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -37,6 +37,7 @@ local Tutorial = require(script.Tutorial)
 local KeyCapture = require(script.KeyCapture)
 local SelfTest = require(script.SelfTest)
 local QuickTest = require(script.QuickTest)
+local Setup = require(script.Setup)
 local AutoTest = require(script.AutoTest)
 local Mods = require(script.Modifiers)
 
@@ -477,11 +478,18 @@ end
 -- a ROBLEND part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
 -- from RB_Data (only once per session, and only for parts not saved to Roblox)
 local fixedLook = setmetatable({}, { __mode = "k" })
+-- can this game make meshes? (Game Settings > Security > Mesh / Image APIs) nil = not known yet. While it can't,
+-- ROBLEND doesn't keep trying (Studio prints a warning for every try) - "Before you start" explains it
+local meshApiOK = nil
+local function meshRefused(e) return e ~= nil and tostring(e):find("not accessible", 1, true) ~= nil end
 local function fixUnsaved(p)
+	if meshApiOK == false then return end
 	if fixedLook[p] or not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) then return end
 	fixedLook[p] = true
 	if isSaved(p) or Display.partEm[p] then return end
-	pcall(function() applyMesh(p, loadFrom(p), false) end)
+	local okC, okA, errA = pcall(function() return applyMesh(p, loadFrom(p), false) end)
+	local e = (not okC and okA) or errA
+	if meshRefused(e) then meshApiOK = false fixedLook[p] = nil end
 end
 -- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
 local function restoreSaved(p)
@@ -1666,7 +1674,7 @@ local function featureEdges(m, all)
 	return out
 end
 local function syncScene()
-	if not ownView() then return false end
+	if not ownView() or meshApiOK == false then return false end
 	local changed = false
 	for p, r in pairs(scene) do
 		if not p.Parent or not p:FindFirstChild("RB_Data") or (not shownHere(p) and not (editing and p == obj)) then
@@ -1881,6 +1889,13 @@ function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
 local KC = KeyCapture.new(ctx)
 local QT = QuickTest.new(ctx)
+local SETUP = Setup.new(ctx)
+SETUP.onMesh = function(ok)
+	local was = meshApiOK
+	meshApiOK = ok
+	-- switched on just now: show what's in the workshop
+	if ok and was == false then fixedLook = setmetatable({}, { __mode = "k" }) if ownView() then pcall(syncScene) dirtyCage = true end end
+end
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3649,6 +3664,7 @@ api.toScreen = function(wp) return toScreen(wp) end
 api.W = function(co) return W(co) end
 api.camera = function() return camera() end
 api.quickTestState = function() return QT end
+api.setupState = function() return SETUP end
 api.setBlockKeys = function(on) KC.setEnabled(on) end
 -- Help > Show Key Presses: every key ROBLEND receives is printed to Output (to find keys Studio keeps for itself)
 api.toggleShowKeys = function()
@@ -4173,11 +4189,22 @@ setUIOn = function(on)
 			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
 			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: select it in Studio and press Edit in ROBLEND (Plugins tab) to edit it here."):format(up, up == 1 and " is" or "es are")) end
 		end
-		-- the first time ever: open the tutorial (Help > Tutorial brings it back)
+		-- the first time ever: open the tutorial (Help > Tutorial brings it back) - after "Before you start"
+		-- has checked the two switches ROBLEND needs (it covers everything until they're on)
 		local seen
 		pcall(function() seen = plugin:GetSetting("RB_TutorialSeen") end)
-		if not seen then
-			pcall(function() plugin:SetSetting("RB_TutorialSeen", true) end)
+		local firstRun = not seen
+		if firstRun then pcall(function() plugin:SetSetting("RB_TutorialSeen", true) end) end
+		SETUP.onDone = function()
+			if firstRun and uiOn then TUT.openTutorial() end
+			firstRun = false
+			setStatus("All set. Shift A = add, click a mesh + Tab = edit, Q = modes, F3 = search every command.")
+		end
+		local ready = SETUP.ready()
+		meshApiOK = SETUP.mesh
+		if not ready then
+			SETUP.open()
+		elseif firstRun then
 			task.defer(function() if uiOn then TUT.openTutorial() end end)
 		end
 	else
@@ -4636,6 +4663,8 @@ local function objectKey(k, shift, ctrl, alt)
 	end
 end
 hook("InputBegan", UIS.InputBegan, function(input, gp)
+	-- "Before you start" is up: ROBLEND waits until the two switches are on
+	if SETUP.isOpen and uiOn and not placing then return end
 	-- holding work to place in Studio (Place in Studio)
 	if placing and input.UserInputType == Enum.UserInputType.MouseButton1 then
 		placeUpdate()
@@ -4815,7 +4844,9 @@ RunService.Heartbeat:Connect(function()
 		if now - lastSync > 0.2 then
 			lastSync = now
 			local ok, changed = pcall(syncScene)
-			if ok and changed then dirtyCage = true elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
+			if ok and changed then dirtyCage = true
+			elseif not ok and meshRefused(changed) then meshApiOK = false if not SETUP.isOpen then SETUP.open() end
+			elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
 		end
 	end
 	-- timed save while editing in our view, so a crash loses little
@@ -4846,6 +4877,7 @@ RunService.Heartbeat:Connect(function()
 	end
 	pcall(UVE.tick)
 	pcall(TUT.tick, now)
+	pcall(SETUP.tick, now)
 	if MOD.modSave then
 		for p, t0 in pairs(MOD.modSave) do
 			if now - t0 > 4 then

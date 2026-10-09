@@ -1,4 +1,4 @@
-# ROBLEND 0.23.2
+# ROBLEND 0.23.3
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.23.3:** "Before you start": ROBLEND checks the two things it needs - Mesh / Image APIs for the game and Studio's CreateAssetAsync beta - shows a tick or a cross for each with how to turn it on, and lets you in when both are on. While a game can't make meshes, ROBLEND stops retrying (no more Output warnings).
 
 **0.23.2:** Place in Studio: a click in Studio's view always places it (and it stays - Esc afterwards does nothing to it); no hint bar.
 
