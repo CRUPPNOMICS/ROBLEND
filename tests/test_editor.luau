@@ -2081,6 +2081,11 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000, "picking one wall brought the whole model down")
 	assert(m.Wall1.Parent == m and m.Parent == workspace, "still a model")
 	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
+	-- selected straight away, with an outline box round the whole model
+	assert(table.find(S.Selection:Get(), m), "the model is selected")
+	local function shownLines() local n = 0 for _, d in ipairs(view.frame:GetDescendants()) do if d:IsA("BasePart") and (d.Transparency or 0) < 1 and d.Color == View.THEME.active then n += 1 end end return n end
+	for _ = 1, 3 do MOCK.t += 0.05 beat() end
+	assert(shownLines() >= 12, "outline drawn: " .. shownLines())
 	-- picking just one wall still carries the whole model (in a model, out a model)
 	S.Selection:Set({ m.Wall1 }) api.exportSelected() beat()
 	local held = api.placing()

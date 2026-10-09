@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.3"
+local VERSION = "0.24.4"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1842,6 +1842,38 @@ drawObjects = function()
 			end
 		end
 	end
+	-- things brought in that aren't ROBLEND meshes (parts, unions, models, groups): an outline box when selected
+	if editing then return end
+	local function box(cf, size, col)
+		local h = size / 2
+		local c = {}
+		for i, sgn in ipairs({ V3(-1, -1, -1), V3(1, -1, -1), V3(1, 1, -1), V3(-1, 1, -1), V3(-1, -1, 1), V3(1, -1, 1), V3(1, 1, 1), V3(-1, 1, 1) }) do c[i] = cf * (h * sgn) end
+		for _, e in ipairs({ { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 1 }, { 5, 6 }, { 6, 7 }, { 7, 8 }, { 8, 5 }, { 1, 5 }, { 2, 6 }, { 3, 7 }, { 4, 8 } }) do
+			line(c[e[1]], c[e[2]], col, 1.3)
+		end
+	end
+	for x in pairs(sel) do
+		if x.Parent and (x:IsA("Model") or x:IsA("Folder")) then
+			local probe = x:FindFirstChildWhichIsA("BasePart", true)
+			if probe and shownHere(probe) then
+				local cf, size
+				if x:IsA("Model") then cf, size = x:GetBoundingBox()
+				else
+					local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
+					for _, d in ipairs(x:GetDescendants()) do
+						if d:IsA("BasePart") then
+							local hh = d.Size / 2
+							for _, sgn in ipairs({ V3(1, 1, 1), V3(-1, -1, -1), V3(1, -1, 1), V3(-1, 1, -1), V3(1, 1, -1), V3(-1, -1, 1), V3(1, -1, -1), V3(-1, 1, 1) }) do local w = d.CFrame * (hh * sgn) lo, hi = lo:Min(w), hi:Max(w) end
+						end
+					end
+					cf, size = CFrame.new((lo + hi) / 2), hi - lo
+				end
+				box(cf, size + V3(0.1, 0.1, 0.1), View.THEME.active)
+			end
+		elseif extras[x] and x.Parent then
+			box(x.CFrame, x.Size + V3(0.05, 0.05, 0.05), x == activeObj and View.THEME.active or View.THEME.select)
+		end
+	end
 end
 local function boundsOf(points)
 	local lo, hi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
@@ -1861,6 +1893,7 @@ local function frameAll()
 	if not view then return end
 	local pts = {}
 	for p, r in pairs(scene) do if p.Parent and not r.hidden then partCorners(p, pts) end end
+	for p in pairs(extras) do if p.Parent then partCorners(p, pts) end end
 	if #pts == 0 then view.focus, view.dist = CURSOR, 30 view:update() else view:frameBox(boundsOf(pts)) end
 	view.viewName = nil
 	dirtyCage = true
@@ -3983,7 +4016,7 @@ local function updateBringIn()
 	bringBtn.Text = ("Bring in  \"%s\"%s"):format(up[1].Name, #up > 1 and ("  + " .. (#up - 1) .. " more") or "")
 	bringBtn.Visible = true
 end
-pcall(function() Selection.SelectionChanged:Connect(function() pcall(updateBringIn) end) end)
+pcall(function() Selection.SelectionChanged:Connect(function() dirtyCage = true pcall(updateBringIn) end) end)
 api.bringInButton = function() return bringBtn end
 -- the things to send up: selected Models / parts that are down in the workshop. A part inside a model means the
 -- whole model (and a group that was brought in goes back as the whole group): in a model, out a model
