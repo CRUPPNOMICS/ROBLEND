@@ -573,5 +573,63 @@ check2("fill holes, smooth by angle, mirror bisect", function()
 	for v in pairs(out.verts) do lo = math.min(lo, v.co.X) hi = math.max(hi, v.co.X) end
 	assert(math.abs(lo + 1.5) < 1e-4 and math.abs(hi - 1.5) < 1e-4, "cut at 0 then mirrored: " .. lo .. " " .. hi)
 end)
+-- ===== Sculpt brushes (Sculpt.lua) =====
+local function sgrid()
+	local g = BMesh.new() Ops.grid(g, 16, 16, 8)
+	g:normalsUpdate()
+	local up = 0 for f in pairs(g.faces) do up += f.no.Y end
+	return g, (up > 0) and 1 or -1
+end
+local function heightAt(g, x, z)
+	local best, bd = nil, math.huge
+	for v in pairs(g.verts) do local d = (v.co.X - x) ^ 2 + (v.co.Z - z) ^ 2 if d < bd then best, bd = v, d end end
+	return best.co.Y
+end
+check2("sculpt: draw raises, Ctrl lowers, only inside the brush", function()
+	local g, s = sgrid()
+	local n = Sculpt.dab(g, "draw", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh })
+	assert(n > 0, "moved verts")
+	assert(heightAt(g, 0, 0) * s > 0.1, "centre went out along the normal")
+	eq(heightAt(g, 3.5, 3.5), 0, "outside the brush unchanged")
+	local g2 = sgrid()
+	Sculpt.dab(g2, "draw", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh, invert = true })
+	assert(heightAt(g2, 0, 0) * s < -0.1, "inverted went in")
+	g2:validate()
+end)
+check2("sculpt: smooth + flatten calm a bump, inflate grows a sphere, pinch pulls in, crease digs", function()
+	local g, s = sgrid()
+	for _ = 1, 3 do Sculpt.dab(g, "draw", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh }) end
+	local h0 = math.abs(heightAt(g, 0, 0))
+	Sculpt.dab(g, "smooth", Vector3.new(0, 0, 0), 3, 1, { BMesh = BMesh })
+	assert(math.abs(heightAt(g, 0, 0)) < h0, "smooth lowered the peak")
+	local h1 = math.abs(heightAt(g, 0, 0))
+	Sculpt.dab(g, "flatten", Vector3.new(0, 0, 0), 3, 1, { BMesh = BMesh })
+	assert(math.abs(heightAt(g, 0, 0)) < h1, "flatten lowered it more")
+	local sp = BMesh.new() Ops.uvSphere(sp, 16, 8, 2) sp:normalsUpdate()
+	Sculpt.dab(sp, "inflate", Vector3.new(0, 2, 0), 1.5, 1, { BMesh = BMesh })
+	local top = 0 for v in pairs(sp.verts) do top = math.max(top, v.co.Y) end
+	assert(top > 2.01, "inflate pushed the top out: " .. top)
+	local g3 = sgrid()
+	local near = {}
+	for v in pairs(g3.verts) do if Vector3.new(v.co.X, 0, v.co.Z).Magnitude < 1.5 then near[v] = true end end
+	local function spread() local s2 = 0 for v in pairs(near) do s2 += Vector3.new(v.co.X, 0, v.co.Z).Magnitude end return s2 end
+	local before = spread()
+	Sculpt.dab(g3, "pinch", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh })
+	assert(spread() < before, "pinch pulled points to the middle")
+	local g4, s4 = sgrid()
+	Sculpt.dab(g4, "crease", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh })
+	assert(heightAt(g4, 0, 0) * s4 < 0, "crease dug in")
+	local g5, s5 = sgrid()
+	Sculpt.dab(g5, "clay", Vector3.new(0, 0, 0), 2, 1, { BMesh = BMesh })
+	assert(heightAt(g5, 0, 0) * s5 > 0, "clay built up")
+end)
+check2("sculpt: grab drags the captured points", function()
+	local g = sgrid()
+	local hits = Sculpt.capture(BMesh, g, Vector3.new(0, 0, 0), 2)
+	assert(#hits > 0, "captured")
+	Sculpt.dab(g, "grab", nil, 2, 1, { BMesh = BMesh, grab = hits, grabDelta = Vector3.new(0, 3, 0) })
+	assert(math.abs(heightAt(g, 0, 0) - 3) < 1e-6, "centre followed fully")
+	eq(heightAt(g, 3.5, 3.5), 0, "far points stayed")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

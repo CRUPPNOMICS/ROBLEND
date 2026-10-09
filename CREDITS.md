@@ -29,6 +29,7 @@ The Blender source files used are:
 | `scripts/startup/bl_ui/properties_data_modifier.py` | The Modifiers tab and the Add Modifier menu |
 | `source/blender/editors/mesh/editmesh_select_similar.cc`, `source/blender/editors/object/object_transform.cc` | Select Similar; Set Origin and Apply Rotation |
 | `source/blender/editors/uvedit/uvedit_unwrap_ops.cc`, `source/blender/blenlib/intern/uvproject.cc` | Cube, cylinder and sphere UV projection |
+| `source/blender/editors/sculpt_paint/brushes/*.cc`, `sculpt.cc` | Sculpt brushes (draw, clay strips, inflate, grab, smooth, flatten, pinch, crease), area normal, falloff, symmetry |
 | `scripts/presets/keyconfig/keymap_data/blender_default.py` | The keyboard shortcuts (Edit Mode, Object Mode and 3D view keymaps) |
 | `release/datafiles/userdef/userdef_default_theme.c` | Every colour of the window and the 3D view |
 | `scripts/startup/bl_ui/space_view3d.py` | The 3D view header menus, the Add menu and the right-click menus |

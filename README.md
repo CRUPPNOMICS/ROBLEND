@@ -204,6 +204,25 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - Shift Ctrl R: Offset Edge Loops (two loops either side of the selected one).
 - Mirror modifier: Bisect cuts off whatever crosses to the other side before mirroring.
 
+**Sculpt Mode** (mode dropdown or Ctrl Tab > Sculpt Mode)
+
+Push the surface around like clay, as in Blender's Sculpt Mode.
+
+| Brush | Key | What it does (Ctrl = the opposite) |
+|---|---|---|
+| Draw | X | Pushes the surface out |
+| Clay Strips | C | Builds up flat layers |
+| Inflate | I | Blows the surface up along its normals |
+| Grab | G | Drags a chunk of surface with the mouse |
+| Smooth | S (or hold Shift) | Relaxes bumps |
+| Flatten | T | Presses the surface flat |
+| Pinch | P | Pulls the surface into the middle of the brush |
+| Crease | Shift C | Cuts a sharp groove |
+
+- F changes the brush size and Shift F the strength (move the mouse, click to set); [ and ] also resize.
+- Symmetry X is on by default: both sides of the mesh change together.
+- Sculpt > Subdivide adds detail (each press = 4x the faces, up to Roblox's 20,000 triangles). Each stroke is one undo step.
+
 **Textures and UVs**
 - U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
 - Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
@@ -234,6 +253,9 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
+| `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
+| `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View. |
+| `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |

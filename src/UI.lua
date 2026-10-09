@@ -396,10 +396,7 @@ function UI:buildView()
 	corner(ed, 4) icon(ed, "editor")
 	self:tip(ed, "Editor Type", "3D Viewport")
 	local mode = self:btn(left, { LayoutOrder = nx(), Size = UDim2.fromOffset(118, 20), BackgroundColor3 = T.textField, Text = "      Object Mode   v", TextXAlignment = Enum.TextXAlignment.Left }, function(b)
-		self:openMenu({
-			{ "Object Mode", "Tab", function() if api.state().editing then api.toggleEdit() end end, icon = "object" },
-			{ "Edit Mode", "Tab", function() if not api.state().editing then api.toggleEdit() end end, icon = "mesh" },
-		}, b)
+		self:openMenu(self:modeItems(), b)
 	end, "regular")
 	corner(mode, 4)
 	local mi = make("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(22, 20) }, mode)
@@ -411,6 +408,28 @@ function UI:buildView()
 	hlist(grp, 0)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 4) }, grp)
 	self.selGroup, self.selBtns = grp, {}
+	-- Sculpt Mode header: radius, strength, X symmetry (Blender's sculpt tool header)
+	local sh = make("Frame", { Name = "SculptHeader", LayoutOrder = nx(), BackgroundTransparency = 1, Size = UDim2.fromOffset(330, 20), Visible = false }, left)
+	hlist(sh, 4)
+	make("UIPadding", { PaddingLeft = UDim.new(0, 6) }, sh)
+	self.sculptHdr = sh
+	self.sculptFields = {}
+	for i, f in ipairs({ { "radius", "Radius", "px", 4, 500 }, { "strength", "Strength", "", 0.01, 1 } }) do
+		label(sh, { LayoutOrder = i * 2 - 1, Size = UDim2.fromOffset(#f[2] * 6 + 4, 20), Text = f[2], TextColor3 = T.textDim, TextSize = 11 })
+		local box = make("TextBox", { Name = "RB_Sculpt_" .. f[1], LayoutOrder = i * 2, Size = UDim2.fromOffset(48, 18), BackgroundColor3 = T.num, BorderSizePixel = 0, Font = FONT, TextSize = 11, TextColor3 = T.text, Text = "", ClearTextOnFocus = false }, sh)
+		corner(box, 4)
+		box.FocusLost:Connect(function()
+			local v = tonumber((box.Text:gsub("[^%d%.]", "")))
+			if v then self:safe(function() api.sculptSet(f[1], math.clamp(v, f[4], f[5])) end) end
+			self:refresh(true)
+		end)
+		self.sculptFields[f[1]] = box
+	end
+	self.symBtn = self:btn(sh, { LayoutOrder = 10, Size = UDim2.fromOffset(46, 20), BackgroundColor3 = T.regular, Text = "X sym", TextSize = 11 }, function()
+		api.sculptSet("symmetryX", not api.state().symmetryX)
+	end, "toggle")
+	corner(self.symBtn, 4)
+	self:tip(self.symBtn, "Symmetry X", "Sculpt both sides of the mesh at once (its own X)")
 	for i, m in ipairs({ "vert", "edge", "face" }) do
 		local b = self:btn(grp, { LayoutOrder = i, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.setMode(m) end, "toggle")
 		corner(b, 3)
@@ -426,7 +445,11 @@ function UI:buildView()
 	pd("View", function() return self:viewMenu() end)
 	pd("Select", function() return api.state().editing and self:selectMenuEdit() or self:selectMenu() end)
 	pd("Add", function() return self:addMeshItems() end)
-	self.objMenuBtn = pd("Object", function() return api.state().editing and self:meshMenu() or self:objectMenu() end)
+	self.objMenuBtn = pd("Object", function()
+		local st = api.state()
+		if st.paintMode == "sculpt" then return self:sculptMenu() end
+		return st.editing and self:meshMenu() or self:objectMenu()
+	end)
 	self.vertMenuBtn = pd("Vertex", function() return self:vertexMenu() end)
 	self.edgeMenuBtn = pd("Edge", function() return self:edgeMenu() end)
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
@@ -510,6 +533,19 @@ function UI:buildView()
 	vlist(tb, 2).HorizontalAlignment = Enum.HorizontalAlignment.Center
 	make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, tb)
 	self.toolbarFrame = tb
+	-- Sculpt Mode brushes (shown instead of the edit tools)
+	local sb = make("Frame", { Name = "SculptTools", ZIndex = 3, Visible = false, Position = UDim2.fromOffset(6, 8), Size = UDim2.fromOffset(40, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = T.header, BackgroundTransparency = 0.15, BorderSizePixel = 0 }, ov)
+	corner(sb, 6)
+	vlist(sb, 2).HorizontalAlignment = Enum.HorizontalAlignment.Center
+	make("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4) }, sb)
+	self.sculptBar, self.brushBtns = sb, {}
+	for i, b in ipairs(api.brushes or {}) do
+		local bt = self:btn(sb, { LayoutOrder = i, ZIndex = 3, Size = UDim2.fromOffset(30, 30), BackgroundColor3 = T.toolItem, Text = b.short, Font = FONT_B, TextSize = 12 }, function() api.setBrush(b.id) end, "tool")
+		corner(bt, 5)
+		bt:SetAttribute("rbTipRight", true)
+		self:tip(bt, b.name, b.tip, b.key)
+		self.brushBtns[b.id] = bt
+	end
 	self.toolBtns = {}
 	-- from space_toolsystem_toolbar.py (VIEW3D_PT_tools_active, object + edit mesh); a list = a flyout group
 	local TOOLS = {
@@ -1378,6 +1414,29 @@ function UI:openSearch()
 	pcall(function() box:CaptureFocus() end)
 	return fr
 end
+-- the interaction modes (header dropdown, Ctrl Tab)
+function UI:modeItems()
+	local api = self.api
+	return {
+		{ "Object Mode", "Tab", function() local st = api.state() if st.editing then api.toggleEdit() end end, icon = "object" },
+		{ "Edit Mode", "Tab", function() local st = api.state() if st.paintMode then api.setPaintMode(nil) elseif not st.editing then api.toggleEdit() end end, icon = "mesh" },
+		{ "Sculpt Mode", "", function() api.setPaintMode("sculpt") end, icon = "smooth" },
+	}
+end
+-- Sculpt menu (header, in Sculpt Mode)
+function UI:sculptMenu()
+	local api = self.api
+	local st = api.state()
+	local items = { { header = "Brushes" } }
+	for _, b in ipairs(api.brushes or {}) do items[#items + 1] = { b.name, b.key, function() api.setBrush(b.id) end, check = st.brush == b.id } end
+	items[#items + 1] = "-"
+	items[#items + 1] = { "Subdivide (more detail)", "", function() api.sculptSubdivide() end }
+	items[#items + 1] = { "Shade Smooth", "", function() api.sculptSmooth(true) end }
+	items[#items + 1] = { "Shade Flat", "", function() api.sculptSmooth(false) end }
+	items[#items + 1] = "-"
+	items[#items + 1] = { "Symmetry X", "", function() api.sculptSet("symmetryX", not st.symmetryX) end, check = st.symmetryX }
+	return items
+end
 function UI:similarItems()
 	local items = {}
 	for _, k in ipairs(self.api.similarList()) do items[#items + 1] = { k[2], "", function() self.api.selectSimilar(k[1]) end } end
@@ -1535,6 +1594,7 @@ function UI:openNamedMenu(name, at)
 		snap = function() return self:snapItems(), "Snap" end,
 		separate = function() return self:separateItems(), "Separate" end,
 		similar = function() return self:similarItems(), "Select Similar" end,
+		mode = function() return self:modeItems(), "Mode" end,
 		uv = function() return self:uvItems(), "UV Mapping" end,
 		pivot = function() return self:pivotItems(), "Pivot Point" end,
 		shading = function() return self:shadingItems(), "Shading" end,
@@ -1667,7 +1727,8 @@ function UI:helpItems()
 		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
 		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
 		{ "Lasso select / deselect", "Ctrl RMB drag / Shift Ctrl RMB drag" }, { "Snapping on / off", "Shift Tab" }, { "UV menu", "U" },
-		{ "Pivot point menu", "." }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
+		{ "Pivot point menu", "." }, { "Mode menu (Object / Edit / Sculpt)", "Ctrl Tab" },
+		{ "Sculpt brushes", "X C I G S T P, Shift C" }, { "Brush size / strength", "F / Shift F, [ ]" }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },
@@ -1746,24 +1807,38 @@ function UI:refresh(force)
 		t.b.TextColor3 = (t.edit == s.editing) and T.white or T.textTab
 	end
 	-- 3D header
-	self.modeBtn.Text = "      " .. (s.editing and "Edit Mode" or "Object Mode") .. "   v"
+	local sculpting = s.paintMode == "sculpt"
+	self.modeBtn.Text = "      " .. (sculpting and "Sculpt Mode" or s.editing and "Edit Mode" or "Object Mode") .. "   v"
 	if self.lastModeIcon ~= s.editing then
 		self.lastModeIcon = s.editing
 		local parent = self.modeIcon.Parent
 		self.modeIcon.Parent = nil
 		self.modeIcon = icon(parent, s.editing and "mesh" or "object")
 	end
-	self.selGroup.Visible = s.editing
+	self.selGroup.Visible = s.editing and not sculpting
+	self.sculptHdr.Visible = sculpting
+	if sculpting then
+		for k, box in pairs(self.sculptFields) do
+			if not box:IsFocused() then
+				local v = k == "radius" and s.brushRadius or s.brushStrength
+				box.Text = v and (k == "radius" and tostring(math.floor(v + 0.5)) or ("%.2f"):format(v)) or ""
+			end
+		end
+		self:setOnStyle(self.symBtn, s.symmetryX == true)
+	end
 	for m, b in pairs(self.selBtns) do self:setOnStyle(b, s.mode == m) end
-	self.objMenuBtn.Text = s.editing and "Mesh" or "Object"
-	self.objMenuBtn.Size = UDim2.fromOffset(s.editing and 42 or 56, 20)
-	self.vertMenuBtn.Visible, self.edgeMenuBtn.Visible, self.faceMenuBtn.Visible = s.editing, s.editing, s.editing
+	self.objMenuBtn.Text = sculpting and "Sculpt" or s.editing and "Mesh" or "Object"
+	self.objMenuBtn.Size = UDim2.fromOffset(sculpting and 48 or s.editing and 42 or 56, 20)
+	local meshMenus = s.editing and not sculpting
+	self.vertMenuBtn.Visible, self.edgeMenuBtn.Visible, self.faceMenuBtn.Visible = meshMenus, meshMenus, meshMenus
 	self:setOnStyle(self.xrayBtn, s.xray)
 	for k, b in pairs(self.shadeBtns) do self:setOnStyle(b, (s.shading or "solid") == k) end
 	self.opHeader.Visible = s.modal ~= nil
 	if s.modal then self.opText.Text = s.modalText or "" end
 	-- canvas: hide our 3D view when Studio's own is used
-	self.toolbarFrame.Visible = self.toolbar
+	self.toolbarFrame.Visible = self.toolbar and not sculpting
+	self.sculptBar.Visible = self.toolbar and sculpting
+	for id, bt in pairs(self.brushBtns) do self:setOnStyle(bt, s.brush == id, T.toolItem) end
 	local active = s.activeTool or "select"
 	for _, g in ipairs(self.toolGroups) do
 		g.b.Visible = (not g.edit) or s.editing
@@ -1774,15 +1849,16 @@ function UI:refresh(force)
 	for _, sep in ipairs(self.toolSeps) do sep.Visible = s.editing end
 	for k, b in pairs(self.toggleBtns) do
 		self:setOnStyle(b, s[k] == true)
-		b.Visible = s.editing or k == "snap"
+		b.Visible = (s.editing and not sculpting) or (k == "snap" and not sculpting)
 	end
-	self.falloffBtn.Visible = s.editing == true
-	self.pivotBtn.Visible = s.editing == true
+	self.falloffBtn.Visible = s.editing == true and not sculpting
+	self.snapTargetBtn.Visible = not sculpting
+	self.pivotBtn.Visible = s.editing == true and not sculpting
 	for k, b in pairs(self.boxModeBtns) do
 		self:setOnStyle(b, (s.boxMode or "set") == k)
-		b.Visible = s.editing == true and (s.activeTool or "select") == "select"
+		b.Visible = s.editing == true and not sculpting and (s.activeTool or "select") == "select"
 	end
-	self.uvMenuBtn.Visible = s.editing
+	self.uvMenuBtn.Visible = s.editing and not sculpting
 	-- info text (Blender: "User Perspective" + "(1) Collection | Cube")
 	local lines = { s.viewName or "User Perspective", "(1) Collection" .. (s.objName and (" | " .. s.objName) or "") }
 	if s.editing and s.stats then
@@ -1836,7 +1912,9 @@ function UI:refresh(force)
 		end
 	end
 	-- status bar (Blender 5 style mouse hints)
-	if s.modal then
+	if sculpting then
+		self.hints.Text = "<b>LMB</b> Sculpt      <b>Ctrl</b> Invert      <b>Shift</b> Smooth      <b>F</b> Size  <b>Shift F</b> Strength      <b>MMB</b> Rotate View      <b>Tab</b> Object Mode"
+	elseif s.modal then
 		self.hints.Text = "<b>LMB</b> Confirm      <b>RMB</b> Cancel      <b>X Y Z</b> Axis      <b>Ctrl</b> Snap      <b>0-9</b> Value"
 	elseif s.editing then
 		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Mesh Context Menu      <b>Tab</b> Object Mode"

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.13.0"
+local VERSION = "0.14.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -24,6 +24,9 @@ local UI = require(script.UI)
 local View = require(script.View)
 local MT = require(script.MeshTools)
 local Icon = require(script.Icon)
+local ObjectTools = require(script.ObjectTools)
+local ModStack = require(script.ModStack)
+local Sculpt = require(script.Sculpt)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -46,6 +49,8 @@ local bm = nil           -- its mesh
 local origin = CFrame.identity
 local editing = false
 local mode = "vert"      -- vert / edge / face
+local paintMode = nil    -- nil = Edit Mode, "sculpt" = Sculpt Mode (both edit the mesh in `bm`)
+local paintHooks = {}    -- exit() set by the Sculpt controller
 local xray = false
 local modal = nil        -- the running G / S / R / inset / loop cut
 local hover = nil
@@ -539,7 +544,7 @@ local SEAM_COL, SHARP_COL, CREASE_COL = Color3.fromRGB(219, 37, 18), Color3.from
 local function drawCage()
 	pBegin()
 	if view then view:beginCage() end
-	if editing and bm then
+	if editing and bm and not paintMode then
 		local many = bm.ne > 6000
 		for e in pairs(bm.edges) do
 			local on = e.sel
@@ -659,6 +664,8 @@ end
 
 local function exitEdit()
 	if not editing then return end
+	paintMode = nil
+	if paintHooks.exit then pcall(paintHooks.exit) end
 	modal = nil
 	if obj and bm then
 		editing = false
@@ -1627,170 +1634,26 @@ local function duplicateObjects()
 	activeObj = copies[#copies]
 	startObjTransform("G")
 end
--- Ctrl J (Blender's Join): the other selected meshes go into the active one
-local function joinObjects()
-	local ps = {}
-	for _, p in ipairs(selectedParts()) do if isRB(p) then ps[#ps + 1] = p end end
-	local act = (isRB(activeObj) and table.find(ps, activeObj)) and activeObj or ps[1]
-	if #ps < 2 then setStatus("Select two or more " .. NAME .. " meshes to join (Shift click).") return end
-	local base = loadFrom(act)
-	local spec = MT.toSpec(base)
-	local o = originOf(act)
-	for _, p in ipairs(ps) do
-		if p ~= act then
-			local m = loadFrom(p)
-			local src = MT.toSpec(m)
-			local op = originOf(p)
-			local off = #spec.verts
-			for _, sv in ipairs(src.verts) do
-				spec.verts[#spec.verts + 1] = { co = o:PointToObjectSpace(op * sv.co), sel = false, loose = sv.loose }
-			end
-			for _, f in ipairs(src.faces) do
-				local r = {}
-				for j, k in ipairs(f.v) do r[j] = k + off end
-				spec.faces[#spec.faces + 1] = { v = r, sel = false, smooth = f.smooth }
-			end
-			for _, e in ipairs(src.edges) do spec.edges[#spec.edges + 1] = { e[1] + off, e[2] + off } end
-			for k, fl in pairs(src.eflags) do
-				local a, b = k:match("(%d+):(%d+)")
-				spec.eflags[(tonumber(a) + off) .. ":" .. (tonumber(b) + off)] = fl
-			end
-		end
-	end
-	local joined = MT.fromSpec(spec)
-	record("Join", function()
-		dataOf(act).Value = encode(joined)
-		local _, _, np = applyMesh(act, joined, false)
-		act = np or act
-		for _, p in ipairs(ps) do if p ~= act then p.Parent = nil end end
-	end)
-	Selection:Set({ act })
-	activeObj = act
-	if scene[act] then scene[act].data = nil end
-	dirtyCage = true
-	setStatus(("Joined %d meshes into %s."):format(#ps, act.Name))
+-- ===== shared context for the split-out modules (ObjectTools.lua, Sculpt.lua, Paint.lua, ...) =====
+local ctx = {
+	NAME = NAME, Selection = Selection, CHS = CHS, HttpService = HttpService, UIS = UIS, MT = MT, Display = Display, BMesh = BMesh, Ops = Ops, Mods = Mods,
+	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
+	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
+	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
+}
+function ctx.get()
+	return { editing = editing, obj = obj, bm = bm, mode = mode, modal = modal, origin = origin, cursor = CURSOR, activeObj = activeObj, xray = xray, view = view, ui = ui }
 end
--- rebuild a part with new mesh coords and a new origin (keeps where the mesh is in the world unless asked)
-local function reshapePart(p, m, newOrigin, what)
-	record(what, function()
-		dataOf(p).Value = encode(m)
-		-- point the part's origin at newOrigin, then applyMesh puts the mesh round it
-		p.CFrame = newOrigin * CFrame.new(p:GetAttribute("RB_Center") or V3())
-		local _, _, np = applyMesh(p, m, false)
-		p = np or p
-	end)
-	if scene[p] then scene[p].data = nil end
-	return p
-end
-local function rbSelected()
-	local out = {}
-	for _, p in ipairs(selectedParts()) do if isRB(p) then out[#out + 1] = p end end
-	return out
-end
--- Object > Set Origin (Blender's object.origin_set)
-local function setOrigin(how)
-	if editing then setStatus("Set Origin works in Object Mode (Tab).") return end
-	local ps = rbSelected()
-	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
-	for _, p in ipairs(ps) do
-		local m = loadFrom(p)
-		local o = originOf(p)
-		local c = Display.bounds(m)
-		local newO = o
-		if how == "geometry" then
-			-- Origin to Geometry: the origin moves to the middle of the mesh
-			newO = o * CFrame.new(c)
-			for v in pairs(m.verts) do v.co -= c end
-		elseif how == "cursor" then
-			newO = CFrame.new(CURSOR) * o.Rotation
-			for v in pairs(m.verts) do v.co = newO:PointToObjectSpace(o * v.co) end
-		else
-			-- Geometry to Origin: the mesh moves so its middle is on the origin
-			for v in pairs(m.verts) do v.co -= c end
-		end
-		m:normalsUpdate()
-		reshapePart(p, m, newO, "Set Origin")
-	end
-	dirtyCage = true
-	setStatus(({ geometry = "Origin moved to the middle of the mesh.", cursor = "Origin moved to the 3D cursor.", origin = "Mesh moved onto its origin." })[how] or "Origin set.")
-end
--- Object > Apply > Rotation: bake the part's rotation into the mesh, the part goes back to 0, 0, 0
-local function applyRotation()
-	if editing then return end
-	local ps = rbSelected()
-	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
-	for _, p in ipairs(ps) do
-		local m = loadFrom(p)
-		local o = originOf(p)
-		local newO = CFrame.new(o.Position)
-		for v in pairs(m.verts) do v.co = newO:PointToObjectSpace(o * v.co) end
-		m:normalsUpdate()
-		reshapePart(p, m, newO, "Apply Rotation")
-	end
-	setStatus("Rotation applied: the mesh keeps its look, the part's rotation is 0.")
-end
--- Object > Shade Smooth / Shade Flat (every face of the selected meshes)
-local function shadeObjects(smooth, autoAngle)
-	local ps = rbSelected()
-	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
-	for _, p in ipairs(ps) do
-		local m = (editing and p == obj) and bm or loadFrom(p)
-		for f in pairs(m.faces) do f.smooth = smooth or nil end
-		if autoAngle then MT.smoothByAngle(m, nil, autoAngle) end
-		if editing and p == obj then commit("Shade") else reshapePart(p, m, originOf(p), "Shade") end
-	end
-	setStatus(autoAngle and "Shade Auto Smooth (30 degrees)." or smooth and "Shade Smooth." or "Shade Flat.")
-end
-
--- H / Shift H / Alt H in Object Mode (the Outliner eye)
-local function hideObjects(which)
-	local sel = {}
-	for _, p in ipairs(Selection:Get()) do sel[p] = true end
-	local n = 0
-	for p, r in pairs(scene) do
-		if which == "reveal" then
-			if r.hidden then r.hidden = false n += 1 end
-		elseif (which == "selected") == (sel[p] == true) and not r.hidden then
-			r.hidden = true
-			n += 1
-		end
-	end
-	if which ~= "reveal" then Selection:Set({}) end
-	dirtyCage = true
-	setStatus(which == "reveal" and ("Revealed %d."):format(n) or ("Hid %d."):format(n))
-end
--- Alt G / Alt R: put the origin back at the world centre / clear the rotation (the part moves, the mesh doesn't change)
-local function clearTransform(what)
-	local ps = rbSelected()
-	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
-	record(what == "loc" and "Clear Location" or "Clear Rotation", function()
-		for _, p in ipairs(ps) do
-			local o = originOf(p)
-			local newO = (what == "loc") and o.Rotation or CFrame.new(o.Position)
-			p.CFrame = newO * CFrame.new(p:GetAttribute("RB_Center") or V3())
-		end
-	end)
-	dirtyCage = true
-	setStatus(what == "loc" and "Location cleared (origin at 0, 0, 0)." or "Rotation cleared.")
-end
--- Numpad / (Local View): show only the selected meshes; again to bring the rest back
-local localView = nil
-local function toggleLocalView()
-	if localView then
-		for _, r in pairs(scene) do r.localOut = nil end
-		localView = nil
-		setStatus("Local view off.")
-	else
-		local set = {}
-		for _, p in ipairs(Selection:Get()) do set[p] = true end
-		if editing and obj then set[obj] = true end
-		if not next(set) then setStatus("Select something for Local View.") return end
-		for p, r in pairs(scene) do r.localOut = not set[p] or nil end
-		localView = set
-		setStatus("Local view: only the selection is shown (Numpad / again to leave).")
-	end
-	dirtyCage = true
-end
+function ctx.setActive(p) activeObj = p end
+function ctx.setBm(m) bm = m worldTris = nil end
+function ctx.setModal(M) modal = M end
+function ctx.dirtyCage() dirtyCage = true end
+function ctx.dirtyMesh() dirtyMesh = true dirtyCage = true worldTris = nil end
+local OT = ObjectTools.new(ctx)
+ctx.rayMesh, ctx.camera = rayMesh, camera
+function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) end
+local SCULPT = Sculpt.new(ctx)
+paintHooks.exit = function() SCULPT.exit() end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
 local function modelingTools()
@@ -3285,20 +3148,20 @@ local TOOL = {
 	Duplicate = function() if not editing and not modal then duplicateObjects() end end,
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
-TOOL.Join = function() if not editing and not modal then joinObjects() end end
-TOOL.OriginToGeometry = function() setOrigin("geometry") end
-TOOL.OriginToCursor = function() setOrigin("cursor") end
-TOOL.GeometryToOrigin = function() setOrigin("origin") end
-TOOL.ApplyRotation = applyRotation
-TOOL.HideSelected = function() if not editing then hideObjects("selected") end end
-TOOL.HideUnselectedObj = function() if not editing then hideObjects("unselected") end end
-TOOL.RevealObj = function() if not editing then hideObjects("reveal") end end
-TOOL.ClearLocation = function() if not editing then clearTransform("loc") end end
-TOOL.ClearRotation = function() if not editing then clearTransform("rot") end end
-TOOL.LocalView = toggleLocalView
-TOOL.ObjShadeSmooth = function() if not editing then shadeObjects(true) end end
-TOOL.ObjShadeFlat = function() if not editing then shadeObjects(false) end end
-TOOL.ObjShadeAuto = function() if not editing then shadeObjects(true, 30) end end
+TOOL.Join = function() if not editing and not modal then OT.join() end end
+TOOL.OriginToGeometry = function() OT.setOrigin("geometry") end
+TOOL.OriginToCursor = function() OT.setOrigin("cursor") end
+TOOL.GeometryToOrigin = function() OT.setOrigin("origin") end
+TOOL.ApplyRotation = OT.applyRotation
+TOOL.HideSelected = function() if not editing then OT.hide("selected") end end
+TOOL.HideUnselectedObj = function() if not editing then OT.hide("unselected") end end
+TOOL.RevealObj = function() if not editing then OT.hide("reveal") end end
+TOOL.ClearLocation = function() if not editing then OT.clearTransform("loc") end end
+TOOL.ClearRotation = function() if not editing then OT.clearTransform("rot") end end
+TOOL.LocalView = OT.toggleLocalView
+TOOL.ObjShadeSmooth = function() if not editing then OT.shade(true) end end
+TOOL.ObjShadeFlat = function() if not editing then OT.shade(false) end end
+TOOL.ObjShadeAuto = function() if not editing then OT.shade(true, 30) end end
 TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
 local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
 for name, fn in pairs(MOD.ops) do
@@ -3319,6 +3182,7 @@ function api.state()
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
+		paintMode = paintMode, brush = SCULPT and SCULPT.brush, brushRadius = SCULPT and SCULPT.radius, brushStrength = SCULPT and SCULPT.strength, symmetryX = SCULPT and SCULPT.symmetryX,
 		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode, snapTarget = EDIT.snapTarget, pivot = EDIT.pivot,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
@@ -3396,29 +3260,10 @@ local function modsChanged(p)
 	end
 	dirtyCage = true
 end
-api.mods = function()
-	local p = modTarget()
-	if not p then return nil end
-	return modsOf(p), p
-end
-api.modTypes = Mods.TYPES
+ctx.modTarget, ctx.modsChanged, ctx.modsOf, ctx.setMods, ctx.uvOf = modTarget, modsChanged, modsOf, setMods, uvOf
+function ctx.replaceEdited(m, val) bm = m lastWritten = val worldTris = nil end
+ModStack.install(api, ctx)
 api.repeatLast = function() if editing and not modal then MOD.repeatLast() end end
--- Ctrl 0..5 (Blender's Subdivision Set): add a Subdivision Surface modifier, or set its levels
-api.subdivSet = function(level)
-	local p = modTarget()
-	if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
-	level = math.clamp(level, 0, 4)
-	local list = modsOf(p)
-	local idx
-	for i, m in ipairs(list) do if m.type == "subsurf" then idx = i end end
-	if idx then
-		api.modSet(idx, "levels", level)
-	else
-		api.modAdd("subsurf")
-		api.modSet(#modsOf(p), "levels", level)
-	end
-	setStatus(("Subdivision level %d."):format(level))
-end
 MOD.subdivSet = api.subdivSet
 api.similarList = function()
 	local out = {}
@@ -3440,101 +3285,55 @@ api.setBoxMode = function(m) EDIT.boxMode = m end
 api.setPivot = function(m) EDIT.pivot = m setStatus("Pivot: " .. ({ median = "Median Point", cursor = "3D Cursor", individual = "Individual Origins" })[m] .. ".") end
 api.setSnapTarget = function(m) EDIT.snapTarget = m EDIT.snap = true setStatus("Snap to " .. m .. " (snapping on).") end
 api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
--- U menu / Material > Texture: UV projection + the image
-api.uvModes = Display.UV_MODES
-api.setUV = function(mode, scale)
-	local p = modTarget()
-	if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
-	record("UV", function()
-		if mode ~= nil then p:SetAttribute("RB_UVMode", mode ~= "" and mode or nil) end
-		if scale then p:SetAttribute("RB_UVScale", math.max(scale, 0.01)) end
-		modsChanged(p)
-	end)
-	local u = uvOf(p)
-	setStatus(u and ("UVs: " .. u.mode .. (u.mode == "box" and (" (repeats every %g studs)"):format(u.scale) or "") .. ". Set a texture in Material > Texture.") or "UVs cleared.")
+api.join = OT.join
+-- Sculpt Mode (mode menu / Ctrl Tab)
+api.setPaintMode = function(m)
+	if modal then return end
+	if not m then
+		paintMode = nil
+		SCULPT.exit()
+		dirtyCage, dirtyMesh = true, true
+		if editing then setStatus("Edit Mode.") end
+		return
+	end
+	if not editing then toggleEdit() end
+	if not editing then return end
+	paintMode = m
+	clearSel()
+	flush()
+	worldTris = nil
+	dirtyCage, dirtyMesh = true, true
+	SCULPT.setBrush(SCULPT.brush)
+	if bm.nv < 300 then
+		setStatus(("Sculpt Mode. This mesh only has %d points - use Sculpt > Subdivide (or Ctrl 2 on it first) for detail to sculpt."):format(bm.nv))
+	end
 end
-api.setTexture = function(id)
-	local p = modTarget()
-	if not p then return end
-	id = tostring(id or "")
-	if id:match("^%d+$") then id = "rbxassetid://" .. id end
-	record("Texture", function()
-		pcall(function() p.TextureID = id end)
-		if id ~= "" and not uvOf(p) then p:SetAttribute("RB_UVMode", "boxfit") modsChanged(p) end
-	end)
-	dirtyCage = true
-	setStatus(id ~= "" and ("Texture set: " .. id .. (uvOf(p) and "" or "")) or "Texture cleared.")
+api.brushes = Sculpt.BRUSHES
+api.setBrush = function(id) SCULPT.setBrush(id) end
+api.sculptSet = function(key, value)
+	if key == "radius" then SCULPT.radius = math.clamp(value, 4, 500)
+	elseif key == "strength" then SCULPT.strength = math.clamp(value, 0.01, 1)
+	elseif key == "symmetryX" then SCULPT.symmetryX = value == true end
 end
-api.join = joinObjects
-local function modEdit(what, fn)
-	local p = modTarget()
-	if not p then setStatus("Pick a " .. NAME .. " part first.") return end
-	local list = modsOf(p)
-	local msg
-	record(what, function()
-		msg = fn(list, p)
-		setMods(p, list)
-		modsChanged(p)
-	end)
-	if msg then setStatus(msg) end
+-- Sculpt > Subdivide: one Catmull-Clark level for the whole mesh (more points to sculpt), smooth shaded
+api.sculptSubdivide = function()
+	if not (editing and bm) or modal then return end
+	local tris = 0
+	for f in pairs(bm.faces) do tris += f.len - 2 end
+	if tris * 4 > 20000 then setStatus(("Too dense to subdivide again (%d triangles now; Roblox allows 20,000)."):format(tris)) return end
+	local nb = Mods.subsurf(bm, { levels = 1 })
+	for f in pairs(nb.faces) do f.smooth = true f.sel = false end
+	for v in pairs(nb.verts) do v.sel = false end
+	for e in pairs(nb.edges) do e.sel = false end
+	bm = nb
+	worldTris = nil
+	commit("Subdivide")
+	setStatus(("Subdivided: %d points, %d faces."):format(bm.nv, bm.nf))
 end
-api.modAdd = function(id)
-	local t = Mods.BY_ID[id]
-	if not t then return end
-	modEdit("add " .. t.name, function(list)
-		local m = Mods.new(id)
-		m.name = t.name
-		list[#list + 1] = m
-		return "Added " .. t.name .. " modifier."
-	end)
-end
-api.modSet = function(i, key, value)
-	modEdit("modifier", function(list) if list[i] then list[i][key] = value end end)
-end
-api.modToggle = function(i, key)
-	modEdit("modifier", function(list)
-		if list[i] then
-			local cur = list[i][key]
-			if cur == nil then cur = key == "on" or key == "edit" end
-			list[i][key] = not cur
-		end
-	end)
-end
-api.modRemove = function(i)
-	modEdit("remove modifier", function(list) local m = table.remove(list, i) return m and ("Removed " .. (m.name or m.type) .. ".") end)
-end
-api.modMove = function(i, d)
-	modEdit("move modifier", function(list)
-		local j = i + d
-		if list[i] and list[j] then list[i], list[j] = list[j], list[i] end
-	end)
-end
-api.modApply = function(i)
-	local p = modTarget()
-	if not p then return end
-	local list = modsOf(p)
-	local m = list[i]
-	if not m then return end
-	if editing and p ~= obj then return end
-	local base = (editing and p == obj) and bm or loadFrom(p)
-	local one = table.clone(m)
-	one.on = true
-	local ok, res = pcall(Mods.evaluate, base, { one })
-	if not ok or not res then setStatus("Couldn't apply: " .. tostring(res)) return end
-	if res == base then res = MT.fromSpec(MT.toSpec(base)) end
-	record("apply " .. (m.name or m.type), function()
-		table.remove(list, i)
-		setMods(p, list)
-		local val = encode(res)
-		if editing and p == obj then
-			bm = res
-			lastWritten = val
-			worldTris = nil
-		end
-		dataOf(p).Value = val
-		modsChanged(p)
-	end)
-	setStatus("Applied " .. (m.name or m.type) .. (i > 1 and " (it wasn't first in the stack, so the result may differ)." or "."))
+api.sculptSmooth = function(on)
+	if not (editing and bm) then return end
+	for f in pairs(bm.faces) do f.smooth = on or nil end
+	commit(on and "Shade Smooth" or "Shade Flat")
 end
 api.togglePanel = function() widget.Enabled = not widget.Enabled end
 api.setMode = function(m) if editing and not modal then setMode(m) end end
@@ -3840,6 +3639,11 @@ end
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
 	if ui:overUI(mp) then return end
+	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
+		local ok, err = pcall(SCULPT.press, mp)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
 	if modal and modal.click then
 		local ok, err = pcall(modal.click)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
@@ -3863,6 +3667,11 @@ mouse.Button1Down:Connect(function()
 end)
 mouse.Button1Up:Connect(function()
 	if uiOn then ui:mouseUp() end
+	if paintMode and editing then
+		local ok, err = pcall(SCULPT.release)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+		return
+	end
 	if modal and modal.release then
 		local ok, used = pcall(modal.release)
 		if ok and used then return end
@@ -3931,6 +3740,7 @@ mouse.Button1Up:Connect(function()
 end)
 mouse.Button2Down:Connect(function()
 	if modal then pcall(finishModal, true) return end
+	if paintMode and SCULPT.adjust then SCULPT.finishAdjust(true) return end
 	local mp = mousePos()
 	if ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
@@ -3977,6 +3787,15 @@ mouse.Move:Connect(function()
 		navDrag.last = mp
 		navDrag.moved += math.abs(dx) + math.abs(dy)
 		if dx ~= 0 or dy ~= 0 then api.navDrag(navDrag.kind, dx, dy) end
+		return
+	end
+	if paintMode and editing and ownView() and not modal then
+		if ui:inCanvas(mp) and not ui:overUI(mp) then
+			local ok, err = pcall(SCULPT.move, mp)
+			if not ok then warn(NAME .. ": " .. tostring(err)) end
+		else
+			SCULPT.hideRing()
+		end
 		return
 	end
 	if modal and modal.update then
@@ -4073,7 +3892,7 @@ local function navKey(k, ctrl)
 	elseif n == "KeypadEight" then if ctrl then view:pan(0, -40) else view:step(0, math.rad(15)) view.viewName = nil end dirtyCage = true
 	elseif n == "KeypadTwo" then if ctrl then view:pan(0, 40) else view:step(0, math.rad(-15)) view.viewName = nil end dirtyCage = true
 	elseif n == "KeypadNine" then view:step(math.pi, -2 * view.pitch) view.viewName = nil dirtyCage = true
-	elseif n == "KeypadDivide" then toggleLocalView() frameSelected()
+	elseif n == "KeypadDivide" then OT.toggleLocalView() frameSelected()
 	else return false end
 	return true
 end
@@ -4084,11 +3903,11 @@ local function objectKey(k, shift, ctrl, alt)
 	if k == Enum.KeyCode.A and ctrl and not shift and not alt then ui:openNamedMenu("apply", mousePos()) return end
 	if k == Enum.KeyCode.Z and not ctrl and not shift and not alt then ui:openNamedMenu("shading", mousePos()) return end
 	if k == Enum.KeyCode.C and shift and not ctrl and not alt then CURSOR = V3() frameAll() setStatus("3D cursor to the world origin, view all.") return end
-	if k == Enum.KeyCode.H and alt then hideObjects("reveal") return end
-	if k == Enum.KeyCode.H and shift then hideObjects("unselected") return end
-	if k == Enum.KeyCode.H then hideObjects("selected") return end
-	if k == Enum.KeyCode.G and alt then clearTransform("loc") return end
-	if k == Enum.KeyCode.R and alt then clearTransform("rot") return end
+	if k == Enum.KeyCode.H and alt then OT.hide("reveal") return end
+	if k == Enum.KeyCode.H and shift then OT.hide("unselected") return end
+	if k == Enum.KeyCode.H then OT.hide("selected") return end
+	if k == Enum.KeyCode.G and alt then OT.clearTransform("loc") return end
+	if k == Enum.KeyCode.R and alt then OT.clearTransform("rot") return end
 	if k == Enum.KeyCode.G and not ctrl then startObjTransform("G")
 	elseif k == Enum.KeyCode.R and not ctrl then startObjTransform("R")
 	elseif k == Enum.KeyCode.S and not ctrl then startObjTransform("S")
@@ -4097,7 +3916,7 @@ local function objectKey(k, shift, ctrl, alt)
 	elseif k == Enum.KeyCode.A and alt then TOOL.SelectNone()
 	elseif k == Enum.KeyCode.A and not ctrl then TOOL.SelectAll()
 	elseif k == Enum.KeyCode.I and ctrl then TOOL.Invert()
-	elseif k == Enum.KeyCode.J and ctrl then joinObjects()
+	elseif k == Enum.KeyCode.J and ctrl then OT.join()
 	elseif ctrl and ({ Zero = 0, One = 1, Two = 2, Three = 3, Four = 4, Five = 5 })[k.Name] then MOD.subdivSet(({ Zero = 0, One = 1, Two = 2, Three = 3, Four = 4, Five = 5 })[k.Name])
 	elseif k == Enum.KeyCode.Z and alt then toggleXray()
 	elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
@@ -4120,6 +3939,7 @@ UIS.InputBegan:Connect(function(input, gp)
 		return
 	end
 	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
+	if k == Enum.KeyCode.Tab and ctrl and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
 	if k == Enum.KeyCode.Tab and shift and not ctrl and not alt and uiOn then
 		EDIT.snap = not EDIT.snap
 		setStatus("Snapping " .. (EDIT.snap and ("on (" .. EDIT.snapTarget .. ")") or "off") .. ".")
@@ -4149,6 +3969,14 @@ UIS.InputBegan:Connect(function(input, gp)
 			return
 		end
 		if navKey(k, ctrl) then return end
+		if paintMode and editing then
+			-- Sculpt Mode: brush keys only (no mesh-editing tools)
+			if SCULPT.key(k, shift, ctrl, alt) then return end
+			if k == Enum.KeyCode.Z and alt then toggleXray()
+			elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
+			elseif k == Enum.KeyCode.Z then ui:openNamedMenu("shading", mousePos()) end
+			return
+		end
 		if k == Enum.KeyCode.Escape and MOD.measure then MOD.measure = nil dirtyCage = true return end
 		if not editing then
 			if uiOn then objectKey(k, shift, ctrl, alt) end
