@@ -1,4 +1,4 @@
-<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0019"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0020"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - a free, open-source mesh editor for Roblox Studio
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Mesh engine converted from Blender's BMesh
@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.1"
+local VERSION = "0.21.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -34,6 +34,7 @@ local Boolean = require(script.Boolean)
 local UVTools = require(script.UVTools)
 local UVEditor = require(script.UVEditor)
 local Tutorial = require(script.Tutorial)
+local KeyCapture = require(script.KeyCapture)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1754,7 +1755,7 @@ local ctx = {
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
-	return { editing = editing, obj = obj, bm = bm, mode = mode, modal = modal, origin = origin, cursor = CURSOR, activeObj = activeObj, xray = xray, view = view, ui = ui }
+	return { editing = editing, obj = obj, bm = bm, mode = mode, modal = modal, origin = origin, cursor = CURSOR, activeObj = activeObj, xray = xray, view = view, ui = ui, uiOn = uiOn }
 end
 function ctx.setActive(p) activeObj = p end
 function ctx.setBm(m) bm = m worldTris = nil end
@@ -1775,7 +1776,10 @@ function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:Is
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
 local UVE = UVEditor.new(ctx)
+ctx.plugin = plugin
+function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
+local KC = KeyCapture.new(ctx)
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3393,7 +3397,7 @@ end
 local api = { version = VERSION, logoImage = logoImage }
 local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
+	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -3513,6 +3517,8 @@ api.uvEditor = function() UVE.toggle() end
 api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
+api.setBlockKeys = function(on) KC.setEnabled(on) end
+api.keyCapture = function() return KC end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
@@ -3765,6 +3771,7 @@ setStudioView = function(b)
 end
 setUIOn = function(on)
 	if not on then
+		KC.release()
 		if modal then pcall(finishModal, true) end
 		if editing then exitEdit() end
 	end
@@ -3946,6 +3953,7 @@ end
 
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
+	if uiOn and ownView() then task.defer(KC.grab) end
 	if UVE.mouseDown(mp) then return end
 	if ui:overUI(mp) then return end
 	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
@@ -4086,6 +4094,7 @@ pcall(function()
 end)
 mouse.Move:Connect(function()
 	local mp = mousePos()
+	if uiOn and ownView() then KC.grab() end
 	if uiOn then pcall(function() ui:step(mp) end) end
 	if UVE.mouseMove(mp) then return end
 	if lasso then
@@ -4236,7 +4245,10 @@ local function objectKey(k, shift, ctrl, alt)
 	end
 end
 UIS.InputBegan:Connect(function(input, gp)
-	if UIS:GetFocusedTextBox() then return end
+	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
+	local focusBox = UIS:GetFocusedTextBox()
+	if focusBox and not KC.isOurs(focusBox) then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then KC.noteKey() end
 	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
 	local shift = shiftDown()
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
@@ -4247,6 +4259,11 @@ UIS.InputBegan:Connect(function(input, gp)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
 	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
+	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
+	if focusBox and ctrl and not alt then
+		if k == Enum.KeyCode.Z and not shift then api.undo() return end
+		if k == Enum.KeyCode.Y or (k == Enum.KeyCode.Z and shift) then api.redo() return end
+	end
 	if uiOn and ui.menuOpen then
 		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return
@@ -6366,7 +6383,100 @@ function Icon.image(AssetService)
 	return img
 end
 return Icon
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0007"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0007"><Properties><string name="Name">KeyCapture</string><ProtectedString name="Source"><![CDATA[--[[
+	ROBLEND - keeps Studio's own shortcuts (1 2 3 4 build tools, Ctrl D, Delete...) from firing while you work
+	in the ROBLEND window: an invisible text box holds the keyboard, so Studio sees typing instead of shortcuts,
+	and ROBLEND still reads every key.
+	SPDX-License-Identifier: GPL-2.0-or-later
+	Copyright (C) 2026 Cruppnomics (Giga_gad27).
+
+	KeyCapture.new(C) -> K
+	  K.grab()      take the keyboard (called when the mouse moves / clicks in our 3D view)
+	  K.release()   give it back (window closed, or switched off)
+	  K.isOurs(tb)  is this focused text box ours? (Main still reads keys then)
+	  K.noteKey()   Main calls this for every key it receives: if the box gets typed into but no key arrives,
+	                Studio isn't passing keys through, so blocking switches itself off (keys keep working)
+	Setting: plugin setting RB_BlockStudioKeys (default on), Edit > Block Studio Shortcuts.
+]]
+local KeyCapture = {}
+
+function KeyCapture.new(C)
+	local K = { enabled = true, box = nil, lastKey = 0, failed = false }
+	pcall(function()
+		local v = C.plugin:GetSetting("RB_BlockStudioKeys")
+		if v ~= nil then K.enabled = v == true end
+	end)
+
+	local function make()
+		local st = C.get()
+		local gui = st.ui and st.ui.gui
+		if not gui then return nil end
+		local b = Instance.new("TextBox")
+		b.Name = "RB_KeyCapture"
+		b.Size = UDim2.fromOffset(1, 1)
+		b.Position = UDim2.fromOffset(-10, -10)
+		b.BackgroundTransparency = 1
+		b.TextTransparency = 1
+		b.Text = ""
+		b.ClearTextOnFocus = true
+		b.TextEditable = true
+		b.ZIndex = 0
+		b.Parent = gui
+		-- Enter / Escape / Tab make a text box let go: take it straight back (a click somewhere else doesn't)
+		b.FocusLost:Connect(function(_, input)
+			if K.enabled and not K.failed and input and input.UserInputType == Enum.UserInputType.Keyboard then
+				task.defer(function() K.grab() end)
+			end
+		end)
+		-- typing goes in here: throw it away, and check that the key also reached ROBLEND
+		b:GetPropertyChangedSignal("Text"):Connect(function()
+			if b.Text == "" then return end
+			b.Text = ""
+			local at = C.clock()
+			task.delay(0.2, function()
+				if K.enabled and not K.failed and K.lastKey < at - 0.5 then
+					-- Studio isn't sending key presses to plugins while the box has focus: stop blocking
+					K.failed = true
+					K.release()
+					C.setStatus("Couldn't block Studio's shortcuts on this Studio version, so they're back on (keys still work in ROBLEND).")
+				end
+			end)
+		end)
+		return b
+	end
+
+	function K.isOurs(tb) return tb ~= nil and tb == K.box end
+	function K.noteKey() K.lastKey = C.clock() end
+	function K.active()
+		local ok, f = pcall(function() return C.UIS:GetFocusedTextBox() end)
+		return ok and f ~= nil and f == K.box
+	end
+	function K.grab()
+		if not K.enabled or K.failed then return end
+		local st = C.get()
+		if not (st.uiOn and st.ui and st.ui.gui) then return end
+		-- never take the keyboard from a text box someone is typing in
+		local ok, f = pcall(function() return C.UIS:GetFocusedTextBox() end)
+		if not ok or (f ~= nil and f ~= K.box) then return end
+		if f ~= nil and f == K.box then return end
+		if not (K.box and K.box.Parent) then K.box = make() end
+		if K.box then pcall(function() K.box:CaptureFocus() end) end
+	end
+	function K.release()
+		if K.box and K.active() then pcall(function() K.box:ReleaseFocus() end) end
+	end
+	function K.setEnabled(on)
+		K.enabled = on == true
+		K.failed = false
+		pcall(function() C.plugin:SetSetting("RB_BlockStudioKeys", K.enabled) end)
+		if K.enabled then K.grab() else K.release() end
+		C.setStatus(K.enabled and "Studio's own shortcuts are blocked while you work in ROBLEND." or "Studio's own shortcuts work again inside ROBLEND.")
+	end
+	return K
+end
+
+return KeyCapture
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0008"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Edit Mode mesh tools (the Modeling tab)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -8099,7 +8209,7 @@ function MT.mirror(bm, verts, center, axis)
 end
 
 return MT
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0008"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0009"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the modifier stack and UV / texture commands behind Properties > Modifiers, Material > Texture,
 	the U menu and Ctrl 0-4 (Blender's object.modifier_add / modifier_apply / subdivision_set, uv projections).
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -8274,7 +8384,7 @@ function ModStack.install(api, C)
 end
 
 return ModStack
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0009"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - modifiers: a non-destructive stack on each mesh (Blender's Properties > Modifiers)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -9369,7 +9479,7 @@ function Mods.mergeDoubles(bm, dist)
 end
 
 return Mods
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Object Mode tools: Join, Set Origin, Apply Rotation, Shade Smooth / Flat / Auto, Hide / Reveal,
 	Clear Location / Rotation, Local View, Convert to ROBLEND Mesh. Converted from Blender's object operators
 	(source/blender/editors/object/object_transform.cc, object_relations.cc, view3d localview).
@@ -9685,7 +9795,7 @@ function ObjectTools.new(C)
 end
 
 return ObjectTools
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - mesh operators
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -10315,7 +10425,7 @@ function Ops.fill(bm, vertSet)
 end
 
 return Ops
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Vertex Paint: paint colours onto the mesh's points (the colour blends across each face).
 	Converted to Luau (and cut down) from Blender's vertex paint:
 	  source/blender/editors/sculpt_paint/paint_vertex.cc (draw / blur / fill / sample, brush falloff, front faces only)
@@ -10572,7 +10682,7 @@ function Paint.new(C)
 end
 
 return Paint
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Sculpt Mode: brushes that push the surface around like clay.
 	Converted to Luau (and cut down) from Blender's sculpt brushes:
 	  source/blender/editors/sculpt_paint/brushes/draw.cc, clay_strips.cc, inflate.cc, grab.cc, smooth.cc,
@@ -10882,7 +10992,7 @@ function Sculpt.new(C)
 end
 
 return Sculpt
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Tutorial: step cards that wait for you to actually do each thing.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -11024,7 +11134,7 @@ function Tutorial.new(C)
 end
 
 return Tutorial
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
 	Outliner, Properties editor and status bar.
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -11376,6 +11486,7 @@ function UI:buildTopBar()
 		end)(),
 		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
+		{ "Block Studio Shortcuts", "", function() api.setBlockKeys(not api.state().blockKeys) end, check = api.state().blockKeys == true },
 	} end)
 	menu("Help", function()
 		local items = self:helpItems()
@@ -12366,6 +12477,7 @@ function UI:viewMenu()
 		} end },
 		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
+		{ "Block Studio Shortcuts", "", function() api.setBlockKeys(not api.state().blockKeys) end, check = api.state().blockKeys == true },
 	}
 end
 function UI:selectMenu()
@@ -13137,7 +13249,7 @@ end
 function UI:destroy() self.gui.Parent = nil end
 
 return UI
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the UV Editor: a 2D window showing the UVs of the faces being edited over the texture,
 	where UV points are selected and moved (Blender's UV Editor, cut down).
 	Converted to Luau from Blender's UV editor behaviour:
@@ -13640,7 +13752,7 @@ function UVEditor.new(C)
 end
 
 return UVEditor
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - UV unwrapping: Unwrap (angle-preserving, cut at seams), Smart UV Project and Pack Islands.
 	Converted to Luau (and cut down) from Blender's UV tools:
 	  source/blender/editors/uvedit/uvedit_unwrap_ops.cc (unwrap / smart project operators)
@@ -14039,7 +14151,7 @@ function UV.facesWithUV(BMesh, bm)
 end
 
 return UV
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
 	axis lines and a headlight, plus the edit cage (lines + dots drawn as depth-tested parts).
 	SPDX-License-Identifier: GPL-2.0-or-later

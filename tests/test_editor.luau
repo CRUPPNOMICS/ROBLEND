@@ -1743,6 +1743,50 @@ check("Help > Tutorial: each card waits for the real action, then moves on", fun
 	textBtn("Close")
 	assert(not T.open, "closed")
 end)
+-- ===== Studio shortcuts blocked (0.21.2) =====
+check("ROBLEND holds the keyboard so Studio's 1 2 3 4 / Ctrl D etc. don't fire; Ctrl Z / Y still undo", function()
+	if inEdit() then press("Tab") beat() end
+	mouseXY(300, 300) beat()
+	local KC = MOCK.api.keyCapture()
+	assert(KC.box and MOCK.focused == KC.box, "the invisible box has the keyboard")
+	assert(MOCK.api.state().blockKeys, "on by default")
+	-- keys still reach ROBLEND
+	local p = editCube()
+	press("Three") beat()
+	eq(MOCK.api.state().mode, "face", "3 still works")
+	local u0 = MOCK.undos or 0
+	press("Z", { "LeftControl" }) beat()
+	eq(MOCK.undos, u0 + 1, "Ctrl Z = undo")
+	local r0 = MOCK.redos or 0
+	press("Y", { "LeftControl" }) beat()
+	eq(MOCK.redos, r0 + 1, "Ctrl Y = redo")
+	press("Tab") beat()
+	-- someone typing in another box: never taken away
+	local other = Instance.new("TextBox")
+	MOCK.focused = other
+	mouseXY(310, 300) beat()
+	eq(MOCK.focused, other, "doesn't steal from another text box")
+	MOCK.focused = nil
+	mouseXY(320, 300) beat()
+	eq(MOCK.focused, KC.box, "takes it again")
+	-- Edit > Block Studio Shortcuts turns it off
+	headerBtn("Edit") menuItem("Block Studio Shortcuts")
+	assert(not MOCK.api.state().blockKeys, "off")
+	eq(MOCK.focused, nil, "let go")
+	mouseXY(330, 300) beat()
+	eq(MOCK.focused, nil, "stays off")
+	headerBtn("Edit") menuItem("Block Studio Shortcuts")
+	eq(MOCK.focused, KC.box, "on again")
+	-- if Studio doesn't pass keys while the box has focus, it switches itself off
+	MOCK.t += 2
+	KC.box.Text = "q"
+	beat() beat() beat()
+	assert(KC.failed and MOCK.focused == nil, "gave up safely")
+	assert(MOCK.status:find("Couldn't block", 1, true), MOCK.status)
+	assert(not MOCK.api.state().blockKeys, "shows as off")
+	headerBtn("Edit") menuItem("Block Studio Shortcuts")
+	assert(MOCK.api.state().blockKeys and not KC.failed, "can be switched back on")
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

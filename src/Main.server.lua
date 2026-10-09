@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.1"
+local VERSION = "0.21.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -34,6 +34,7 @@ local Boolean = require(script.Boolean)
 local UVTools = require(script.UVTools)
 local UVEditor = require(script.UVEditor)
 local Tutorial = require(script.Tutorial)
+local KeyCapture = require(script.KeyCapture)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1754,7 +1755,7 @@ local ctx = {
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
-	return { editing = editing, obj = obj, bm = bm, mode = mode, modal = modal, origin = origin, cursor = CURSOR, activeObj = activeObj, xray = xray, view = view, ui = ui }
+	return { editing = editing, obj = obj, bm = bm, mode = mode, modal = modal, origin = origin, cursor = CURSOR, activeObj = activeObj, xray = xray, view = view, ui = ui, uiOn = uiOn }
 end
 function ctx.setActive(p) activeObj = p end
 function ctx.setBm(m) bm = m worldTris = nil end
@@ -1775,7 +1776,10 @@ function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:Is
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
 local UVE = UVEditor.new(ctx)
+ctx.plugin = plugin
+function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
+local KC = KeyCapture.new(ctx)
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
 local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
 paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
@@ -3393,7 +3397,7 @@ end
 local api = { version = VERSION, logoImage = logoImage }
 local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
+	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -3513,6 +3517,8 @@ api.uvEditor = function() UVE.toggle() end
 api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
+api.setBlockKeys = function(on) KC.setEnabled(on) end
+api.keyCapture = function() return KC end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
@@ -3765,6 +3771,7 @@ setStudioView = function(b)
 end
 setUIOn = function(on)
 	if not on then
+		KC.release()
 		if modal then pcall(finishModal, true) end
 		if editing then exitEdit() end
 	end
@@ -3946,6 +3953,7 @@ end
 
 mouse.Button1Down:Connect(function()
 	local mp = mousePos()
+	if uiOn and ownView() then task.defer(KC.grab) end
 	if UVE.mouseDown(mp) then return end
 	if ui:overUI(mp) then return end
 	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
@@ -4086,6 +4094,7 @@ pcall(function()
 end)
 mouse.Move:Connect(function()
 	local mp = mousePos()
+	if uiOn and ownView() then KC.grab() end
 	if uiOn then pcall(function() ui:step(mp) end) end
 	if UVE.mouseMove(mp) then return end
 	if lasso then
@@ -4236,7 +4245,10 @@ local function objectKey(k, shift, ctrl, alt)
 	end
 end
 UIS.InputBegan:Connect(function(input, gp)
-	if UIS:GetFocusedTextBox() then return end
+	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
+	local focusBox = UIS:GetFocusedTextBox()
+	if focusBox and not KC.isOurs(focusBox) then return end
+	if input.UserInputType == Enum.UserInputType.Keyboard then KC.noteKey() end
 	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
 	local shift = shiftDown()
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
@@ -4247,6 +4259,11 @@ UIS.InputBegan:Connect(function(input, gp)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
 	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
+	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
+	if focusBox and ctrl and not alt then
+		if k == Enum.KeyCode.Z and not shift then api.undo() return end
+		if k == Enum.KeyCode.Y or (k == Enum.KeyCode.Z and shift) then api.redo() return end
+	end
 	if uiOn and ui.menuOpen then
 		if k == Enum.KeyCode.Escape then ui:closeMenu() end
 		return

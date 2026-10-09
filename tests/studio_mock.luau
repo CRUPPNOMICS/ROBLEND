@@ -228,7 +228,10 @@ local UIS = svc("UserInputService")
 UIS._sig.InputBegan = Signal.new()
 SIGNALS.InputBegan = true
 function Inst.IsKeyDown(_, k) return held[k.Name] == true end
-function Inst.GetFocusedTextBox() return nil end
+function Inst.GetFocusedTextBox() return MOCK.focused end
+-- (only ROBLEND's invisible keyboard box keeps focus in the fake; other boxes are driven by their events)
+function Inst.CaptureFocus(o) if o._p.Name == "RB_KeyCapture" then MOCK.focused = o MOCK.captures = (MOCK.captures or 0) + 1 end end
+function Inst.ReleaseFocus(o) if MOCK.focused == o then MOCK.focused = nil end end
 function Inst.IsFocused() return false end
 function Inst.SetActive(o, on) o._p.ActiveState = on end
 
@@ -245,6 +248,8 @@ MOCK.recordings = {}
 function Inst.TryBeginRecording(_, n, d) local id = "rec" .. (#MOCK.recordings + 1) MOCK.recordings[#MOCK.recordings + 1] = d return id end
 function Inst.FinishRecording() end
 function Inst.SetWaypoint(_, n) MOCK.recordings[#MOCK.recordings + 1] = n end
+function Inst.Undo() MOCK.undos = (MOCK.undos or 0) + 1 end
+function Inst.Redo() MOCK.redos = (MOCK.redos or 0) + 1 end
 
 -- JSON: real encoding (checks the data is plain), decode through a registry
 local Http = svc("HttpService")

@@ -1,4 +1,4 @@
-# ROBLEND 0.21.1
+# ROBLEND 0.21.2
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.21.2:** while you work in the ROBLEND window, Studio's own shortcuts (1 2 3 4 build tools, Ctrl D, Delete and so on) no longer fire; ROBLEND gets the keys. Ctrl Z / Ctrl Y still undo and redo. Edit > Block Studio Shortcuts turns it off.
 
 **0.21.1:** the tutorial's Face select card shows which select mode you're in right now, and explains the number-row 3 vs the numpad 3.
 

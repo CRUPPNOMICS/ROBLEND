@@ -22,6 +22,8 @@ python3 tools/build.py   # makes build/ROBLEND.rbxmx
 
 Your place must allow the Mesh / Image APIs: *Game Settings > Security > Allow Mesh / Image APIs*.
 
+**Studio's shortcuts:** while your mouse is in the ROBLEND window, Studio's own shortcuts (the 1 2 3 4 build tools, Ctrl D, Delete...) are blocked so ROBLEND's keys work like Blender's. Ctrl Z / Ctrl Y still undo and redo. Edit > Block Studio Shortcuts turns this off.
+
 **New to it?** The first time you open ROBLEND a tutorial starts: short cards that wait for you to do each step (add a cube, Tab into Edit Mode, extrude, inset, loop cut, a modifier, saving). Help > Tutorial runs it again.
 
 ## Use
@@ -312,6 +314,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |
 | `src/UVEditor.lua` | The UV Editor window. |
 | `src/Tutorial.lua` | Help > Tutorial: the step cards. |
+| `src/KeyCapture.lua` | Holds the keyboard so Studio's own shortcuts don't fire inside ROBLEND. |
 | `src/Boolean.lua` | Union, Difference and Intersect (BSP-tree CSG) plus the clean-up. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |

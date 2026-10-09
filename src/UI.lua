@@ -350,6 +350,7 @@ function UI:buildTopBar()
 		end)(),
 		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
+		{ "Block Studio Shortcuts", "", function() api.setBlockKeys(not api.state().blockKeys) end, check = api.state().blockKeys == true },
 	} end)
 	menu("Help", function()
 		local items = self:helpItems()
@@ -1340,6 +1341,7 @@ function UI:viewMenu()
 		} end },
 		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
+		{ "Block Studio Shortcuts", "", function() api.setBlockKeys(not api.state().blockKeys) end, check = api.state().blockKeys == true },
 	}
 end
 function UI:selectMenu()
