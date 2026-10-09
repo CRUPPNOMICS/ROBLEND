@@ -135,7 +135,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
+local SIGNALS = { Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
@@ -379,6 +379,8 @@ local mouse = newInst("PluginMouse")
 mouse.X, mouse.Y = 600, 400
 MOCK.mouse = mouse
 function Inst.CreateToolbar() return newInst("Toolbar") end
+MOCK.actions = {}
+function Inst.CreatePluginAction(_, id, text) local a = newInst("PluginAction") a.Name = id a.Text = text MOCK.actions[id] = a return a end
 function Inst.CreateButton() local b = newInst("ToolbarButton") MOCK.toolbarButton = b return b end
 function Inst.CreateDockWidgetPluginGui() return newInst("DockWidgetPluginGui") end
 function Inst.GetMouse() return mouse end

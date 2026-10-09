@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.2"
+local VERSION = "0.21.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -3518,6 +3518,34 @@ api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
 api.setBlockKeys = function(on) KC.setEnabled(on) end
+-- Help > Show Key Presses: every key ROBLEND receives is printed to Output (to find keys Studio keeps for itself)
+api.toggleShowKeys = function()
+	KC.showKeys = not KC.showKeys
+	setStatus(KC.showKeys and "Key presses are printed in Studio's Output window now (Help > Show Key Presses again to stop)." or "Stopped printing key presses.")
+end
+-- Studio keeps some keys (its 1 2 3 4 build tools) before plugins see them. These ROBLEND commands appear in
+-- File > Advanced > Customize Shortcuts, so those keys can be given to ROBLEND instead
+local function pluginAction(id, text, tip, fn)
+	pcall(function()
+		local a = plugin:CreatePluginAction("ROBLEND_" .. id, NAME .. ": " .. text, tip, "", true)
+		a.Triggered:Connect(function()
+			local ok, err = pcall(fn)
+			if not ok then warn(NAME .. ": " .. tostring(err)) end
+		end)
+	end)
+end
+local function selectModeAction(m, label)
+	return function()
+		if not editing then setStatus("Tab into Edit Mode first, then " .. label .. " select works.") return end
+		if modal then return end
+		setMode(m)
+		setStatus(label .. " select.")
+	end
+end
+pluginAction("VertexSelect", "Vertex Select (1)", "ROBLEND Edit Mode: point select. Give it the 1 key here.", selectModeAction("vert", "Vertex"))
+pluginAction("EdgeSelect", "Edge Select (2)", "ROBLEND Edit Mode: edge select. Give it the 2 key here.", selectModeAction("edge", "Edge"))
+pluginAction("FaceSelect", "Face Select (3)", "ROBLEND Edit Mode: face select. Give it the 3 key here.", selectModeAction("face", "Face"))
+pluginAction("EditMode", "Edit / Object Mode (Tab)", "ROBLEND: Tab in and out of Edit Mode.", function() if uiOn and not modal then if editing then exitEdit() else toggleEdit() end end end)
 api.keyCapture = function() return KC end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
@@ -4247,6 +4275,9 @@ end
 UIS.InputBegan:Connect(function(input, gp)
 	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
 	local focusBox = UIS:GetFocusedTextBox()
+	if KC.showKeys and input.UserInputType == Enum.UserInputType.Keyboard then
+		print(("%s key: %s  (holding the keyboard: %s)"):format(NAME, input.KeyCode.Name, KC.isOurs(focusBox) and "yes" or (focusBox and "no, a text box has it" or "no")))
+	end
 	if focusBox and not KC.isOurs(focusBox) then return end
 	if input.UserInputType == Enum.UserInputType.Keyboard then KC.noteKey() end
 	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
