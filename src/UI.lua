@@ -756,6 +756,24 @@ function UI:refreshOutliner(s)
 		icon(eye, o.hidden and "eyeoff" or "eye", rgb(0xcccccc))
 		eye.Activated:Connect(function() self:safe(function() api.toggleHidden(o.key) end) self.outKey = nil end)
 		r.Activated:Connect(function()
+			-- double click a name to rename it (Blender's Outliner)
+			local now = os.clock()
+			local last = self.lastOutClick
+			self.lastOutClick = { key = o.key, t = now }
+			if last and last.key == o.key and now - last.t < 0.4 then
+				self.lastOutClick = nil
+				local tb = make("TextBox", { Name = "RB_OutlinerRename", ZIndex = (r.ZIndex or 1) + 2, Position = UDim2.fromOffset(66, 1), Size = UDim2.new(1, -116, 1, -2),
+					BackgroundColor3 = T.textField, BorderSizePixel = 0, Font = FONT, TextSize = 12, TextColor3 = T.text, Text = o.name, ClearTextOnFocus = false, TextXAlignment = Enum.TextXAlignment.Left }, r)
+				corner(tb, 3)
+				tb.FocusLost:Connect(function(enter)
+					local txt = tb.Text
+					tb.Parent = nil
+					if enter and txt ~= "" and txt ~= o.name then self:safe(function() api.selectObject(o.key, false) api.rename(txt) end) end
+					self.outKey = nil
+				end)
+				pcall(function() tb:CaptureFocus() end)
+				return
+			end
 			self:safe(function() api.selectObject(o.key, api.shiftDown and api.shiftDown()) end)
 			self.outKey = nil
 		end)
@@ -815,7 +833,14 @@ function UI:panel(order, key, title, build)
 	local h = make("TextButton", { LayoutOrder = 0, AutoButtonColor = false, BackgroundTransparency = 1, Text = "", Size = UDim2.new(1, 0, 0, 24) }, p)
 	label(h, { Position = UDim2.fromOffset(8, 0), Size = UDim2.fromOffset(14, 24), Text = open and "v" or ">", TextColor3 = T.textDim, TextSize = 11 })
 	label(h, { Position = UDim2.fromOffset(24, 0), Size = UDim2.new(1, -24, 1, 0), Text = title, TextColor3 = T.text })
-	h.Activated:Connect(function() self.panelsOpen[key] = not self.panelsOpen[key] self:buildPropContent() end)
+	h.Activated:Connect(function()
+		-- a double click counts once (it used to open the panel and shut it again straight away)
+		local now = os.clock()
+		if self.lastPanelClick and self.lastPanelClick.key == key and now - self.lastPanelClick.t < 0.4 then return end
+		self.lastPanelClick = { key = key, t = now }
+		self.panelsOpen[key] = not self.panelsOpen[key]
+		self:buildPropContent()
+	end)
 	if open then
 		local body = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, p)
 		vlist(body, 3)
