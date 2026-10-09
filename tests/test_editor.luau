@@ -6,6 +6,7 @@ local mouse = MOCK.mouse
 local cam = workspace.CurrentCamera
 local pass, fail = 0, 0
 local function check(name, fn)
+	if AUTO_ONLY and not name:find("Auto%-Test") then return end
 	local nw = #MOCK.warns
 	local ok, err = pcall(fn)
 	if ok and #MOCK.warns > nw then ok, err = false, "warned: " .. MOCK.warns[#MOCK.warns] end
@@ -1926,6 +1927,42 @@ check("Help > Quick Test sets up and shows every item, then tidies up", function
 	end
 	if mine then assert(mine.Parent, "your own part is kept") end
 	MOCK.api.quickTestState().reset()
+	MOCK.warns = {}
+end)
+check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
+	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
+	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	local realPrint = print
+	local lines = {}
+	print = function(...) lines[#lines + 1] = table.concat({ ... }, " ") if AUTO_ONLY then realPrint(...) end end
+	MOCK.warns = {}
+	local okRun, errRun = pcall(function() if not AUTO_ONLY then headerBtn("Help") end if AUTO_ONLY then MOCK.api.autoTest(AUTO_ONLY) else menuItem("Run Auto-Test (every feature, hands off)") end end)
+	for _ = 1, 4000 do
+		beat()
+		local done = false
+		for _, l in ipairs(lines) do if l:find("ROBLEND AUTO DONE", 1, true) then done = true end end
+		if done then break end
+	end
+	print = realPrint
+	assert(okRun, tostring(errRun))
+	local fails = {}
+	for _, w in ipairs(MOCK.warns) do fails[#fails + 1] = w end
+	local done, yous = nil, {}
+	for _, l in ipairs(lines) do
+		if l:find("ROBLEND AUTO DONE", 1, true) then done = l end
+		if l:find("ROBLEND AUTO YOU", 1, true) or l:find("ROBLEND AUTO PASS  [a-z]+  %-") then yous[#yous + 1] = l end
+	end
+	if #fails > 0 or not done then
+		for _, l in ipairs(lines) do if l:find("ROBLEND AUTO") then print(l) end end
+		for _, w in ipairs(fails) do print("WARNED " .. w) end
+		print("lines: " .. #lines .. " status: " .. tostring(MOCK.status))
+	end
+	assert(done, "never finished")
+	assert(#fails == 0, #fails .. " failed:\n" .. table.concat(fails, "\n"))
+	for _, d in ipairs(workspace:GetDescendants()) do
+		assert(not (d:IsA("BasePart") and d.Name:sub(1, 3) == "QT_"), "test part left behind: " .. d.Name)
+	end
 	MOCK.warns = {}
 end)
 check("wireframe, x-ray, Studio view switch, close", function()

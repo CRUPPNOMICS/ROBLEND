@@ -470,6 +470,7 @@ add(G, "reopen", "After a restart", "Last one: save the place, close Studio, ope
 	"Your meshes are still there and look right.", function(H) H.clean() end)
 
 QuickTest.ITEMS = I
+QuickTest.helpers = helpers
 
 -- ===== the card =====
 function QuickTest.new(C)

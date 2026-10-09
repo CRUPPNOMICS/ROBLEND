@@ -3,7 +3,7 @@
 SPDX-License-Identifier: GPL-2.0-or-later"""
 import pathlib, subprocess, sys
 root = pathlib.Path(__file__).resolve().parent.parent
-luau = sys.argv[1] if len(sys.argv) > 1 else 'luau'
+luau = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith('--') else 'luau'
 rd = lambda p: (root / p).read_text()
 
 # module file -> the global name it gets in the test bundle (the same names Main uses for its requires)
@@ -41,5 +41,8 @@ for file, alias in MODULES:
 assert 'require(script.' not in main, 'a require the test bundle does not know: ' + main[main.index('require(script.'):][:60]
 editor = (rd('tests/mock.luau') + rd('tests/studio_mock.luau') + 'MOCK.t = 0\n' + ''.join(mod(alias, rd(f'src/{file}.lua')) for file, alias in MODULES)
           + ';(function()\n' + main + '\nend)()\n' + rd('tests/test_editor.luau'))  # own function: Main gets its own 200 locals
+if '--write-only' in sys.argv:
+    (root / 'tests/_run_editor.luau').write_text(editor)
+    sys.exit(0)
 rc = run('engine', engine) | run('editor', editor)
 sys.exit(rc)

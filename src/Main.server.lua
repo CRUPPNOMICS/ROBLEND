@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.2"
+local VERSION = "0.22.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -37,6 +37,7 @@ local Tutorial = require(script.Tutorial)
 local KeyCapture = require(script.KeyCapture)
 local SelfTest = require(script.SelfTest)
 local QuickTest = require(script.QuickTest)
+local AutoTest = require(script.AutoTest)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -455,7 +456,19 @@ local function toScreen(wp)
 	return Vector2.new(sp.X, sp.Y), vis and sp.Z > 0, sp.Z
 end
 local mouse = plugin:GetMouse()
-local function mousePos() return Vector2.new(mouse.X, mouse.Y) end
+-- Help > Run Auto-Test drives ROBLEND through the very same input handlers as your mouse and keyboard:
+-- FAKE = { pos = Vector2, keys = { [KeyCode] = true } } while it runs (real input is ignored then)
+local FAKE = nil
+local INJECT = {}
+local function hook(name, signal, fn)
+	INJECT[name] = fn
+	signal:Connect(function(...)
+		if FAKE and not FAKE.injecting then return end
+		fn(...)
+	end)
+end
+local function keyDown(k) if FAKE then return FAKE.keys[k] == true end return UIS:IsKeyDown(k) end
+local function mousePos() if FAKE then return FAKE.pos end return Vector2.new(mouse.X, mouse.Y) end
 local function getRay() if ownView() then return view:ray(mousePos()) end return mouse.UnitRay end
 
 local function buildWorldTris()
@@ -620,10 +633,24 @@ end
 local drawObjects -- object-mode outlines (set below)
 local drawExtras  -- 3D cursor, knife, measure, annotations, tool previews (set below)
 local SEAM_COL, SHARP_COL, CREASE_COL = Color3.fromRGB(219, 37, 18), Color3.fromRGB(0, 255, 255), Color3.fromRGB(204, 0, 153)
+-- how many little parts the edit outline needs (lines + dots)
+local CAGE_BIG = 2500
+local function cageCost()
+	if not bm then return 0 end
+	local n = bm.ne
+	if mode == "vert" and bm.nv < 6000 then n += bm.nv elseif mode == "face" and bm.nf < 6000 then n += bm.nf end
+	return n
+end
+local lastCageDraw = 0
 local function drawCage()
+	lastCageDraw = os.clock()
 	pBegin()
 	if view then view:beginCage() end
-	if editing and bm and not paintMode then
+	-- a big mesh's outline is thousands of little parts: while a tool is moving it (G, S, R, Shrink...), only the
+	-- mesh is updated and the outline comes back when it's done (it would cost far more than moving the mesh)
+	local light = editing and bm and modal ~= nil and modal.kind ~= "loopcut" and modal.kind ~= "knife" and modal.kind ~= "circle" and modal.kind ~= "addcube"
+		and cageCost() > CAGE_BIG
+	if editing and bm and not paintMode and not light then
 		local many = bm.ne > 6000
 		for e in pairs(bm.edges) do
 			local on = e.sel
@@ -1068,7 +1095,7 @@ local function applyObjTransform()
 	local M = modal
 	local mp = mousePos()
 	local num = tonumber(M.num)
-	local snap = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	local snap = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 	local axisW = M.axis and AXES[M.axis]
 	local cam = camera()
 	if M.kind == "G" then
@@ -1175,7 +1202,7 @@ local function applyTransform()
 	if M.obj then applyObjTransform() return end
 	local mp = mousePos()
 	local num = tonumber(M.num)
-	local snap = (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) ~= EDIT.snap
+	local snap = (keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)) ~= EDIT.snap
 	local axisW = M.axisWorld or (M.axis and (M.axisLocal and origin:VectorToWorldSpace(AXES[M.axis]) or AXES[M.axis]))
 	local axisL = axisW and origin:VectorToObjectSpace(axisW).Unit
 	if M.kind == "G" then
@@ -1539,7 +1566,7 @@ label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (n
 -- ===== the Blender-style window (UI.lua + View.lua) =====
 -- (in its own function: Luau allows 200 locals per function)
 local function window()
-local function shiftDown() return UIS:IsKeyDown(Enum.KeyCode.LeftShift) or UIS:IsKeyDown(Enum.KeyCode.RightShift) end
+local function shiftDown() return keyDown(Enum.KeyCode.LeftShift) or keyDown(Enum.KeyCode.RightShift) end
 local function selectedPart()
 	if editing and obj then return obj end
 	if activeObj and activeObj.Parent and table.find(Selection:Get(), activeObj) then return activeObj end
@@ -1779,7 +1806,7 @@ function ctx.dirtyMeshFast(kind)
 end
 local OT = ObjectTools.new(ctx)
 ctx.rayMesh, ctx.camera = rayMesh, camera
-function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) end
+function ctx.ctrlDown() return keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl) end
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
 local UVE = UVEditor.new(ctx)
@@ -2932,6 +2959,15 @@ local function modelingTools()
 	end
 	O.SelectMirror = function()
 		local n = MT.selectMirror(bm, "X", false)
+		-- the mirror is found point by point: in edge / face select, pick the edges / faces those points make
+		if mode ~= "vert" then
+			for e in pairs(bm.edges) do e.sel = e.v1.sel and e.v2.sel end
+			for f in pairs(bm.faces) do
+				local all = true
+				for _, v in ipairs(BMesh.faceVerts(f)) do if not v.sel then all = false break end end
+				f.sel = all
+			end
+		end
 		flush()
 		changed()
 		setStatus(n > 0 and ("Selected the mirror (X) of %d verts."):format(n) or "No mirrored verts found (the mesh isn't symmetrical on X).")
@@ -3528,6 +3564,20 @@ api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
 api.quickTest = function() QT.toggle() end
+api.autoTest = function(only) task.spawn(function() local ok, err = pcall(AutoTest.run, ctx, api, only) if not ok then FAKE = nil AutoTest.running = false warn(NAME .. " auto-test stopped: " .. tostring(err)) end end) end
+-- the auto-test's hands: fake mouse / keys through the real handlers
+api.setFake = function(f) FAKE = f end
+api.inject = function(name, ...)
+	local f = INJECT[name]
+	if not (f and FAKE) then return end
+	FAKE.injecting = true
+	local ok, err = pcall(f, ...)
+	FAKE.injecting = false
+	if not ok then error(err, 0) end
+end
+api.toScreen = function(wp) return toScreen(wp) end
+api.W = function(co) return W(co) end
+api.camera = function() return camera() end
 api.quickTestState = function() return QT end
 api.setBlockKeys = function(on) KC.setEnabled(on) end
 -- Help > Show Key Presses: every key ROBLEND receives is printed to Output (to find keys Studio keeps for itself)
@@ -4008,7 +4058,7 @@ local function finishLasso()
 	setStatus(L.sub and "Lasso: deselected." or "Lasso: selected.")
 end
 
-mouse.Button1Down:Connect(function()
+hook("Button1Down", mouse.Button1Down, function()
 	local mp = mousePos()
 	-- (only in the 3D view itself: a click on a text box in Properties must keep the keyboard for typing)
 	if uiOn and ownView() and ui:inCanvas(mp) then task.defer(KC.grab) end
@@ -4026,7 +4076,7 @@ mouse.Button1Down:Connect(function()
 	end
 	if modal and modal.releaseConfirm then return end
 	if not modal and (editing or ownView()) then
-		local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+		local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 		local ok, used = pcall(MOD.press, mp, shiftDown(), ctrl)
 		if not ok then warn(NAME .. ": " .. tostring(used)) return end
 		if used then return end
@@ -4040,7 +4090,7 @@ mouse.Button1Down:Connect(function()
 	if not editing and not ownView() then return end
 	down = mp
 end)
-mouse.Button1Up:Connect(function()
+hook("Button1Up", mouse.Button1Up, function()
 	if uiOn then ui:mouseUp() end
 	if UVE.mouseUp(mousePos()) then return end
 	if paintMode and editing then
@@ -4066,8 +4116,8 @@ mouse.Button1Up:Connect(function()
 	down = nil
 	boxFrame.Visible = false
 	local shift = shiftDown()
-	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
-	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
+	local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
+	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	local ok, err = pcall(function()
 		if (b - a).Magnitude > 6 then boxSelect(a, b, shift, ctrl) return end
 		if not editing then
@@ -4076,7 +4126,7 @@ mouse.Button1Up:Connect(function()
 		end
 		-- double click = loop select (Blender 4), like Alt click
 		local now = os.clock()
-		if not alt and not ctrl and MOD.lastClick and now - MOD.lastClick.t < 0.3 and (b - MOD.lastClick.at).Magnitude < 5 then alt = true end
+		if not alt and not ctrl and MOD.lastClick and (not FAKE or FAKE.double) and now - MOD.lastClick.t < 0.3 and (b - MOD.lastClick.at).Magnitude < 5 then alt = true end
 		MOD.lastClick = { t = now, at = b }
 		if alt and ctrl then
 			-- Ctrl Alt click: edge ring select
@@ -4114,19 +4164,19 @@ mouse.Button1Up:Connect(function()
 	end)
 	if not ok then warn(NAME .. ": " .. tostring(err)) end
 end)
-mouse.Button2Down:Connect(function()
+hook("Button2Down", mouse.Button2Down, function()
 	if UVE.rightClick() then return end
 	if modal then pcall(finishModal, true) return end
 	if paintMode and brushCtl().adjust then brushCtl().finishAdjust(true) return end
 	local mp = mousePos()
-	if ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
+	if ownView() and ui:inCanvas(mp) and (keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)) then
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
 		return
 	end
 	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true } end
 end)
 pcall(function()
-	mouse.Button2Up:Connect(function()
+	hook("Button2Up", mouse.Button2Up, function()
 		if lasso then finishLasso() return end
 		local nd = navDrag
 		if not (nd and nd.rmb) then return end
@@ -4147,10 +4197,10 @@ local function wheel(steps)
 	dirtyCage = true
 end
 pcall(function()
-	mouse.WheelForward:Connect(function() wheelFromMouse = true wheel(1) end)
-	mouse.WheelBackward:Connect(function() wheelFromMouse = true wheel(-1) end)
+	hook("WheelForward", mouse.WheelForward, function() wheelFromMouse = true wheel(1) end)
+	hook("WheelBackward", mouse.WheelBackward, function() wheelFromMouse = true wheel(-1) end)
 end)
-mouse.Move:Connect(function()
+hook("Move", mouse.Move, function()
 	local mp = mousePos()
 	if uiOn and ownView() and ui:inCanvas(mp) then KC.grab() end
 	if uiOn then pcall(function() ui:step(mp) end) end
@@ -4264,8 +4314,9 @@ local function navKey(k, ctrl)
 	elseif n == "KeypadSeven" then api.viewAxis(ctrl and "bottom" or "top")
 	elseif n == "KeypadPeriod" then frameSelected()
 	elseif n == "Home" then frameAll()
-	elseif n == "KeypadPlus" then view:zoom(1) dirtyCage = true
-	elseif n == "KeypadMinus" then view:zoom(-1) dirtyCage = true
+	-- (Ctrl + numpad plus / minus in Edit Mode is Select More / Less, not zoom)
+	elseif n == "KeypadPlus" and not (ctrl and editing) then view:zoom(1) dirtyCage = true
+	elseif n == "KeypadMinus" and not (ctrl and editing) then view:zoom(-1) dirtyCage = true
 	elseif n == "KeypadFive" then view:toggleOrtho() dirtyCage = true
 	elseif n == "KeypadFour" then if ctrl then view:pan(-40, 0) else view:step(math.rad(15), 0) view.viewName = nil end dirtyCage = true
 	elseif n == "KeypadSix" then if ctrl then view:pan(40, 0) else view:step(math.rad(-15), 0) view.viewName = nil end dirtyCage = true
@@ -4302,15 +4353,15 @@ local function objectKey(k, shift, ctrl, alt)
 	elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
 	end
 end
-UIS.InputBegan:Connect(function(input, gp)
+hook("InputBegan", UIS.InputBegan, function(input, gp)
 	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
 	local focusBox = UIS:GetFocusedTextBox()
 	if KC.showKeys and input.UserInputType == Enum.UserInputType.Keyboard then
 		print(("%s key: %s  (holding the keyboard: %s)"):format(NAME, input.KeyCode.Name, KC.isOurs(focusBox) and "yes" or (focusBox and "no, a text box has it" or "no")))
 	end
-	if focusBox and not KC.isOurs(focusBox) then return end
+	if focusBox and not KC.isOurs(focusBox) and not FAKE then return end
 	if input.UserInputType == Enum.UserInputType.Keyboard then KC.noteKey() end
-	local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+	local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 	local shift = shiftDown()
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
 		local mp = mousePos()
@@ -4319,7 +4370,7 @@ UIS.InputBegan:Connect(function(input, gp)
 	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
-	local alt = UIS:IsKeyDown(Enum.KeyCode.LeftAlt) or UIS:IsKeyDown(Enum.KeyCode.RightAlt)
+	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
 	if focusBox and ctrl and not alt then
 		if k == Enum.KeyCode.Z and not shift then api.undo() return end
@@ -4397,14 +4448,14 @@ UIS.InputBegan:Connect(function(input, gp)
 	if not ok then warn(NAME .. ": " .. tostring(err)) setStatus("Error: " .. tostring(err)) end
 end)
 pcall(function()
-	UIS.InputEnded:Connect(function(input)
+	hook("InputEnded", UIS.InputEnded, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton3 then
 			if navDrag and not navDrag.rmb then navDrag = nil end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
 			if uiOn then ui:mouseUp() end
 		end
 	end)
-	UIS.InputChanged:Connect(function(input)
+	hook("InputChanged", UIS.InputChanged, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseWheel and not wheelFromMouse then
 			wheel(input.Position.Z > 0 and 1 or -1)
 		end
@@ -4438,9 +4489,9 @@ local function catchRibbonTool()
 	if key then
 		local pad = ({ One = Enum.KeyCode.KeypadOne, Two = Enum.KeyCode.KeypadTwo, Three = Enum.KeyCode.KeypadThree, Four = Enum.KeyCode.KeypadFour })[key]
 		local downPad = false
-		pcall(function() downPad = UIS:IsKeyDown(pad) end)
+		pcall(function() downPad = keyDown(pad) end)
 		if downPad then
-			local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+			local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 			if KC.showKeys then print(("%s key: Keypad%s  (from Studio's %s tool key)"):format(NAME, key, tool.Name)) end
 			pcall(navKey, pad, ctrl)
 			return
@@ -4536,7 +4587,9 @@ RunService.Heartbeat:Connect(function()
 	end
 	if editing or ownView() then
 		local cf = camera().CFrame
-		if dirtyCage or cf ~= lastCam then
+		-- orbiting round a big mesh: redraw its outline about 8 times a second, not every frame
+		local throttle = not dirtyCage and cf ~= lastCam and editing and cageCost() > CAGE_BIG and now - lastCageDraw < 0.12
+		if (dirtyCage or cf ~= lastCam) and not throttle then
 			lastCam = cf
 			dirtyCage = false
 			drawCage()
