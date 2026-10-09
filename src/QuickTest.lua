@@ -431,7 +431,7 @@ add(G, "uvkeep", "UVs kept", "Move a few points with G, then press Tab to leave 
 	function(H, api) local p = H.add("Cube") H.select({ p }) H.frame() api.setTexture("rbxasset://textures/face.png") api.toggleEdit() H.pick("all") api.uvUnwrap("smart") H.pick("top") end)
 
 G = "Sculpt Mode"
-add(G, "sculptin", "Enter Sculpt Mode", "Click the mode button at the top left (it says Edit Mode) > Sculpt Mode. (Ctrl Tab may not work: Studio keeps that key.)",
+add(G, "sculptin", "Enter Sculpt Mode", "Press Q (or click the mode button at the top left, it says Edit Mode) > Sculpt Mode.",
 	"A brush circle follows the mouse; brush buttons appear on the left.", function(H) H.edit("Sphere", "face", "none") end)
 add(G, "brushes", "Brushes", "Drag on the sphere. Then press X, C, I, G, S, T, P and drag with each. Hold Ctrl to do the opposite.",
 	"Draw (X) raises, Clay (C) builds up, Inflate (I) puffs, Grab (G) pulls, Smooth (S) relaxes, Flatten (T), Pinch (P).",
@@ -444,7 +444,7 @@ add(G, "sculptspeed", "Sculpt speed", "Drag around on the sphere with the Draw b
 	"It keeps up with the mouse (no stutter).", function(H) H.sculpt(3) end)
 
 G = "Vertex Paint"
-add(G, "paintin", "Enter Vertex Paint", "Click the mode button at the top left > Vertex Paint.",
+add(G, "paintin", "Enter Vertex Paint", "Press Q (or click the mode button at the top left) > Vertex Paint.",
 	"The header shows a colour square and a hex box; the Mesh menu becomes Paint.", function(H) H.edit("Sphere", "face", "none") end)
 add(G, "paintdraw", "Paint", "Drag on the sphere. Click the colour square to pick another colour. Hold Ctrl to paint white.",
 	"Colour spreads smoothly across the surface.", function(H) H.paint(2) end)

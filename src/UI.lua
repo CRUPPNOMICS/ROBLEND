@@ -1948,7 +1948,7 @@ function UI:helpItems()
 		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
 		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
 		{ "Lasso select / deselect", "Ctrl RMB drag / Shift Ctrl RMB drag" }, { "Snapping on / off", "Shift Tab" }, { "UV menu", "U" },
-		{ "Pivot point menu", "." }, { "Mode menu (Object / Edit / Sculpt)", "Ctrl Tab" },
+		{ "Pivot point menu", "." }, { "Mode menu (Object / Edit / Sculpt / Paint)", "Q or Ctrl Tab" },
 		{ "Sculpt brushes", "X C I G S T P, Shift C" }, { "Vertex Paint: pick colour / fill", "S / Shift K" }, { "Brush size / strength", "F / Shift F, [ ]" }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },

@@ -82,7 +82,7 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: var(--kbd); color
 
 <div class="wrap">
   <header class="top">
-    <div class="brand"><h1>ROBLEND Test Run</h1><span class="ver">plugin 0.22.6</span></div>
+    <div class="brand"><h1>ROBLEND Test Run</h1><span class="ver">plugin 0.22.7</span></div>
     <p class="lede">Go down the list in Studio. Mark each one Works, Broken or Skip, and say what went wrong in the note when something breaks. Claude reads these results and fixes what failed.</p>
     <div class="bar" aria-hidden="true"><span class="ok" id="barOk"></span><span class="bad" id="barBad"></span><span class="skip" id="barSkip"></span></div>
     <div class="stats">
@@ -109,7 +109,7 @@ const TESTS = [
   ["open", "Open the window", "Click the ROBLEND button in the Plugins tab.", "The Blender-style window covers the 3D view: grey grid, red and blue axis lines, tool strip on the left, Outliner and Properties on the right."],
   ["logo", "Logo", "Look at the toolbar button, the top bar and the bottom right corner.", "The yellow ROBLEND logo shows in all three places."],
   ["tutorial", "Tutorial", "ROBLEND's own Help menu (next to the logo) > Tutorial. Do a couple of cards.", "A card bottom-left that turns green and moves on when you do each step."],
-  ["about", "About box", "Help > About ROBLEND.", "Logo, version 0.22.6, GPL licence, link to the GitHub repo."],
+  ["about", "About box", "Help > About ROBLEND.", "Logo, version 0.22.7, GPL licence, link to the GitHub repo."],
   ["f3", "Search every command", "In Object Mode press [F3] and type join. Then [Tab] into Edit Mode on a mesh, [F3], type bevel, press [Enter].", "The list narrows as you type (Object Mode lists object commands, Edit Mode lists mesh commands); Enter runs the top one, here Bevel."],
   ["studiokeys", "Studio shortcuts blocked", "In Edit Mode press number-row [1] [2] [3]. Try [Ctrl+D] in Object Mode too.", "ROBLEND switches point / edge / face select. Studio's Select / Move / Scale tools and its duplicate don't kick in."],
   ["keys", "Show Key Presses", "Help > Show Key Presses, press a few keys, look at Studio's Output window.", "Each key prints a line like \"ROBLEND key: G\". Turn it off again after."],

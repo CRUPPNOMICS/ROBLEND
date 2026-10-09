@@ -951,9 +951,11 @@ function AutoTest.run(C, api, only)
 	end
 	T("sculptin", function()
 		edit("Sphere", "face", "none")
+		move(mid()) key("Q")
+		check(C.get().ui.menuOpen ~= nil, "Q should open the mode menu")
+		key("Escape")
 		api.setPaintMode("sculpt") beat()
 		check(api.state().paintMode == "sculpt", "Sculpt Mode")
-		return "you: Ctrl Tab may be kept by Studio; use the mode button"
 	end)
 	T("brushes", function()
 		H.sculpt(1) beat()

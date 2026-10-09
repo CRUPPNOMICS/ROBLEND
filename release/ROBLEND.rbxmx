@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.6"
+local VERSION = "0.22.7"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4433,6 +4433,8 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if UVE.key(k, shift, ctrl, alt) then return end
 	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
 	if k == Enum.KeyCode.Tab and ctrl and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
+	-- Q: the same mode menu (Studio keeps Ctrl Tab for itself)
+	if k == Enum.KeyCode.Q and not ctrl and not shift and not alt and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
 	if k == Enum.KeyCode.Tab and shift and not ctrl and not alt and uiOn then
 		EDIT.snap = not EDIT.snap
 		setStatus("Snapping " .. (EDIT.snap and ("on (" .. EDIT.snapTarget .. ")") or "off") .. ".")
@@ -5611,9 +5613,11 @@ function AutoTest.run(C, api, only)
 	end
 	T("sculptin", function()
 		edit("Sphere", "face", "none")
+		move(mid()) key("Q")
+		check(C.get().ui.menuOpen ~= nil, "Q should open the mode menu")
+		key("Escape")
 		api.setPaintMode("sculpt") beat()
 		check(api.state().paintMode == "sculpt", "Sculpt Mode")
-		return "you: Ctrl Tab may be kept by Studio; use the mode button"
 	end)
 	T("brushes", function()
 		H.sculpt(1) beat()
@@ -12532,7 +12536,7 @@ add(G, "uvkeep", "UVs kept", "Move a few points with G, then press Tab to leave 
 	function(H, api) local p = H.add("Cube") H.select({ p }) H.frame() api.setTexture("rbxasset://textures/face.png") api.toggleEdit() H.pick("all") api.uvUnwrap("smart") H.pick("top") end)
 
 G = "Sculpt Mode"
-add(G, "sculptin", "Enter Sculpt Mode", "Click the mode button at the top left (it says Edit Mode) > Sculpt Mode. (Ctrl Tab may not work: Studio keeps that key.)",
+add(G, "sculptin", "Enter Sculpt Mode", "Press Q (or click the mode button at the top left, it says Edit Mode) > Sculpt Mode.",
 	"A brush circle follows the mouse; brush buttons appear on the left.", function(H) H.edit("Sphere", "face", "none") end)
 add(G, "brushes", "Brushes", "Drag on the sphere. Then press X, C, I, G, S, T, P and drag with each. Hold Ctrl to do the opposite.",
 	"Draw (X) raises, Clay (C) builds up, Inflate (I) puffs, Grab (G) pulls, Smooth (S) relaxes, Flatten (T), Pinch (P).",
@@ -12545,7 +12549,7 @@ add(G, "sculptspeed", "Sculpt speed", "Drag around on the sphere with the Draw b
 	"It keeps up with the mouse (no stutter).", function(H) H.sculpt(3) end)
 
 G = "Vertex Paint"
-add(G, "paintin", "Enter Vertex Paint", "Click the mode button at the top left > Vertex Paint.",
+add(G, "paintin", "Enter Vertex Paint", "Press Q (or click the mode button at the top left) > Vertex Paint.",
 	"The header shows a colour square and a hex box; the Mesh menu becomes Paint.", function(H) H.edit("Sphere", "face", "none") end)
 add(G, "paintdraw", "Paint", "Drag on the sphere. Click the colour square to pick another colour. Hold Ctrl to paint white.",
 	"Colour spreads smoothly across the surface.", function(H) H.paint(2) end)
@@ -15457,7 +15461,7 @@ function UI:helpItems()
 		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
 		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
 		{ "Lasso select / deselect", "Ctrl RMB drag / Shift Ctrl RMB drag" }, { "Snapping on / off", "Shift Tab" }, { "UV menu", "U" },
-		{ "Pivot point menu", "." }, { "Mode menu (Object / Edit / Sculpt)", "Ctrl Tab" },
+		{ "Pivot point menu", "." }, { "Mode menu (Object / Edit / Sculpt / Paint)", "Q or Ctrl Tab" },
 		{ "Sculpt brushes", "X C I G S T P, Shift C" }, { "Vertex Paint: pick colour / fill", "S / Shift K" }, { "Brush size / strength", "F / Shift F, [ ]" }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },

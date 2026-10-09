@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.22.6"
+local VERSION = "0.22.7"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4433,6 +4433,8 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if UVE.key(k, shift, ctrl, alt) then return end
 	if k == Enum.KeyCode.F3 and uiOn and not modal then ui:openSearch() return end
 	if k == Enum.KeyCode.Tab and ctrl and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
+	-- Q: the same mode menu (Studio keeps Ctrl Tab for itself)
+	if k == Enum.KeyCode.Q and not ctrl and not shift and not alt and uiOn and not modal then ui:openNamedMenu("mode", mousePos()) return end
 	if k == Enum.KeyCode.Tab and shift and not ctrl and not alt and uiOn then
 		EDIT.snap = not EDIT.snap
 		setStatus("Snapping " .. (EDIT.snap and ("on (" .. EDIT.snapTarget .. ")") or "off") .. ".")
