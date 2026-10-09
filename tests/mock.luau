@@ -31,3 +31,6 @@ CFm.__mul = function(a, v)
 	return v * math.cos(ang) + axis:Cross(v) * math.sin(ang) + axis * (axis:Dot(v) * (1 - math.cos(ang)))
 end
 CFrame = { fromAxisAngle = function(axis, ang) return setmetatable({ axis = axis.Unit, ang = ang }, CFm) end }
+
+-- Color3 stand-in for engine tests (Vertex Paint)
+Color3 = { new = function(r, g, b) return { R = r, G = g, B = b } end, fromRGB = function(r, g, b) return { R = r / 255, G = g / 255, B = b / 255 } end }

@@ -411,6 +411,14 @@ function BMesh:toData()
 	end
 	for i, f in ipairs(fOrder) do if f.smooth then sm[#sm + 1] = i end end
 	local d = { v = vs, f = fs, e = es }
+	-- vertex colours (Vertex Paint): one 0xRRGGBB per vert, in vert order; only saved when something is painted
+	local vc, anyCol = {}, false
+	for v in pairs(self.verts) do
+		local c = v.col
+		if c then anyCol = true end
+		vc[vi[v]] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or 0xFFFFFF
+	end
+	if anyCol then d.vc = vc end
 	if #sm > 0 then d.s = sm end
 	if #sh > 0 then d.sh = sh end
 	if #se > 0 then d.se = se end
@@ -423,6 +431,11 @@ function BMesh.fromData(d)
 	local bm = BMesh.new()
 	local vs, fl = {}, {}
 	for i = 1, #d.v, 3 do vs[#vs + 1] = bm:vertCreate(V3(d.v[i], d.v[i + 1], d.v[i + 2])) end
+	if d.vc then
+		for i, hex in ipairs(d.vc) do
+			if vs[i] and hex ~= 0xFFFFFF then vs[i].col = Color3.fromRGB(math.floor(hex / 65536) % 256, math.floor(hex / 256) % 256, hex % 256) end
+		end
+	end
 	for _, idx in ipairs(d.f or {}) do
 		local list = {}
 		for i, k in ipairs(idx) do list[i] = vs[k] end

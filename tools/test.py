@@ -28,7 +28,7 @@ def run(tag, src):
     return r.returncode
 
 
-engine = (rd('tests/mock.luau') + ''.join(mod(ALIAS[n], rd(f'src/{n}.lua')) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Sculpt'))
+engine = (rd('tests/mock.luau') + ''.join(mod(ALIAS[n], rd(f'src/{n}.lua')) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Sculpt', 'Paint'))
           + 'do\n' + rd('tests/test_engine.luau') + '\nend\n' + rd('tests/test_tools.luau'))
 main = rd('src/Main.server.lua')
 for a, b in [('os.clock()', 'MOCK.t'), ('local function setStatus(t) status.Text = t', 'local function setStatus(t) status.Text = t MOCK.status = t'),

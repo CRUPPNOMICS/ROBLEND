@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.14.0"
+local VERSION = "0.15.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -27,6 +27,7 @@ local Icon = require(script.Icon)
 local ObjectTools = require(script.ObjectTools)
 local ModStack = require(script.ModStack)
 local Sculpt = require(script.Sculpt)
+local Paint = require(script.Paint)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1653,7 +1654,10 @@ local OT = ObjectTools.new(ctx)
 ctx.rayMesh, ctx.camera = rayMesh, camera
 function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) end
 local SCULPT = Sculpt.new(ctx)
-paintHooks.exit = function() SCULPT.exit() end
+local PAINT = Paint.new(ctx)
+-- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
+local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
+paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
 local function modelingTools()
@@ -3182,7 +3186,8 @@ function api.state()
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
-		paintMode = paintMode, brush = SCULPT and SCULPT.brush, brushRadius = SCULPT and SCULPT.radius, brushStrength = SCULPT and SCULPT.strength, symmetryX = SCULPT and SCULPT.symmetryX,
+		paintMode = paintMode, brush = SCULPT and brushCtl().brush, brushRadius = SCULPT and brushCtl().radius, brushStrength = SCULPT and brushCtl().strength, symmetryX = SCULPT and brushCtl().symmetryX,
+		paintColor = PAINT and Paint.hex(PAINT.color),
 		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode, snapTarget = EDIT.snapTarget, pivot = EDIT.pivot,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
@@ -3291,29 +3296,59 @@ api.setPaintMode = function(m)
 	if modal then return end
 	if not m then
 		paintMode = nil
-		SCULPT.exit()
+		SCULPT.exit() PAINT.exit()
 		dirtyCage, dirtyMesh = true, true
 		if editing then setStatus("Edit Mode.") end
 		return
 	end
 	if not editing then toggleEdit() end
 	if not editing then return end
+	SCULPT.exit() PAINT.exit()
 	paintMode = m
 	clearSel()
 	flush()
 	worldTris = nil
 	dirtyCage, dirtyMesh = true, true
+	if m == "paint" then
+		PAINT.setBrush(PAINT.brush)
+		local c = obj and obj.Color
+		if c and (c.R < 0.9 or c.G < 0.9 or c.B < 0.9) then
+			setStatus("Vertex Paint. The part's colour tints the paint - Paint > White Base Colour shows the true colours.")
+		elseif bm.nv < 100 then
+			setStatus(("Vertex Paint. Colour goes on the points (%d here) and blends across faces - Subdivide for finer painting."):format(bm.nv))
+		end
+		return
+	end
 	SCULPT.setBrush(SCULPT.brush)
 	if bm.nv < 300 then
 		setStatus(("Sculpt Mode. This mesh only has %d points - use Sculpt > Subdivide (or Ctrl 2 on it first) for detail to sculpt."):format(bm.nv))
 	end
 end
 api.brushes = Sculpt.BRUSHES
-api.setBrush = function(id) SCULPT.setBrush(id) end
+api.paintBrushes = Paint.BRUSHES
+api.palette = Paint.PALETTE
+api.setBrush = function(id) brushCtl().setBrush(id) end
 api.sculptSet = function(key, value)
-	if key == "radius" then SCULPT.radius = math.clamp(value, 4, 500)
-	elseif key == "strength" then SCULPT.strength = math.clamp(value, 0.01, 1)
-	elseif key == "symmetryX" then SCULPT.symmetryX = value == true end
+	local B = brushCtl()
+	if key == "radius" then B.radius = math.clamp(value, 4, 500)
+	elseif key == "strength" then B.strength = math.clamp(value, 0.01, 1)
+	elseif key == "symmetryX" then B.symmetryX = value == true end
+end
+-- Vertex Paint: colour, fill, white base
+api.setPaintColor = function(c)
+	if type(c) == "string" then c = Paint.fromHex(c) elseif type(c) == "number" then c = Paint.fromInt(c) end
+	if c then PAINT.setColor(c) else setStatus("Colour: type 6 hex digits, like FF8800.") end
+end
+api.paintFill = function() if editing and paintMode == "paint" then PAINT.fill() end end
+api.paintWhiteBase = function()
+	if obj then record("White Base Colour", function() obj.Color = Color3.new(1, 1, 1) end) setStatus("Part colour set to white: the paint shows as painted.") end
+end
+api.paintClear = function()
+	if not (editing and bm) then return end
+	for v in pairs(bm.verts) do v.col = nil end
+	dirtyMesh = true
+	commit("Clear Colours")
+	setStatus("Colours cleared.")
 end
 -- Sculpt > Subdivide: one Catmull-Clark level for the whole mesh (more points to sculpt), smooth shaded
 api.sculptSubdivide = function()
@@ -3640,7 +3675,7 @@ mouse.Button1Down:Connect(function()
 	local mp = mousePos()
 	if ui:overUI(mp) then return end
 	if paintMode and editing and ownView() and not modal and ui:inCanvas(mp) then
-		local ok, err = pcall(SCULPT.press, mp)
+		local ok, err = pcall(brushCtl().press, mp)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
 		return
 	end
@@ -3668,7 +3703,7 @@ end)
 mouse.Button1Up:Connect(function()
 	if uiOn then ui:mouseUp() end
 	if paintMode and editing then
-		local ok, err = pcall(SCULPT.release)
+		local ok, err = pcall(brushCtl().release)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
 		return
 	end
@@ -3740,7 +3775,7 @@ mouse.Button1Up:Connect(function()
 end)
 mouse.Button2Down:Connect(function()
 	if modal then pcall(finishModal, true) return end
-	if paintMode and SCULPT.adjust then SCULPT.finishAdjust(true) return end
+	if paintMode and brushCtl().adjust then brushCtl().finishAdjust(true) return end
 	local mp = mousePos()
 	if ownView() and ui:inCanvas(mp) and (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) then
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
@@ -3791,10 +3826,10 @@ mouse.Move:Connect(function()
 	end
 	if paintMode and editing and ownView() and not modal then
 		if ui:inCanvas(mp) and not ui:overUI(mp) then
-			local ok, err = pcall(SCULPT.move, mp)
+			local ok, err = pcall(brushCtl().move, mp)
 			if not ok then warn(NAME .. ": " .. tostring(err)) end
 		else
-			SCULPT.hideRing()
+			brushCtl().hideRing()
 		end
 		return
 	end
@@ -3971,7 +4006,7 @@ UIS.InputBegan:Connect(function(input, gp)
 		if navKey(k, ctrl) then return end
 		if paintMode and editing then
 			-- Sculpt Mode: brush keys only (no mesh-editing tools)
-			if SCULPT.key(k, shift, ctrl, alt) then return end
+			if brushCtl().key(k, shift, ctrl, alt) then return end
 			if k == Enum.KeyCode.Z and alt then toggleXray()
 			elseif k == Enum.KeyCode.Z and shift then api.setShading(shading == "wire" and "solid" or "wire")
 			elseif k == Enum.KeyCode.Z then ui:openNamedMenu("shading", mousePos()) end

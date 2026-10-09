@@ -72,7 +72,7 @@ MT.cornersAround = cornersAround
 function MT.toSpec(bm)
 	local spec = { verts = {}, faces = {}, edges = {}, eflags = {}, vi = {} }
 	for v in pairs(bm.verts) do
-		spec.verts[#spec.verts + 1] = { co = v.co, sel = v.sel, loose = v.e == nil }
+		spec.verts[#spec.verts + 1] = { co = v.co, sel = v.sel, loose = v.e == nil, col = v.col }
 		spec.vi[v] = #spec.verts
 	end
 	for f in pairs(bm.faces) do
@@ -118,6 +118,7 @@ function MT.fromSpec(spec)
 		if used[i] or (sv.loose and not sv.dead) then
 			local v = nb:vertCreate(sv.co)
 			v.sel = sv.sel == true
+			v.col = sv.col
 			vs[i] = v
 		end
 	end

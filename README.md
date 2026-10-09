@@ -223,6 +223,15 @@ Push the surface around like clay, as in Blender's Sculpt Mode.
 - Symmetry X is on by default: both sides of the mesh change together.
 - Sculpt > Subdivide adds detail (each press = 4x the faces, up to Roblox's 20,000 triangles). Each stroke is one undo step.
 
+**Vertex Paint** (mode dropdown or Ctrl Tab > Vertex Paint)
+
+Paint colours onto the mesh's points; the colour blends across each face.
+- Brushes: Draw, Blur, Average. Ctrl paints white back, holding Shift blurs.
+- The colour: the swatch in the header (palette) or type a hex code like FF8800. S over the mesh picks up the colour under the mouse.
+- Paint > Fill (Shift K) colours the whole mesh; Clear Colours resets it.
+- The part's own colour tints the paint: Paint > White Base Colour shows the true colours.
+- More points = finer painting (Subdivide first). Colours are saved with the mesh and go up when it's saved to Roblox.
+
 **Textures and UVs**
 - U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
 - Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
@@ -254,6 +263,7 @@ Push the surface around like clay, as in Blender's Sculpt Mode.
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
 | `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
+| `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |

@@ -187,6 +187,19 @@ function Display.build(bm, selColor, skipHidden, uv)
 	end)
 	local tris = 0
 	local shared = {}
+	-- vertex colours (Vertex Paint): one colour id per distinct colour
+	local painted = false
+	for v in pairs(bm.verts) do if v.col then painted = true break end end
+	local colIds = {}
+	local function colId(c)
+		if not c then return white end
+		local k = math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)
+		if not colIds[k] then
+			local ok2, id = pcall(function() return em:AddColor(c, 1) end)
+			colIds[k] = ok2 and id or white
+		end
+		return colIds[k]
+	end
 	-- Auto Smooth / split normals: smooth faces round a vert share its corner only across edges that are
 	-- not marked sharp (and between two smooth faces), so sharp edges stay crisp. fan[v][f] = group key
 	local fan = {}
@@ -244,8 +257,13 @@ function Display.build(bm, selColor, skipHidden, uv)
 			if uvids and uvids[t[3]] then pcall(function() em:SetFaceUVs(fid, { uvids[t[1]], uvids[t[2]], uvids[t[3]] }) end) end
 			if white then
 				pcall(function()
-					local col = (sel and f.sel) and sel or white
-					em:SetFaceColors(fid, { col, col, col })
+					if sel and f.sel then
+						em:SetFaceColors(fid, { sel, sel, sel })
+					elseif painted then
+						em:SetFaceColors(fid, { colId(vs[t[1]].col), colId(vs[t[2]].col), colId(vs[t[3]].col) })
+					else
+						em:SetFaceColors(fid, { white, white, white })
+					end
 				end)
 			end
 		end
