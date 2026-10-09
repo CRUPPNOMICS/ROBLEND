@@ -1945,6 +1945,32 @@ check("Before you start: ROBLEND waits until Mesh APIs and the CreateAssetAsync 
 	startB.Activated:Fire() beat()
 	assert(not SU.isOpen and not ov.Visible, "Start lets you in")
 end)
+check("the colour picker is a honeycomb of real colours; clicking one paints with it (0.24.1)", function()
+	if inEdit() then press("Tab") beat() end
+	local api = MOCK.api
+	api.add("Sphere") beat()
+	local sp = S.Selection:Get()[1]
+	api.setPaintMode("paint")
+	for _ = 1, 3 do MOCK.t += 0.2 beat() end
+	-- open it from Paint > Colour...
+	headerBtn("Paint") menuItem("Colour...")
+	local pk = gui:FindFirstChild("RB_HexPicker")
+	assert(pk, "picker open")
+	local n, pickBtn = 0, nil
+	for _, d in ipairs(pk:GetChildren()) do
+		if d.Name == "RB_Hex" then
+			n += 1
+			if d:GetAttribute("rbHex") == "FF0000" then pickBtn = d end
+		end
+	end
+	assert(n == 127 + 13, "127 hexagons + 13 greys, got " .. n)
+	assert(pickBtn, "pure red is in the honeycomb")
+	pickBtn.Activated:Fire() beat()
+	assert(api.state().paintColor == "FF0000", "painting red now: " .. tostring(api.state().paintColor))
+	assert(not gui:FindFirstChild("RB_HexPicker"), "closes after picking")
+	api.setPaintMode(nil) press("Tab") beat()
+	sp.Parent = nil
+end)
 check("Help > Quick Test sets up and shows every item, then tidies up", function()
 	if inEdit() then press("Tab") beat() end
 	local mine = workspace:FindFirstChild("Crate Lid", true)

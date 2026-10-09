@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.0"
+local VERSION = "0.24.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4122,6 +4122,36 @@ api.setPaintColor = function(c)
 	if c then PAINT.setColor(c) else setStatus("Colour: type 6 hex digits, like FF8800.") end
 end
 api.paintFill = function() if editing and paintMode == "paint" then PAINT.fill() end end
+-- a white hexagon picture for the colour picker's swatches (tinted per colour); nil if this Studio can't make one
+local hexImage
+api.hexImage = function()
+	if hexImage ~= nil then return hexImage or nil end
+	hexImage = false
+	pcall(function()
+		local W, H = 32, 37
+		local R = W / math.sqrt(3)
+		local buf = buffer.create(W * H * 4)
+		for y = 0, H - 1 do
+			for x = 0, W - 1 do
+				-- 4 x 4 samples per pixel: smooth edges
+				local n = 0
+				for sy = 0, 3 do
+					for sx = 0, 3 do
+						local px, py = math.abs(x + (sx + 0.5) / 4 - W / 2), math.abs(y + (sy + 0.5) / 4 - H / 2)
+						if px <= W / 2 - 0.6 and py <= R - px / math.sqrt(3) - 0.6 then n += 1 end
+					end
+				end
+				local i = (y * W + x) * 4
+				buffer.writeu8(buf, i, 255) buffer.writeu8(buf, i + 1, 255) buffer.writeu8(buf, i + 2, 255)
+				buffer.writeu8(buf, i + 3, math.floor(n / 16 * 255 + 0.5))
+			end
+		end
+		local img = AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+		img:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), buf)
+		hexImage = img
+	end)
+	return hexImage or nil
+end
 api.paintWhiteBase = function()
 	if obj then record("White Base Colour", function() obj.Color = Color3.new(1, 1, 1) end) setStatus("Part colour set to white: the paint shows as painted.") end
 end
@@ -14634,7 +14664,7 @@ function UI:buildView()
 		self.sculptFields[f[1]] = box
 	end
 	-- Vertex Paint colour: swatch (opens the palette) + hex box
-	self.colorSwatch = self:btn(sh, { LayoutOrder = 0, Size = UDim2.fromOffset(28, 18), BackgroundColor3 = rgb(0xc42b2b), Text = "" }, function(b) self:openMenu(self:paletteItems(), b, "Colour") end, "regular")
+	self.colorSwatch = self:btn(sh, { LayoutOrder = 0, Size = UDim2.fromOffset(28, 18), BackgroundColor3 = rgb(0xc42b2b), Text = "" }, function(b) self:openHexPicker(b) end, "regular")
 	corner(self.colorSwatch, 4)
 	self:tip(self.colorSwatch, "Colour", "The paint colour (click for the palette, S over the mesh picks one up)")
 	self.colorHex = make("TextBox", { Name = "RB_PaintHex", LayoutOrder = 0, Size = UDim2.fromOffset(58, 18), BackgroundColor3 = T.num, BorderSizePixel = 0, Font = FONT, TextSize = 11, TextColor3 = T.text, Text = "", ClearTextOnFocus = false }, sh)
@@ -15985,13 +16015,84 @@ function UI:paintMenu()
 	local items = { { header = "Brushes" } }
 	for _, b in ipairs(api.paintBrushes or {}) do items[#items + 1] = { b.name, b.key, function() api.setBrush(b.id) end, check = st.brush == b.id } end
 	items[#items + 1] = "-"
-	items[#items + 1] = { "Colour", "", nil, sub = function() return self:paletteItems() end }
+	items[#items + 1] = { "Colour...", "", function() self:openHexPicker(self.colorSwatch) end }
 	items[#items + 1] = { "Fill (whole mesh)", "Shift K", function() api.paintFill() end }
 	items[#items + 1] = { "Clear Colours", "", function() api.paintClear() end }
 	items[#items + 1] = { "White Base Colour", "", function() api.paintWhiteBase() end }
 	items[#items + 1] = "-"
 	items[#items + 1] = { "Symmetry X", "", function() api.sculptSet("symmetryX", not st.symmetryX) end, check = st.symmetryX }
 	return items
+end
+-- the colour picker: a honeycomb of colours (white in the middle, full colour round it, darker at the edge)
+-- and a row of greys; click one to paint with it
+local function hex6(c) return string.format("%02X%02X%02X", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)) end
+function UI:openHexPicker(at)
+	local api = self.api
+	self:closeMenu()
+	local N, cell = 6, 24
+	local R = cell / math.sqrt(3)
+	local hh = 2 * R
+	local W = (2 * N + 1) * cell + 24
+	local gridH = 2 * N * hh * 0.75 + hh
+	local Ht = 12 + gridH + 14 + hh + 34
+	local pos = Vector2.new(200, 100)
+	pcall(function()
+		if typeof(at) == "Instance" then pos = at.AbsolutePosition + Vector2.new(0, at.AbsoluteSize.Y + 4) end
+	end)
+	local fr = make("Frame", { Name = "RB_HexPicker", ZIndex = 40, Position = UDim2.fromOffset(pos.X, pos.Y), Size = UDim2.fromOffset(W, Ht), BackgroundColor3 = T.menuBack, BorderSizePixel = 0, Active = true }, self.gui)
+	corner(stroke(fr, T.menuOutline), 8)
+	local hint = label(fr, { ZIndex = 41, Position = UDim2.new(0, 12, 1, -26), Size = UDim2.new(1, -24, 0, 18), Text = "Pick a colour", TextColor3 = T.textDim, TextSize = 11 })
+	local img = api.hexImage and api.hexImage()
+	local cur = api.state().paintColor
+	local function close() fr.Parent = nil if self.searchFrame == fr then self.searchFrame = nil end self.catcher.Visible = false end
+	local function swatch(x, y, col)
+		local h = hex6(col)
+		local b
+		if img then
+			b = make("ImageButton", { Name = "RB_Hex", ZIndex = 41, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(cell - 1, hh - 1),
+				BackgroundTransparency = 1, ImageColor3 = col, AutoButtonColor = false }, fr)
+			local ok = pcall(function() b.ImageContent = Content.fromObject(img) end)
+			if not ok then b.BackgroundTransparency = 0 b.BackgroundColor3 = col corner(b, 99) end
+		else
+			b = make("TextButton", { Name = "RB_Hex", ZIndex = 41, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(cell - 3, cell - 3),
+				BackgroundColor3 = col, BorderSizePixel = 0, AutoButtonColor = false, Text = "" }, fr)
+			corner(b, 99)
+		end
+		b:SetAttribute("rbHex", h)
+		if cur == h then
+			label(b, { ZIndex = 42, Size = UDim2.fromScale(1, 1), Text = "o", Font = Enum.Font.GothamBold, TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center,
+				TextColor3 = (col.R + col.G + col.B) > 1.6 and Color3.new(0, 0, 0) or Color3.new(1, 1, 1) })
+		end
+		b.MouseEnter:Connect(function() hint.Text = "#" .. h hint.TextColor3 = T.textMenu b.Size = b.Size + UDim2.fromOffset(4, 4) b.ZIndex = 43 end)
+		b.MouseLeave:Connect(function() hint.Text = "Pick a colour" hint.TextColor3 = T.textDim b.Size = b.Size - UDim2.fromOffset(4, 4) b.ZIndex = 41 end)
+		b.Activated:Connect(function()
+			close()
+			self:safe(function() api.setPaintColor(h) end)
+			self:refresh(true)
+		end)
+	end
+	local cx, cy = W / 2, 12 + N * hh * 0.75 + hh / 2
+	for q = -N, N do
+		for rr = -N, N do
+			local d = math.max(math.abs(q), math.abs(rr), math.abs(q + rr))
+			if d <= N then
+				local x, y = cx + cell * (q + rr / 2), cy + hh * 0.75 * rr
+				local hue = ((math.atan2(-(y - cy), x - cx) / (2 * math.pi)) + 0.25) % 1
+				local sat = math.min(1, d / 4)
+				local val = d <= 4 and 1 or (1 - (d - 4) * 0.24)
+				swatch(x, y, Color3.fromHSV(hue, sat, val))
+			end
+		end
+	end
+	-- greys: white to black
+	local gy = 12 + gridH + 14 + hh / 2
+	for i = 0, 2 * N do
+		local v = 1 - i / (2 * N)
+		swatch(12 + cell / 2 + i * cell, gy, Color3.new(v, v, v))
+	end
+	self.searchFrame = fr
+	self.catcher.Visible = true
+	return fr
 end
 function UI:paletteItems()
 	local api = self.api

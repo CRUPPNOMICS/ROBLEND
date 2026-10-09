@@ -1,4 +1,4 @@
-# ROBLEND 0.24.0
+# ROBLEND 0.24.1
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
 
 ## New since 0.16
+
+**0.24.1:** Colour picker: a honeycomb of hexagon swatches (white in the middle, full colours round it, darker at the edge) and a row of greys - click one to paint with it. Opens from the colour square in Vertex Paint's header and Paint > Colour....
 
 **0.24.0 - importing:** Import from Studio (top bar): a list of what's on your map, like the Explorer - click one, or drag it into the 3D view. It comes down to the ROBLEND scene, centred, and the view frames it. Parts, meshes, unions, models and groups (folders) all come in as they are; Tab on a part turns it into a ROBLEND mesh to edit. Place in Studio takes groups back too. Fixed: the Bring in button couldn't be clicked.
 

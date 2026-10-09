@@ -90,6 +90,13 @@ CFrame = {
 
 -- ===== small value types =====
 Color3 = { new = function(r, g, b) return { R = r, G = g, B = b } end, fromRGB = function(r, g, b) return { R = r / 255, G = g / 255, B = b / 255 } end }
+function Color3.fromHSV(h, s, v)
+	local i = math.floor(h * 6) % 6
+	local f = h * 6 - math.floor(h * 6)
+	local p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+	local r, g, b = ({ { v, t, p }, { q, v, p }, { p, v, t }, { p, q, v }, { t, p, v }, { v, p, q } })[i + 1][1], ({ { v, t, p }, { q, v, p }, { p, v, t }, { p, q, v }, { t, p, v }, { v, p, q } })[i + 1][2], ({ { v, t, p }, { q, v, p }, { p, v, t }, { p, q, v }, { t, p, v }, { v, p, q } })[i + 1][3]
+	return { R = r, G = g, B = b }
+end
 UDim = { new = function(s, o) return { Scale = s, Offset = o } end }
 UDim2 = {
 	new = function(a, b, c, d) return { a, b, c, d } end,

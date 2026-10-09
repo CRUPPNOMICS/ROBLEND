@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.0"
+local VERSION = "0.24.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4122,6 +4122,36 @@ api.setPaintColor = function(c)
 	if c then PAINT.setColor(c) else setStatus("Colour: type 6 hex digits, like FF8800.") end
 end
 api.paintFill = function() if editing and paintMode == "paint" then PAINT.fill() end end
+-- a white hexagon picture for the colour picker's swatches (tinted per colour); nil if this Studio can't make one
+local hexImage
+api.hexImage = function()
+	if hexImage ~= nil then return hexImage or nil end
+	hexImage = false
+	pcall(function()
+		local W, H = 32, 37
+		local R = W / math.sqrt(3)
+		local buf = buffer.create(W * H * 4)
+		for y = 0, H - 1 do
+			for x = 0, W - 1 do
+				-- 4 x 4 samples per pixel: smooth edges
+				local n = 0
+				for sy = 0, 3 do
+					for sx = 0, 3 do
+						local px, py = math.abs(x + (sx + 0.5) / 4 - W / 2), math.abs(y + (sy + 0.5) / 4 - H / 2)
+						if px <= W / 2 - 0.6 and py <= R - px / math.sqrt(3) - 0.6 then n += 1 end
+					end
+				end
+				local i = (y * W + x) * 4
+				buffer.writeu8(buf, i, 255) buffer.writeu8(buf, i + 1, 255) buffer.writeu8(buf, i + 2, 255)
+				buffer.writeu8(buf, i + 3, math.floor(n / 16 * 255 + 0.5))
+			end
+		end
+		local img = AssetService:CreateEditableImage({ Size = Vector2.new(W, H) })
+		img:WritePixelsBuffer(Vector2.zero, Vector2.new(W, H), buf)
+		hexImage = img
+	end)
+	return hexImage or nil
+end
 api.paintWhiteBase = function()
 	if obj then record("White Base Colour", function() obj.Color = Color3.new(1, 1, 1) end) setStatus("Part colour set to white: the paint shows as painted.") end
 end
