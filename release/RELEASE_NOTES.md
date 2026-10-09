@@ -7,7 +7,7 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 
 1. Download `ROBLEND.rbxmx` below.
 2. Put it in your Studio plugins folder (Studio: Plugins > Plugins Folder) and restart Studio.
-3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Luau API".
+3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
 

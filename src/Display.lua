@@ -382,7 +382,7 @@ function Display.updateColors(em, bm)
 end
 
 -- ===== save: upload the mesh as a real Roblox Mesh asset (AssetService:CreateAssetAsync, local plugins,
--- Studio beta "CreateAssetAsync Luau API"). Returns id, err, errKind ("api" = the API isn't available), centre
+-- Studio beta "CreateAssetAsync Lua API"). Returns id, err, errKind ("api" = the API isn't available), centre
 function Display.upload(bm, params, uv)
 	local mp, c, err, em = Display.build(bm, nil, nil, uv)
 	if not mp or not em then return nil, err or "no mesh" end

@@ -22,7 +22,7 @@ python3 tools/build.py   # makes build/ROBLEND.rbxmx
 
 **Before you start:** ROBLEND needs two things switched on, and checks them itself when it opens. Until both are on, a *Before you start* screen shows a tick or a cross for each, with how to turn it on:
 1. **Mesh / Image APIs** for the game: *Game Settings > Security > Allow Mesh / Image APIs* (once per game).
-2. Studio's **CreateAssetAsync Luau API** beta: *File > Beta Features*, then restart Studio (saving meshes to Roblox needs it).
+2. Studio's **CreateAssetAsync Lua API** beta: *File > Beta Features*, then restart Studio (saving meshes to Roblox needs it).
 
 **Studio's shortcuts:** while your mouse is in the ROBLEND window, Studio's own shortcuts (the 1 2 3 4 build tools, Ctrl D, Delete...) are blocked so ROBLEND's keys work like Blender's. Ctrl Z / Ctrl Y still undo and redo. Edit > Block Studio Shortcuts turns this off.
 
@@ -149,7 +149,7 @@ ROBLEND works in its own space 10,000 studs under your map, so models you're mak
 ROBLEND saves each mesh to Roblox as a real **Mesh asset**, using `AssetService:CreateAssetAsync`, so the mesh stays in the place and publishes like any imported mesh.
 
 **Set it up once**
-1. In Studio, open File > Beta Features and turn on **CreateAssetAsync Luau API**, then restart Studio.
+1. In Studio, open File > Beta Features and turn on **CreateAssetAsync Lua API**, then restart Studio.
 2. Install ROBLEND as a **local plugin** (the .rbxmx in your Plugins folder). Roblox only allows this API in local plugins, not in plugins installed from the Creator Store.
 
 **When it saves**
