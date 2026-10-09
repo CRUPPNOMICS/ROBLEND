@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.21.8"
+local VERSION = "0.21.9"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -35,6 +35,7 @@ local UVTools = require(script.UVTools)
 local UVEditor = require(script.UVEditor)
 local Tutorial = require(script.Tutorial)
 local KeyCapture = require(script.KeyCapture)
+local SelfTest = require(script.SelfTest)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -1782,6 +1783,8 @@ local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
 local UVE = UVEditor.new(ctx)
 ctx.plugin = plugin
+ctx.Sculpt, ctx.Paint, ctx.Font = Sculpt, Paint, Font
+function ctx.finishModal(cancel) finishModal(cancel) end
 function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
 local KC = KeyCapture.new(ctx)
@@ -3552,6 +3555,8 @@ pluginAction("EdgeSelect", "Edge Select (2)", "ROBLEND Edit Mode: edge select. G
 pluginAction("FaceSelect", "Face Select (3)", "ROBLEND Edit Mode: face select. Give it the 3 key here.", selectModeAction("face", "Face"))
 pluginAction("EditMode", "Edit / Object Mode (Tab)", "ROBLEND: Tab in and out of Edit Mode.", function() if uiOn and not modal then if editing then exitEdit() else toggleEdit() end end end)
 api.keyCapture = function() return KC end
+-- Help > Run Self-Test: checks the features inside this real Studio and prints a report to Output
+api.selfTest = function() task.spawn(function() local ok, err = pcall(SelfTest.run, ctx, api) if not ok then SelfTest.running = false warn(NAME .. " self-test: " .. tostring(err)) end end) end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
@@ -3659,6 +3664,7 @@ api.togglePanel = function() widget.Enabled = not widget.Enabled end
 api.setMode = function(m) if editing and not modal then setMode(m) end end
 api.add = function(kind) addShape(kind) sceneAdd(Selection:Get()[1]) end
 api.tool = function(name) local f = TOOL[name] if f then f() end end
+api.hasTool = function(name) return TOOL[name] ~= nil end
 api.mousePos = mousePos
 api.shiftDown = shiftDown
 api.selectObject = function(p, add) if editing or modal then return end selectObject(p, add) end
@@ -4477,7 +4483,7 @@ RunService.Heartbeat:Connect(function()
 			local kind = dirtyFast
 			dirtyFast = nil
 			local shown = ownView() and view.objects[obj] or obj
-			local em = shown and Display.emOf[shown]
+			local em = shown and (Display.emOf[shown] or Display.partEm[shown])
 			local ok = em ~= nil and modsStr(obj) == "" and (kind == "col" and Display.updateColors(em, bm) or kind == "pos" and Display.updatePositions(em, bm))
 			if ok then MOD.fastUpdates = (MOD.fastUpdates or 0) + 1 dirtyCage = true else dirtyMesh = true end
 		end

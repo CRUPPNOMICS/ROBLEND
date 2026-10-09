@@ -1858,6 +1858,26 @@ check("double clicks: a Properties panel stays open; an Outliner name can be ren
 	tb.FocusLost:Fire(true) beat()
 	eq(p.Name, "Crate Lid", "renamed")
 end)
+check("Help > Run Self-Test runs clean in the fake Studio and tidies up", function()
+	if inEdit() then press("Tab") beat() end
+	local before = #workspace:GetChildren()
+	local lines = {}
+	local realPrint = print
+	print = function(...) local t = table.concat({ ... }, " ") lines[#lines + 1] = t end
+	local okRun, errRun = pcall(function() headerBtn("Help") menuItem("Run Self-Test") end)
+	print = realPrint
+	for _ = 1, 20 do beat() end
+	assert(okRun, tostring(errRun))
+	local fails = {}
+	for _, w in ipairs(MOCK.warns) do if tostring(w):find("ROBLEND TEST FAIL", 1, true) then fails[#fails + 1] = w end end
+	local done
+	for _, l in ipairs(lines) do if l:find("ROBLEND TEST DONE", 1, true) then done = l end end
+	-- the fake can't do everything (MeshPart loading from a real asset) but nothing should fail
+	assert(done, "finished: " .. table.concat(lines, "\n"))
+	assert(#fails == 0, table.concat(fails, "\n"))
+	assert(not workspace:FindFirstChild("ROBLEND_SelfTest"), "test folder taken out")
+	MOCK.warns = {}
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

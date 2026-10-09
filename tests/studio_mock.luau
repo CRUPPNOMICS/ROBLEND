@@ -237,6 +237,17 @@ function Inst.IsFocused() return false end
 function Inst.SetActive(o, on) o._p.ActiveState = on end
 
 local RunService = svc("RunService")
+-- task.wait lets a frame go by (the self-test waits for the heartbeat); never nested
+task.wait = function(d)
+	MOCK.t = (MOCK.t or 0) + (tonumber(d) or 0.03)
+	if MOCK.inWait or MOCK.noWaitBeat then return end
+	MOCK.inWait = true
+	local q = MOCK_DEFER
+	MOCK_DEFER = {}
+	for _, f in ipairs(q) do f() end
+	pcall(function() RunService.Heartbeat:Fire() end)
+	MOCK.inWait = false
+end
 SIGNALS.Heartbeat = true
 
 local sel = {}
@@ -337,6 +348,7 @@ function Inst.CreateAssetAsync(_, em, assetType, params)
 	return Enum.CreateAssetResult.Success, 900000 + #MOCK.uploads
 end
 function Inst.CreateMeshPartAsync(_, content, opts)
+	local fromId = content.assetId
 	if content.assetId then content = { obj = assert(MOCK.uploads[content.assetId - 900000], "unknown asset").em } end
 	assert(content.obj, "content")
 	local em = content.obj
@@ -353,6 +365,7 @@ function Inst.CreateMeshPartAsync(_, content, opts)
 	mp.MeshSize = hi - lo
 	mp.Mesh = em
 	mp.CFrame = CFrame.new()
+	if fromId then mp.MeshId = "rbxassetid://" .. tostring(fromId) end
 	mp.CollisionFidelity = opts and opts.CollisionFidelity or Enum.CollisionFidelity.Default
 	mp.RenderFidelity = opts and opts.RenderFidelity or Enum.RenderFidelity.Automatic
 	mp.CanCollide, mp.CastShadow = true, true
