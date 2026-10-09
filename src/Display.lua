@@ -187,6 +187,31 @@ function Display.build(bm, selColor, skipHidden, uv)
 	end)
 	local tris = 0
 	local shared = {}
+	-- Auto Smooth / split normals: smooth faces round a vert share its corner only across edges that are
+	-- not marked sharp (and between two smooth faces), so sharp edges stay crisp. fan[v][f] = group key
+	local fan = {}
+	local function fanOf(v, f)
+		local m = fan[v]
+		if not m then
+			m = {}
+			fan[v] = m
+			local parent = {}
+			local function find(x) while parent[x] ~= x do parent[x] = parent[parent[x]] x = parent[x] end return x end
+			local fs = BMesh.vertFaces(v)
+			for _, g in ipairs(fs) do parent[g] = g end
+			for _, e in ipairs(BMesh.vertEdges(v)) do
+				if not e.sharp then
+					local ef = BMesh.edgeFaces(e)
+					if #ef == 2 and ef[1].smooth and ef[2].smooth and parent[ef[1]] and parent[ef[2]] then
+						local a, b = find(ef[1]), find(ef[2])
+						if a ~= b then parent[a] = b end
+					end
+				end
+			end
+			for _, g in ipairs(fs) do m[g] = find(g) end
+		end
+		return m[f] or f
+	end
 	for f in pairs(bm.faces) do
 		if skipHidden and f.hide then continue end
 		local vs = BMesh.faceVerts(f)
@@ -197,8 +222,11 @@ function Display.build(bm, selColor, skipHidden, uv)
 		local ids = {}
 		for i, v in ipairs(vs) do
 			if f.smooth then
-				if not shared[v] then shared[v] = em:AddVertex(v.co - c) end
-				ids[i] = shared[v]
+				local g = fanOf(v, f)
+				local key = shared[v]
+				if not key then key = {} shared[v] = key end
+				if not key[g] then key[g] = em:AddVertex(v.co - c) end
+				ids[i] = key[g]
 			else
 				ids[i] = em:AddVertex(v.co - c)
 			end

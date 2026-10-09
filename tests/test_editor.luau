@@ -1193,6 +1193,83 @@ check("Ctrl right-drag lasso selects; snap to Vertex", function()
 	eq(MOCK.api.state().snap, false, "Shift Tab turned snapping off")
 	press("Tab") beat()
 end)
+check("Shade Auto Smooth keeps a cylinder's rim sharp (split normals)", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cylinder")
+	local c = S.Selection:Get()[1]
+	beat()
+	eq(#c.Mesh.v, 24 * 4 + 24 * 2, "flat: every face has its own corners")
+	headerBtn("Object") menuItem("Shade Auto Smooth") beat()
+	eq(#c.Mesh.v, 48 * 2, "smooth sides share corners, caps stay separate")
+	assert(data(c).sh and #data(c).sh == 48 * 2, "the 48 rim edges are marked sharp")
+end)
+check("Pivot: Individual Origins; X X = local axis; Fill Holes; Offset Edge Loops", function()
+	p4 = editCube()
+	press("One") press("A", { "LeftAlt" })
+	local vs = worldVerts(p4)
+	local _, hi = bounds(vs)
+	local top = {}
+	for _, v in ipairs(vs) do if near(v.Y, hi.Y) then top[#top + 1] = v end end
+	table.sort(top, function(x, y) return (x - cam.CFrame.Position).Magnitude < (y - cam.CFrame.Position).Magnitude end)
+	local a, b = top[1], nil
+	for _, v in ipairs(top) do if not near(v.X, a.X) and not near(v.Z, a.Z) then b = v end end
+	mouseTo(a) click()
+	MOCK.held.LeftShift = true mouseTo(b) click() MOCK.held.LeftShift = nil
+	eq(MOCK.api.state().stats.vs, 2, "two corners, not joined by an edge")
+	MOCK.api.setPivot("individual")
+	local function pointSet()
+		local d, out = data(p4), {}
+		for i = 1, #d.v, 3 do out[#out + 1] = ("%.3f,%.3f,%.3f"):format(d.v[i], d.v[i + 1], d.v[i + 2]) end
+		table.sort(out)
+		return table.concat(out, " ")
+	end
+	local before = pointSet()
+	press("S") type_("0.5") press("Return") beat()
+	eq(pointSet(), before, "each lone vert scaled round itself = no move")
+	MOCK.api.setPivot("median")
+	press("S") type_("0.5") press("Return") beat()
+	assert(pointSet() ~= before, "median pivot pulls them together")
+	press("Tab") beat()
+	-- local axis: a rotated part, G X X moves along the mesh's own X
+	p4 = editCube()
+	press("Tab") beat()
+	p4.CFrame = p4.CFrame * CFrame.fromAxisAngle(Vector3.new(0, 1, 0), math.rad(45))
+	beat()
+	S.Selection:Set({ p4 }) beat()
+	press("Tab") beat() beat()
+	press("A")
+	local d0 = data(p4)
+	press("G") press("X") press("X") type_("2") press("Return") beat()
+	assert(MOCK.api.state().editing, "still editing")
+	local d1 = data(p4)
+	local dx, dz = 0, 0
+	for i = 1, #d0.v, 3 do dx += d1.v[i] - d0.v[i] dz += d1.v[i + 2] - d0.v[i + 2] end
+	assert(math.abs(dx / 8 - 2) < 1e-3 and math.abs(dz / 8) < 1e-3, "moved 2 along local X only: " .. dx / 8 .. ", " .. dz / 8)
+	-- fill holes
+	press("Three") press("A", { "LeftAlt" })
+	mouseTo(faceCenterWhere(p4, function(v) return true end) or p4.CFrame.Position)
+	press("A") MOCK.api.tool("DeleteFaces") beat()
+	eq(select(2, counts(p4)), 0, "all faces gone")
+	press("Tab") beat()
+	p4 = editCube()
+	local lo2, hi2 = bounds(worldVerts(p4))
+	press("Three")
+	mouseTo(faceCenterWhere(p4, function(v) return near(v.Y, hi2.Y) end)) click()
+	MOCK.api.tool("DeleteFaces") beat()
+	eq(select(2, counts(p4)), 5, "top removed")
+	headerBtn("Mesh") menuItem("Clean Up") menuItem("Fill Holes") beat()
+	eq(select(2, counts(p4)), 6, "hole filled")
+	-- offset edge loops on the loop round the middle... the top loop: two loops come out of it
+	press("Two") press("A", { "LeftAlt" })
+	MOCK.held.LeftAlt = true
+	mouseTo(edgeMid(p4, function(a, b) return near(a.Y, hi2.Y) and near(b.Y, hi2.Y) and near(a.Z, hi2.Z) and near(b.Z, hi2.Z) end)) click()
+	MOCK.held.LeftAlt = nil
+	press("R", { "LeftShift", "LeftControl" })
+	mouseXY(mouse.X + 20, mouse.Y + 20) beat() click()
+	assert(select(2, counts(p4)) > 6, "offset loops made new faces")
+	press("Tab") beat()
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

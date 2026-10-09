@@ -35,7 +35,7 @@ local V3 = Vector3.new
 Mods.TYPES = {
 	{ id = "array", name = "Array", group = "Generate", defaults = { count = 3, axis = "X", relative = 1, constant = 0, merge = false } },
 	{ id = "bevel", name = "Bevel", group = "Generate", defaults = { amount = 0.2, segments = 2, angle = 30 } },
-	{ id = "mirror", name = "Mirror", group = "Generate", defaults = { x = true, y = false, z = false, merge = true, mergeDist = 0.001 } },
+	{ id = "mirror", name = "Mirror", group = "Generate", defaults = { x = true, y = false, z = false, merge = true, mergeDist = 0.001, bisect = false } },
 	{ id = "solidify", name = "Solidify", group = "Generate", defaults = { thickness = 0.2, offset = -1 } },
 	{ id = "decimate", name = "Decimate", group = "Generate", defaults = { angle = 5 } },
 	{ id = "screw", name = "Screw", group = "Generate", defaults = { angle = 360, steps = 16, screw = 0, axis = "Y" } },
@@ -64,7 +64,15 @@ end
 local function copy(bm) return (MT.fromSpec(MT.toSpec(bm))) end
 
 -- ===== Mirror (MOD_mirror.cc): copy across the object's own X / Y / Z plane, weld the seam =====
-local function mirrorAxis(bm, axis, merge, dist)
+local function mirrorAxis(bm, axis, merge, dist, bisect)
+	if bisect then
+		-- Bisect: cut on the mirror plane and drop the half on the negative side first
+		bm = copy(bm)
+		MT.bisect(bm, V3(), axis)
+		local gone = {}
+		for v in pairs(bm.verts) do if v.co:Dot(axis) < -1e-4 then gone[v] = true end end
+		if next(gone) then Ops.deleteVerts(bm, gone) end
+	end
 	local spec = MT.toSpec(bm)
 	local n = #spec.verts
 	local twin = {}
@@ -95,7 +103,7 @@ end
 function Mods.mirror(bm, m)
 	local out = bm
 	for _, a in ipairs({ { "x", V3(1, 0, 0) }, { "y", V3(0, 1, 0) }, { "z", V3(0, 0, 1) } }) do
-		if m[a[1]] then out = mirrorAxis(out, a[2], m.merge ~= false, math.max(m.mergeDist or 0.001, 1e-5)) end
+		if m[a[1]] then out = mirrorAxis(out, a[2], m.merge ~= false, math.max(m.mergeDist or 0.001, 1e-5), m.bisect == true) end
 	end
 	return out
 end

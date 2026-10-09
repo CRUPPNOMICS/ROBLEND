@@ -552,5 +552,26 @@ check2("array: constant offset + merge welds touching copies", function()
 	local hx = -math.huge for v in pairs(out.verts) do hx = math.max(hx, v.co.X) end
 	assert(math.abs(hx - 7) < 1e-4, "2 copies 3 studs apart: " .. hx)
 end)
+check2("fill holes, smooth by angle, mirror bisect", function()
+	local bm = cube()
+	local kill = {}
+	for f in pairs(bm.faces) do if math.abs(f.no.Y) > 0.9 then kill[f] = true end end
+	for f in pairs(kill) do bm:faceKill(f) end
+	eq(bm.nf, 4, "a tube: two holes")
+	local n = MT.fillHoles(bm, 0)
+	bm:validate()
+	eq(n, 2, "both ends filled") closed(bm) outward(bm)
+	local c = cube()
+	eq(MT.smoothByAngle(c, nil, 30), 12, "every cube edge is sharp at 30 degrees")
+	for f in pairs(c.faces) do assert(f.smooth, "all smooth") end
+	local m = Mods.new("mirror") m.bisect = true
+	local shifted = cube()
+	for v in pairs(shifted.verts) do v.co = v.co + Vector3.new(0.5, 0, 0) end
+	local out = Mods.evaluate(shifted, { m })
+	out:validate() closed(out)
+	local lo, hi = math.huge, -math.huge
+	for v in pairs(out.verts) do lo = math.min(lo, v.co.X) hi = math.max(hi, v.co.X) end
+	assert(math.abs(lo + 1.5) < 1e-4 and math.abs(hi - 1.5) < 1e-4, "cut at 0 then mirrored: " .. lo .. " " .. hi)
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

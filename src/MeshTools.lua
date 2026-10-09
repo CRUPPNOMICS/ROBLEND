@@ -1484,6 +1484,51 @@ function MT.selectMirror(bm, axis, extend)
 	return n
 end
 
+-- Clean Up > Fill Holes: every open border loop (up to maxSides corners, 0 = any) gets a face
+function MT.fillHoles(bm, maxSides)
+	maxSides = maxSides or 0
+	local nextOf = {}
+	for e in pairs(bm.edges) do
+		if BMesh.edgeFaceCount(e) == 1 then
+			local l = e.l
+			-- the hole goes round the other way from the face beside it
+			nextOf[l.next.v] = l.v
+		end
+	end
+	local made = 0
+	local used = {}
+	for start in pairs(nextOf) do
+		if not used[start] then
+			local loop, v, guard = {}, start, 0
+			while v and not used[v] and guard < 100000 do
+				used[v] = true
+				loop[#loop + 1] = v
+				v = nextOf[v]
+				guard += 1
+			end
+			if v == start and #loop >= 3 and (maxSides == 0 or #loop <= maxSides) then
+				local f = bm:faceCreate(loop)
+				if f then made += 1 f.sel = true end
+			end
+		end
+	end
+	bm:normalsUpdate()
+	return made
+end
+-- Shade Auto Smooth (Blender's Smooth by Angle): all faces smooth, edges sharper than the angle marked sharp
+function MT.smoothByAngle(bm, fs, angleDeg)
+	local lim = math.cos(math.rad(angleDeg or 30))
+	for f in pairs(fs or bm.faces) do f.smooth = true end
+	local n = 0
+	for e in pairs(bm.edges) do
+		local ef = BMesh.edgeFaces(e)
+		if #ef == 2 and (not fs or fs[ef[1]] or fs[ef[2]]) then
+			if ef[1].no:Dot(ef[2].no) < lim then e.sharp = true n += 1 end
+		end
+	end
+	return n
+end
+
 function MT.selectRandom(bm, mode, ratio, seed)
 	local i = 0
 	local src = mode == "vert" and bm.verts or mode == "edge" and bm.edges or bm.faces

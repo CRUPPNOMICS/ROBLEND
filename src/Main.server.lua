@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLENDER"
-local VERSION = "0.11.0"
+local VERSION = "0.12.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -61,7 +61,7 @@ local navDrag = nil       -- orbit / pan / zoom drag in our 3D view
 local scene = {}          -- ROBLENDER parts shown in our 3D view: part -> record
 local activeObj = nil     -- Blender's "active object"
 local CURSOR = Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment" }
+local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment", pivot = "median" }
 -- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
 local FALLOFF = {
 	Smooth = function(t) return t * t * (3 - 2 * t) end,
@@ -831,8 +831,28 @@ local function startTransform(kind, opts)
 	local orig = {}
 	for _, v in ipairs(vs) do orig[v] = v.co end
 	local cLocal = centerOf(vs)
+	-- Pivot Point (Blender's . menu): Median Point, 3D Cursor or Individual Origins
+	if EDIT.pivot == "cursor" then cLocal = origin:PointToObjectSpace(CURSOR) end
+	local ic
+	if EDIT.pivot == "individual" and kind ~= "G" then
+		-- each connected island of the selection turns / scales round its own middle
+		local sel, parent = {}, {}
+		for _, v in ipairs(vs) do sel[v] = true parent[v] = v end
+		local function find(x) while parent[x] ~= x do parent[x] = parent[parent[x]] x = parent[x] end return x end
+		for e in pairs(bm.edges) do
+			if sel[e.v1] and sel[e.v2] then
+				local a, b = find(e.v1), find(e.v2)
+				if a ~= b then parent[a] = b end
+			end
+		end
+		local sum, cnt = {}, {}
+		for _, v in ipairs(vs) do local r = find(v) sum[r] = (sum[r] or V3()) + v.co cnt[r] = (cnt[r] or 0) + 1 end
+		ic = {}
+		for _, v in ipairs(vs) do local r = find(v) ic[v] = sum[r] / cnt[r] end
+	end
 	local m = mousePos()
 	modal = {
+		ic = ic,
 		kind = kind, verts = vs, orig = orig, c = cLocal, cw = W(cLocal), m0 = m, ray0 = getRay(),
 		axis = opts and opts.axis or nil, axisWorld = opts and opts.axisWorld or nil, num = "", what = opts and opts.what or nil,
 	}
@@ -950,7 +970,7 @@ local function applyObjTransform()
 		M.info = ("Rot %.1f"):format(math.deg(ang))
 	end
 	dirtyCage = true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 local function finishObjModal(M, cancel)
 	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
@@ -1007,7 +1027,7 @@ local function applyTransform()
 	local mp = mousePos()
 	local num = tonumber(M.num)
 	local snap = (UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)) ~= EDIT.snap
-	local axisW = M.axisWorld or (M.axis and AXES[M.axis])
+	local axisW = M.axisWorld or (M.axis and (M.axisLocal and origin:VectorToWorldSpace(AXES[M.axis]) or AXES[M.axis]))
 	local axisL = axisW and origin:VectorToObjectSpace(axisW).Unit
 	if M.kind == "G" then
 		local dL
@@ -1040,12 +1060,13 @@ local function applyTransform()
 		local f = num or (d0 > 1 and (mp - M.cs).Magnitude / d0 or 1)
 		if snap and not num then f = math.floor(f * 10 + 0.5) / 10 end
 		for _, v in ipairs(M.verts) do
-			local r = M.orig[v] - M.c
+			local pc = M.ic and M.ic[v] or M.c
+			local r = M.orig[v] - pc
 			if axisL then
 				local along = axisL * r:Dot(axisL)
-				v.co = M.c + (r - along) + along * f
+				v.co = pc + (r - along) + along * f
 			else
-				v.co = M.c + r * f
+				v.co = pc + r * f
 			end
 		end
 		for v, w in pairs(M.prop or {}) do
@@ -1066,7 +1087,7 @@ local function applyTransform()
 		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
 		local axL = axisL or origin:VectorToObjectSpace(-camera().CFrame.LookVector).Unit
 		local rot = CFrame.fromAxisAngle(axL, ang)
-		for _, v in ipairs(M.verts) do v.co = M.c + rot * (M.orig[v] - M.c) end
+		for _, v in ipairs(M.verts) do local pc = M.ic and M.ic[v] or M.c v.co = pc + rot * (M.orig[v] - pc) end
 		for v, w in pairs(M.prop or {}) do v.co = M.c + CFrame.fromAxisAngle(axL, ang * w) * (M.orig[v] - M.c) end
 		M.info = ("Rotate %.1f deg"):format(math.deg(ang))
 	end
@@ -1078,7 +1099,7 @@ local function applyTransform()
 	bm:normalsUpdate()
 	worldTris = nil
 	dirtyMesh, dirtyCage = true, true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 
 local function finishModal(cancel)
@@ -1683,15 +1704,16 @@ local function applyRotation()
 	setStatus("Rotation applied: the mesh keeps its look, the part's rotation is 0.")
 end
 -- Object > Shade Smooth / Shade Flat (every face of the selected meshes)
-local function shadeObjects(smooth)
+local function shadeObjects(smooth, autoAngle)
 	local ps = rbSelected()
 	if #ps == 0 then setStatus("Select a " .. NAME .. " mesh first.") return end
 	for _, p in ipairs(ps) do
 		local m = (editing and p == obj) and bm or loadFrom(p)
 		for f in pairs(m.faces) do f.smooth = smooth or nil end
+		if autoAngle then MT.smoothByAngle(m, nil, autoAngle) end
 		if editing and p == obj then commit("Shade") else reshapePart(p, m, originOf(p), "Shade") end
 	end
-	setStatus(smooth and "Shade Smooth." or "Shade Flat.")
+	setStatus(autoAngle and "Shade Auto Smooth (30 degrees)." or smooth and "Shade Smooth." or "Shade Flat.")
 end
 
 -- H / Shift H / Alt H in Object Mode (the Outliner eye)
@@ -2767,6 +2789,36 @@ local function modelingTools()
 		changed(all and "Clear Crease" or "Crease")
 		setStatus(all and "Crease cleared." or "Creased: Subdivision Surface keeps these edges sharp.")
 	end
+	O.ShadeAutoSmooth = function()
+		local fs = MT.selFaces(bm)
+		local n = MT.smoothByAngle(bm, next(fs) and fs or nil, 30)
+		changed("Shade Auto Smooth")
+		setStatus(("Shade Auto Smooth: smooth, with %d edges sharper than 30 degrees kept sharp."):format(n))
+	end
+	O.FillHoles = function()
+		local n = MT.fillHoles(bm, 0)
+		changed("Fill Holes")
+		setStatus(("Filled %d hole%s."):format(n, n == 1 and "" or "s"))
+	end
+	O.LimitedDissolve = function()
+		local before = bm.nf
+		local nb = Mods.decimate(bm, { angle = 5 })
+		if nb ~= bm then bm = nb end
+		changed("Limited Dissolve")
+		setStatus(("Limited Dissolve: %d faces -> %d."):format(before, bm.nf))
+	end
+	O.DegenerateDissolve = function()
+		local nb, n = Mods.mergeDoubles(bm, 1e-4)
+		bm = nb
+		changed("Degenerate Dissolve")
+		setStatus(("Degenerate Dissolve: %d zero-length bits removed."):format(n))
+	end
+	-- Ctrl Shift R (Offset Edge Loops): two loops either side of the selected one = a flat 1-segment bevel
+	O.OffsetEdgeLoops = function()
+		if mode == "vert" then setMode("edge") end
+		MOD.bevelSegs = 1
+		T.bevel()
+	end
 	O.SelectMirror = function()
 		local n = MT.selectMirror(bm, "X", false)
 		flush()
@@ -3026,6 +3078,7 @@ local function modelingTools()
 	function MOD.editKey(k, shift, ctrl, alt)
 		local K = Enum.KeyCode
 		local function menu(name) ui:openNamedMenu(name, mousePos()) return true end
+		if k == K.R and ctrl and shift then O.OffsetEdgeLoops() return true end
 		if k == K.R and ctrl then T.loopCutModal() return true end
 		if k == K.R and shift and not alt then MOD.repeatLast() return true end
 		if k == K.C and not ctrl and not shift and not alt then T.circleSelect() return true end
@@ -3042,6 +3095,7 @@ local function modelingTools()
 		if k == K.Delete and ctrl then O.Dissolve() return true end
 		if k == K.Z and not ctrl and not shift and not alt then return menu("shading") end
 		if k == K.U and not ctrl and not shift and not alt then return menu("uv") end
+		if k == K.Period and not ctrl and not shift and not alt then return menu("pivot") end
 		if k == K.P and not ctrl then return menu("separate") end
 		local LEVEL = { [K.Zero] = 0, [K.One] = 1, [K.Two] = 2, [K.Three] = 3, [K.Four] = 4, [K.Five] = 5 }
 		if ctrl and LEVEL[k] then MOD.subdivSet(LEVEL[k]) return true end
@@ -3218,6 +3272,7 @@ TOOL.ClearRotation = function() if not editing then clearTransform("rot") end en
 TOOL.LocalView = toggleLocalView
 TOOL.ObjShadeSmooth = function() if not editing then shadeObjects(true) end end
 TOOL.ObjShadeFlat = function() if not editing then shadeObjects(false) end end
+TOOL.ObjShadeAuto = function() if not editing then shadeObjects(true, 30) end end
 TOOL.LoopCut = needEdit(function() MOD.T.loopCutModal() end)
 local ANY_MODE = { CursorToSel = true, CursorToOrigin = true, CursorToGrid = true, ClearAnnotations = true }
 for name, fn in pairs(MOD.ops) do
@@ -3238,7 +3293,7 @@ function api.state()
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
 		activeTool = MOD.tool, snap = EDIT.snap, prop = EDIT.prop, mirrorX = EDIT.mirrorX, autoMerge = EDIT.autoMerge,
-		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode, snapTarget = EDIT.snapTarget,
+		propFalloff = EDIT.propFalloff, boxMode = EDIT.boxMode, snapTarget = EDIT.snapTarget, pivot = EDIT.pivot,
 		lastOp = MOD.lastOp and MOD.lastOp.name or nil }
 	local p = selectedPart()
 	if p then
@@ -3356,6 +3411,7 @@ api.setFalloff = function(name)
 	if FALLOFF[name] then EDIT.propFalloff = name EDIT.prop = true setStatus("Proportional falloff: " .. name .. " (proportional editing on).") end
 end
 api.setBoxMode = function(m) EDIT.boxMode = m end
+api.setPivot = function(m) EDIT.pivot = m setStatus("Pivot: " .. ({ median = "Median Point", cursor = "3D Cursor", individual = "Individual Origins" })[m] .. ".") end
 api.setSnapTarget = function(m) EDIT.snapTarget = m EDIT.snap = true setStatus("Snap to " .. m .. " (snapping on).") end
 api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
 -- U menu / Material > Texture: UV projection + the image
@@ -3960,7 +4016,10 @@ local function modalKey(k)
 		if k == Enum.KeyCode.X or k == Enum.KeyCode.Y or k == Enum.KeyCode.Z then
 			local a = k.Name
 			modal.axisWorld = nil
-			if modal.axis == a then modal.axis = nil else modal.axis = a end
+			-- X = global X, X again = the mesh's own (local) X, again = off (Blender)
+			if modal.axis == a and not modal.axisLocal and not modal.obj then modal.axisLocal = true
+			elseif modal.axis == a then modal.axis, modal.axisLocal = nil, nil
+			else modal.axis, modal.axisLocal = a, nil end
 			applyTransform()
 			return
 		end

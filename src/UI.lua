@@ -413,7 +413,7 @@ function UI:buildView()
 	self.faceMenuBtn = pd("Face", function() return self:faceMenu() end)
 	self.uvMenuBtn = pd("UV", function() return self:uvItems() end)
 	-- right side: X-ray + shading
-	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(420, HDR_H) }, hdr)
+	local right = make("Frame", { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromOffset(470, HDR_H) }, hdr)
 	hlist(right, 1, Enum.HorizontalAlignment.Right)
 	self.toggleBtns = {}
 	for i, tg in ipairs({ { "snap", "magnet", "Snap", "Snap during transform (Ctrl does the opposite)", "" },
@@ -426,6 +426,12 @@ function UI:buildView()
 		self:tip(b, tg[3], tg[4], tg[5])
 		self.toggleBtns[tg[1]] = b
 	end
+	-- pivot point dropdown (Blender's . menu)
+	self.pivotBtn = self:btn(right, { LayoutOrder = -25, Size = UDim2.fromOffset(44, 20), BackgroundColor3 = T.regular, Text = "Pivot v", TextSize = 11 }, function(b)
+		self:openMenu(self:pivotItems(), b, "Pivot Point")
+	end, "toggle")
+	corner(self.pivotBtn, 4)
+	self:tip(self.pivotBtn, "Transform Pivot Point", "What Rotate and Scale turn round: Median Point, 3D Cursor or Individual Origins", ".")
 	-- snap target dropdown (just after the snap button)
 	self.snapTargetBtn = self:btn(right, { LayoutOrder = -20 + 1 * 2 + 1, Size = UDim2.fromOffset(16, 20), BackgroundColor3 = T.regular, Text = "v", TextSize = 10 }, function(b)
 		local st = api.state()
@@ -770,6 +776,7 @@ local MOD_FIELDS = {
 		self:toggleRow(b, 2, "Axis", {
 			{ "X", m.x == true, function() api.modToggle(i, "x") end }, { "Y", m.y == true, function() api.modToggle(i, "y") end }, { "Z", m.z == true, function() api.modToggle(i, "z") end } })
 		self:toggleRow(b, 3, "Merge", { { m.merge ~= false and "On" or "Off", m.merge ~= false, function() api.modToggle(i, "merge") end, "Weld the vertices that sit on the mirror plane" } })
+		self:toggleRow(b, 5, "Bisect", { { m.bisect and "On" or "Off", m.bisect == true, function() api.modToggle(i, "bisect") end, "Cut off whatever crosses to the other side first" } })
 		num(4, "Distance", "mergeDist", 0, 10)
 	end,
 	subsurf = function(self, b, i, m, api, num)
@@ -1217,6 +1224,7 @@ function UI:objectMenu()
 		} end },
 		"-",
 		{ "Shade Smooth", "", function() api.tool("ObjShadeSmooth") end },
+		{ "Shade Auto Smooth", "", function() api.tool("ObjShadeAuto") end },
 		{ "Shade Flat", "", function() api.tool("ObjShadeFlat") end },
 		"-",
 		{ "Subdivision", "", nil, sub = function()
@@ -1230,6 +1238,15 @@ function UI:objectMenu()
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}
+end
+function UI:pivotItems()
+	local api = self.api
+	local cur = api.state().pivot
+	local items = {}
+	for _, p in ipairs({ { "median", "Median Point" }, { "cursor", "3D Cursor" }, { "individual", "Individual Origins" } }) do
+		items[#items + 1] = { p[2], "", function() api.setPivot(p[1]) end, check = cur == p[1] }
+	end
+	return items
 end
 function UI:uvItems()
 	local api = self.api
@@ -1406,12 +1423,15 @@ function UI:meshMenu()
 		{ "Normals", "", nil, sub = function() return {
 			{ "Flip", "", t("Flip") }, { "Recalculate Outside", "Shift N", t("RecalcOutside") }, { "Recalculate Inside", "", t("RecalcInside") },
 		} end },
-		{ "Shading", "", nil, sub = function() return { { "Smooth Faces", "", t("ShadeSmooth") }, { "Flat Faces", "", t("ShadeFlat") } } end },
+		{ "Shading", "", nil, sub = function() return { { "Smooth Faces", "", t("ShadeSmooth") }, { "Flat Faces", "", t("ShadeFlat") }, { "Auto Smooth (30 degrees)", "", t("ShadeAutoSmooth") } } end },
 		"-",
 		{ "Show/Hide", "", nil, sub = function() return {
 			{ "Reveal Hidden", "Alt H", t("Reveal") }, { "Hide Selected", "H", t("Hide") }, { "Hide Unselected", "Shift H", t("HideUnselected") },
 		} end },
-		{ "Clean Up", "", nil, sub = function() return { { "Delete Loose", "", t("DeleteLoose") }, { "Merge by Distance", "", t("MergeDistance") } } end },
+		{ "Clean Up", "", nil, sub = function() return {
+			{ "Delete Loose", "", t("DeleteLoose") }, { "Degenerate Dissolve", "", t("DegenerateDissolve") }, { "Limited Dissolve", "", t("LimitedDissolve") },
+			"-", { "Fill Holes", "", t("FillHoles") }, "-", { "Merge by Distance", "", t("MergeDistance") },
+		} end },
 		"-",
 		{ "Delete", "X", nil, sub = function() return self:deleteItems() end },
 		"-",
@@ -1454,7 +1474,7 @@ function UI:edgeMenu()
 		{ "Rotate Edge CCW", "", t("RotateCCW") },
 		"-",
 		{ "Edge Slide", "G G", t("EdgeSlide") },
-		{ "Loop Cut and Slide", "Ctrl R", t("LoopCut") },
+		{ "Loop Cut and Slide", "Ctrl R", t("LoopCut") }, { "Offset Edge Slide", "Shift Ctrl R", t("OffsetEdgeLoops") },
 		"-",
 		{ "Mark Seam", "", t("MarkSeam") }, { "Clear Seam", "", t("ClearSeam") },
 		"-",
@@ -1495,6 +1515,7 @@ function UI:openNamedMenu(name, at)
 		separate = function() return self:separateItems(), "Separate" end,
 		similar = function() return self:similarItems(), "Select Similar" end,
 		uv = function() return self:uvItems(), "UV Mapping" end,
+		pivot = function() return self:pivotItems(), "Pivot Point" end,
 		shading = function() return self:shadingItems(), "Shading" end,
 		apply = function() return self:applyItems(), "Apply" end,
 		origin = function() return self:originItems(), "Set Origin" end,
@@ -1599,6 +1620,7 @@ function UI:helpItems()
 		{ "Select Similar / Mirror", "Shift G / Shift Ctrl M" }, { "Perspective / Ortho, Local View", "Numpad 5, Numpad /" },
 		{ "Hide / Clear (objects)", "H Shift H Alt H, Alt G Alt R" }, { "Shading menu", "Z" },
 		{ "Lasso select / deselect", "Ctrl RMB drag / Shift Ctrl RMB drag" }, { "Snapping on / off", "Shift Tab" }, { "UV menu", "U" },
+		{ "Pivot point menu", "." }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
 		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },
@@ -1708,6 +1730,7 @@ function UI:refresh(force)
 		b.Visible = s.editing or k == "snap"
 	end
 	self.falloffBtn.Visible = s.editing == true
+	self.pivotBtn.Visible = s.editing == true
 	for k, b in pairs(self.boxModeBtns) do
 		self:setOnStyle(b, (s.boxMode or "set") == k)
 		b.Visible = s.editing == true and (s.activeTool or "select") == "select"

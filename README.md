@@ -195,6 +195,13 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - Ctrl + right-drag: lasso select (Shift Ctrl + right-drag deselects). A Ctrl + right *click* still extrudes to the mouse.
 - Snapping (magnet button, Shift Tab): the small arrow next to it picks Increment (whole studs), Vertex or Face.
 
+- Pivot (header button or .): Median Point, 3D Cursor or Individual Origins (each separate piece turns / scales round its own middle).
+- During G / R / S, pressing X twice uses the mesh's own (local) X; three times turns the axis off. Same for Y and Z.
+- Shading: Mesh > Shading > Auto Smooth, or Object > Shade Auto Smooth. Faces go smooth, but edges sharper than 30 degrees stay crisp (split normals), so a cylinder has smooth sides and sharp rims.
+- Mesh > Clean Up: Fill Holes, Limited Dissolve, Degenerate Dissolve, Delete Loose, Merge by Distance.
+- Shift Ctrl R: Offset Edge Loops (two loops either side of the selected one).
+- Mirror modifier: Bisect cuts off whatever crosses to the other side before mirroring.
+
 **Textures and UVs**
 - U (or the UV menu): Cube Projection tiled or fit, Cylinder, Sphere, Project from Top. The UVs are worked out from the shape every time it changes, so they follow your edits.
 - Properties > Material > Texture: paste an image id (upload the image with Studio's Asset Manager first). Box mode has a Tile Size in studs.
