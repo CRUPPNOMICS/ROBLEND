@@ -216,12 +216,25 @@ local function icon(parent, kind, col, size)
 	elseif kind == "prop" then
 		ring(box, 8, 8, 6.5, col, false) ring(box, 8, 8, 2, col, true)
 	elseif kind == "logo" then
-		local f = rect(box, 0, 0, 16, 16, T.orange, true) corner(f, 4)
-		label(box, { Size = UDim2.fromScale(1, 1), Text = "R", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = T.white, TextXAlignment = Enum.TextXAlignment.Center })
+		-- the ROBLEND logo (yellow on black); UI:logo() shows the real picture when it can
+		local f = rect(box, 0, 0, 16, 16, rgb(0x161616), true) corner(f, 4)
+		label(box, { Size = UDim2.fromScale(1, 1), Text = "R", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = rgb(0xffd60a), TextXAlignment = Enum.TextXAlignment.Center })
 	end
 	return box
 end
 UI.icon = icon
+
+-- the ROBLEND picture (from Icon.lua via an EditableImage), or the drawn stand-in
+function UI:logo(parent, size)
+	local img = self.api.logoImage
+	if img then
+		local il = make("ImageLabel", { Name = "RB_Logo", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size, size) }, parent)
+		local ok = pcall(function() il.ImageContent = Content.fromObject(img) end)
+		if ok then return il end
+		il.Parent = nil
+	end
+	return icon(parent, "logo", nil, size)
+end
 
 -- ===== construction =====
 function UI.new(api, parentGui)
@@ -308,7 +321,8 @@ function UI:buildTopBar()
 	hlist(row, 2)
 	make("UIPadding", { PaddingLeft = UDim.new(0, 8) }, row)
 	local logo = make("Frame", { LayoutOrder = 0, BackgroundTransparency = 1, Size = UDim2.fromOffset(26, 20) }, row)
-	icon(logo, "logo")
+	self:logo(logo, 20)
+	self:tip(logo, "ROBLEND " .. self.version, "Free, open-source modelling for Roblox Studio by Cruppnomics. Help > About ROBLEND")
 	local n = 0
 	local function menu(text, items)
 		n += 1
@@ -337,7 +351,12 @@ function UI:buildTopBar()
 		"-",
 		{ "Use Studio's 3D View", "", function() api.setStudioView(not api.state().studioView) end, check = api.state().studioView },
 	} end)
-	menu("Help", function() return self:helpItems() end)
+	menu("Help", function()
+		local items = self:helpItems()
+		table.insert(items, 1, { "About ROBLEND", "", function() self:openAbout() end })
+		table.insert(items, 2, "-")
+		return items
+	end)
 	-- workspace tabs (Layout = Object Mode, Modeling = Edit Mode)
 	n += 1
 	make("Frame", { LayoutOrder = n, BackgroundTransparency = 1, Size = UDim2.fromOffset(18, 1) }, row)
@@ -1036,7 +1055,9 @@ function UI:buildStatus()
 	local st = make("Frame", { Name = "Status", AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, STATUS_H), BackgroundColor3 = T.status, BorderSizePixel = 0 }, self.gui)
 	self.statusFrame = st
 	self.hints = label(st, { Position = UDim2.fromOffset(10, 0), Size = UDim2.new(0.6, -10, 1, 0), TextColor3 = T.statusText, RichText = true, TextTruncate = Enum.TextTruncate.AtEnd })
-	self.reportLbl = label(st, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 0), Size = UDim2.new(0.4, -10, 1, 0), TextColor3 = T.statusText, TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd })
+	self.reportLbl = label(st, { AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -30, 0, 0), Size = UDim2.new(0.4, -30, 1, 0), TextColor3 = T.statusText, TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd })
+	local corner2 = make("Frame", { Name = "RB_StatusLogo", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(18, 18), BackgroundTransparency = 1 }, st)
+	self:logo(corner2, 18)
 end
 
 -- ===== menus (Blender: back #181818, outline #242424, hover #4772b3) =====
@@ -1607,6 +1628,32 @@ function UI:openContextMenu(at)
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}, at, "Object")
+end
+-- Help > About ROBLEND: logo, version, licence and where the source is
+function UI:openAbout()
+	self:closeMenu()
+	local W = 360
+	local fr = make("Frame", { Name = "RB_About", ZIndex = 40, BackgroundColor3 = T.menuBack, BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45), Size = UDim2.fromOffset(W, 0), AutomaticSize = Enum.AutomaticSize.Y }, self.gui)
+	corner(stroke(fr, T.menuOutline), 8)
+	vlist(fr, 6)
+	make("UIPadding", { PaddingTop = UDim.new(0, 14), PaddingBottom = UDim.new(0, 14), PaddingLeft = UDim.new(0, 16), PaddingRight = UDim.new(0, 16) }, fr)
+	local top = make("Frame", { LayoutOrder = 1, ZIndex = 41, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 96) }, fr)
+	local lg = self:logo(top, 96)
+	pcall(function() lg.ZIndex = 42 end)
+	for i, s in ipairs({
+		{ "ROBLEND " .. self.version, true },
+		{ "Free, open-source modelling for Roblox Studio, by Cruppnomics (Giga_gad27)." },
+		{ "Portions of ROBLEND are derived from Blender source code, licensed under the GNU GPL (version 2 or later). Blender is developed by the Blender Foundation and its contributors. ROBLEND is not affiliated with or endorsed by the Blender Foundation." },
+		{ "Source code + licence: github.com/CRUPPNOMICS/ROBLEND" },
+	}) do
+		label(fr, { LayoutOrder = 1 + i, ZIndex = 41, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, Text = s[1],
+			Font = s[2] and FONT_B or FONT, TextSize = s[2] and 16 or 12, TextColor3 = s[2] and rgb(0xffd60a) or T.textMenu, TextXAlignment = Enum.TextXAlignment.Center })
+	end
+	local close = self:btn(fr, { LayoutOrder = 10, ZIndex = 41, Size = UDim2.new(1, 0, 0, 24), BackgroundColor3 = T.regular, Text = "Close" }, function() fr.Parent = nil self.catcher.Visible = false end, "regular")
+	corner(close, 4)
+	self.searchFrame = fr -- clicking outside closes it like a menu
+	self.catcher.Visible = true
+	return fr
 end
 function UI:helpItems()
 	local items = {}

@@ -290,8 +290,20 @@ function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.dest
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
 MOCK.meshesMade = 0
 MOCK.uploads = {}
+-- EditableImage (the logo)
+local EI = {}
+EI.__index = EI
+function Inst.CreateEditableImage(_, opts) return setmetatable({ size = opts.Size, __kind = "EditableImage" }, EI) end
+function EI:WritePixelsBuffer(pos, size, buf) assert(buffer.len(buf) == size.X * size.Y * 4, "pixel buffer size") self.written = true end
+function EI:Destroy() end
+MOCK.imageUploads = 0
 function Inst.CreateAssetAsync(_, em, assetType, params)
 	if MOCK.noAssetApi then error("CreateAssetAsync is not enabled") end
+	if assetType.Name == "Image" then
+		assert(em.__kind == "EditableImage" and em.written, "uploads the logo image")
+		MOCK.imageUploads += 1
+		return Enum.CreateAssetResult.Success, 800001
+	end
 	assert(assetType.Name == "Mesh", "mesh asset")
 	assert(em.__kind == "EditableMesh", "uploads an EditableMesh")
 	MOCK.uploads[#MOCK.uploads + 1] = { em = em, params = params }

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.12.1"
+local VERSION = "0.13.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -23,6 +23,7 @@ local Display = require(script.Display)
 local UI = require(script.UI)
 local View = require(script.View)
 local MT = require(script.MeshTools)
+local Icon = require(script.Icon)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -78,8 +79,33 @@ local FALLOFF_ORDER = { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "
 
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
-local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - Blender-style mesh editing (free, open source)", "rbxassetid://0", NAME)
+local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - free, open-source 3D modelling for Roblox Studio", "rbxassetid://0", NAME)
 btnMain.ClickableWhenViewportHidden = true
+-- the ROBLEND logo: shown in the window straight from the plugin (an EditableImage), and uploaded once as an
+-- Image asset for the toolbar button (needs the same "CreateAssetAsync" beta as saving meshes; the id is remembered)
+local logoImage = Icon.image(AssetService)
+local function setButtonIcon(id) pcall(function() btnMain.Icon = "rbxassetid://" .. tostring(id) end) end
+do
+	local saved
+	pcall(function() saved = plugin:GetSetting("RB_IconId") end)
+	if saved then
+		setButtonIcon(saved)
+	elseif logoImage then
+		task.spawn(function()
+			local lastTry
+			pcall(function() lastTry = plugin:GetSetting("RB_IconTry") end)
+			if lastTry and os.time() - lastTry < 3600 then return end
+			pcall(function() plugin:SetSetting("RB_IconTry", os.time()) end)
+			local ok, result, id = pcall(function()
+				return AssetService:CreateAssetAsync(logoImage, Enum.AssetType.Image, { Name = "ROBLEND icon", Description = "ROBLEND plugin icon (Cruppnomics)" })
+			end)
+			if ok and result == Enum.CreateAssetResult.Success and id then
+				pcall(function() plugin:SetSetting("RB_IconId", id) end)
+				setButtonIcon(id)
+			end
+		end)
+	end
+end
 local widget = plugin:CreateDockWidgetPluginGui(NAME .. "_Panel", DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 270, 520, 230, 300))
 widget.Title = NAME .. " " .. VERSION
 
@@ -140,7 +166,7 @@ local function button(parent, text, w, fn, col)
 end
 
 label(NAME .. " " .. VERSION, 16, Color3.fromRGB(255, 170, 80))
-label("Free + open source mesh editor (GPL). Mesh engine converted from Blender. Not made by the Blender Foundation.", 10, Color3.fromRGB(150, 155, 170))
+label("ROBLEND - free, open-source modelling (GPL) by Cruppnomics. Portions derived from Blender; not affiliated with or endorsed by the Blender Foundation.", 10, Color3.fromRGB(150, 155, 170))
 local status = label("Add a shape, or click a " .. NAME .. " part and press Tab.", 12, Color3.fromRGB(140, 220, 255))
 local lastStatus = ""
 local function setStatus(t) status.Text = t lastStatus = t if ui then ui:setReport(t) end end
@@ -3285,7 +3311,7 @@ for name, fn in pairs(MOD.ops) do
 	end
 end
 
-local api = { version = VERSION }
+local api = { version = VERSION, logoImage = logoImage }
 local setUIOn, setStudioView
 function api.state()
 	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave,
@@ -4241,4 +4267,4 @@ task.delay(3, function()
 	end
 end)
 
-print(NAME .. " " .. VERSION .. " loaded - free + open source (GPL-2.0-or-later). Mesh engine converted from Blender's BMesh.")
+print(NAME .. " " .. VERSION .. " loaded - free, open-source modelling by Cruppnomics (GPL-2.0-or-later). Portions derived from Blender; not affiliated with or endorsed by the Blender Foundation.")

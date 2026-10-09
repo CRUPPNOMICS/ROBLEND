@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/roblend_icon.png" alt="ROBLEND logo" width="180"></p>
+
 # ROBLEND
 
 A free, open-source mesh editor for Roblox Studio, with Blender-style edit mode.
@@ -231,6 +233,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 | `src/Modifiers.lua` | The modifier stack (14 modifiers) and merge by distance. |
 | `src/Display.lua` | Triangulation, the EditableMesh view, bake to parts, OBJ export. |
 | `src/UI.lua` | The Blender-style window: top bar, header and menus, tool strip, gizmo, Outliner, Properties, status bar. |
+| `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |
 | `tests/` | Headless tests: the engine, plus the whole editor running in a fake Studio. Run `python3 tools/test.py path/to/luau`. |
@@ -253,3 +256,5 @@ ROBLEND is licensed GPL-2.0-or-later, the same as Blender. You may use, change a
 - make the source available
 
 `CREDITS.md` lists the Blender source files each part is converted from.
+
+<p align="center"><img src="assets/roblend_icon.png" alt="ROBLEND" width="64"><br>ROBLEND by Cruppnomics</p>

@@ -1,5 +1,5 @@
 """Pack src/ into a Roblox plugin file (build/ROBLEND.rbxmx).
-The Script 'ROBLEND' runs Main.server.lua; BMesh, Ops, MeshTools, Modifiers, Display, UI and View are ModuleScripts under it.
+The Script 'ROBLEND' runs Main.server.lua; BMesh, Ops, MeshTools, Modifiers, Display, UI, View and Icon are ModuleScripts under it.
 SPDX-License-Identifier: GPL-2.0-or-later
 """
 import hashlib, pathlib, sys
@@ -22,7 +22,7 @@ def item(cls, name, source, children=''):
             f'</Properties>{children}</Item>')
 
 
-mods = ''.join(item('ModuleScript', n, (src / f'{n}.lua').read_text()) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Display', 'UI', 'View'))
+mods = ''.join(item('ModuleScript', n, (src / f'{n}.lua').read_text()) for n in ('BMesh', 'Ops', 'MeshTools', 'Modifiers', 'Display', 'UI', 'View', 'Icon'))
 main = item('Script', 'ROBLEND', (src / 'Main.server.lua').read_text(), mods)
 xml = ('<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" '
        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
