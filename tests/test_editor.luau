@@ -1384,6 +1384,159 @@ check("Add > Curve makes a pipe you can edit as points; Add > Text, change the w
 	eq(tx:GetAttribute("RB_TextPixel"), 1, "block size")
 	propTab(1)
 end)
+-- ===== Convert to ROBLEND Mesh (0.17) =====
+local function newPart(class, name, size, at)
+	local q = Instance.new(class)
+	q.Name, q.Size, q.CFrame = name, size, CFrame.new(at)
+	q.Color, q.Material, q.Anchored = Color3.new(0.5, 0.2, 0.1), Enum.Material.Wood, true
+	q.Parent = workspace
+	return q
+end
+local function rbNamed(name)
+	for _, c in ipairs(workspace:GetChildren()) do if c.Name == name and c:FindFirstChild("RB_Data") then return c end end
+	error("no ROBLEND part " .. name)
+end
+local function allOut(p)
+	-- every face points away from the middle (closed convex shapes)
+	local vs, d = worldVerts(p)
+	local mid = V3()
+	for _, v in ipairs(vs) do mid += v end
+	mid /= #vs
+	for _, f in ipairs(d.f) do
+		local a, b, c = vs[f[1]], vs[f[2]], vs[f[3]]
+		local n = (b - a):Cross(c - a)
+		if n:Dot((a + b + c) / 3 - mid) < -1e-6 then return false end
+	end
+	return true
+end
+check("convert: a Part becomes a ROBLEND mesh in the same place (Object > Convert)", function()
+	if inEdit() then press("Tab") beat() end
+	local q = newPart("Part", "Crate", V3(4, 2, 6), V3(10, 3, 0))
+	local dec = Instance.new("Decal") dec.Parent = q
+	local weld = Instance.new("WeldConstraint") weld.Part0 = q weld.Parent = workspace
+	S.Selection:Set({ q }) beat()
+	MOCK.api.tool("Convert") beat()
+	eq(q.Parent, nil, "the old part is taken out")
+	local c = rbNamed("Crate")
+	eq(c.Material, Enum.Material.Wood, "same material")
+	eq(c.Color.R, 0.5, "same colour")
+	eq(dec.Parent, c, "children move over")
+	eq(weld.Part0, c, "welds hold the new part")
+	local nv, nf = counts(c)
+	eq(nv, 8, "cube points") eq(nf, 6, "cube faces")
+	local lo, hi = bounds(worldVerts(c))
+	assert(near(lo.X, 8) and near(hi.X, 12) and near(lo.Y, 2) and near(hi.Y, 4) and near(lo.Z, -3) and near(hi.Z, 3), "same box " .. tostring(lo) .. " / " .. tostring(hi))
+	assert(allOut(c), "faces point out")
+	eq(S.Selection:Get()[1], c, "selected")
+end)
+check("convert: Tab on a Wedge / CornerWedge converts and goes into Edit Mode", function()
+	local w = newPart("WedgePart", "Ramp", V3(2, 4, 6), V3(0, 2, 20))
+	S.Selection:Set({ w }) beat()
+	press("Tab") beat()
+	assert(inEdit(), "edit mode")
+	press("Tab") beat()
+	local r = rbNamed("Ramp")
+	local nv, nf = counts(r)
+	eq(nv, 6, "wedge points") eq(nf, 5, "wedge faces")
+	assert(allOut(r), "wedge faces point out")
+	local lo, hi = bounds(worldVerts(r))
+	assert(near(hi.Y, 4) and near(lo.Y, 0) and near(lo.Z, 17) and near(hi.Z, 23), "wedge box")
+	local cw = newPart("CornerWedgePart", "Peak", V3(2, 2, 2), V3(0, 1, 30))
+	S.Selection:Set({ cw }) beat()
+	MOCK.api.convert() beat()
+	local pk = rbNamed("Peak")
+	local nv2, nf2 = counts(pk)
+	eq(nv2, 5, "corner wedge points") eq(nf2, 5, "corner wedge faces")
+	assert(allOut(pk), "corner wedge faces point out")
+end)
+check("convert: Ball and Cylinder (cylinders lie along X)", function()
+	local b = newPart("Part", "Ball", V3(4, 4, 4), V3(0, 2, 40))
+	b.Shape = Enum.PartType.Ball
+	local cy = newPart("Part", "Pipe", V3(6, 2, 2), V3(0, 1, 50))
+	cy.Shape = Enum.PartType.Cylinder
+	MOCK.api.convert({ b, cy }) beat()
+	local lo, hi = bounds(worldVerts(rbNamed("Ball")))
+	assert(near(hi.Y - lo.Y, 4, 1e-2) and near(hi.X - lo.X, 4, 0.1), "ball size")
+	assert(allOut(rbNamed("Ball")), "ball faces point out")
+	lo, hi = bounds(worldVerts(rbNamed("Pipe")))
+	assert(near(hi.X - lo.X, 6) and near(hi.Y - lo.Y, 2, 0.05), "cylinder along X: " .. tostring(hi - lo))
+	assert(allOut(rbNamed("Pipe")), "cylinder faces point out")
+	eq(#S.Selection:Get(), 2, "both selected")
+end)
+check("convert: a MeshPart's own mesh is read back, welded and scaled to the part", function()
+	-- a cube as a mesh file stores it: 4 corners per side (24 points), 2 triangles per side
+	local em = S.AssetService:CreateEditableMesh()
+	local sides = { { V3(1, 0, 0), V3(0, 1, 0), V3(0, 0, 1) }, { V3(-1, 0, 0), V3(0, 0, 1), V3(0, 1, 0) }, { V3(0, 1, 0), V3(0, 0, 1), V3(1, 0, 0) },
+		{ V3(0, -1, 0), V3(1, 0, 0), V3(0, 0, 1) }, { V3(0, 0, 1), V3(1, 0, 0), V3(0, 1, 0) }, { V3(0, 0, -1), V3(0, 1, 0), V3(1, 0, 0) } }
+	for _, sd in ipairs(sides) do
+		local n, u, v = sd[1], sd[2], sd[3]
+		local ids = {}
+		for i, k in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do ids[i] = em:AddVertex(n + u * k[1] + v * k[2]) end
+		em:AddTriangle(ids[1], ids[2], ids[3]) em:AddTriangle(ids[1], ids[3], ids[4])
+	end
+	local _, id = S.AssetService:CreateAssetAsync(em, Enum.AssetType.Mesh, {})
+	local mp = newPart("MeshPart", "Rock", V3(4, 6, 4), V3(0, 3, 60))
+	mp.MeshId = "rbxassetid://" .. id
+	mp.MeshSize = V3(2, 2, 2)
+	MOCK.denyMesh = true
+	MOCK.api.convert({ mp }) beat()
+	assert(MOCK.status:find("won't let", 1, true), "explains a locked mesh: " .. MOCK.status)
+	eq(mp.Parent, workspace, "left alone when Roblox says no")
+	MOCK.denyMesh = nil
+	MOCK.api.convert({ mp }) beat()
+	local r = rbNamed("Rock")
+	local nv, nf = counts(r)
+	eq(nv, 8, "corners welded back together") eq(nf, 12, "its triangles")
+	local lo, hi = bounds(worldVerts(r))
+	assert(near(hi.Y - lo.Y, 6) and near(hi.X - lo.X, 4), "scaled to the part's size")
+	-- Ctrl Z-able: converting a ROBLEND mesh again does nothing
+	MOCK.api.convert({ r }) beat()
+	assert(MOCK.status:find("Select a Part", 1, true), "already a ROBLEND mesh")
+end)
+check("speed: dragging points updates the shown mesh in place (no rebuild per frame)", function()
+	local p = editCube()
+	press("A") beat()
+	local made0, set0 = MOCK.meshesMade, MOCK.setPositions or 0
+	press("G") press("Y")
+	for i = 1, 5 do mouseXY(300, 300 - i * 10) beat() end
+	assert((MOCK.setPositions or 0) > set0, "points moved in place")
+	eq(MOCK.meshesMade, made0, "no rebuild while dragging")
+	press("Return") beat()
+	local lo = bounds(worldVerts(p))
+	assert(lo.Y > p.CFrame.Position.Y - 2.5, "the move was kept")
+	press("Tab") beat()
+end)
+check("Properties > Object > Collision: detail survives edits; Edit Mode previews use Box", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat()
+	propTab(1)
+	local head = find("TextLabel", function(d) return d.Text == "Collision" and d.Parent and d.Parent:IsA("TextButton") end)
+	assert(head, "Collision panel") head.Parent.Activated:Fire() beat()
+	textBtn("Hull")
+	eq(p.CollisionFidelity, Enum.CollisionFidelity.Hull, "collision set")
+	eq(p:GetAttribute("RB_Collision"), "Hull", "remembered")
+	textBtn("Fast")
+	eq(p.RenderFidelity, Enum.RenderFidelity.Performance, "render detail set")
+	local anch = p.Anchored
+	textBtn((anch and "[x]" or "[  ]") .. "  Anchored")
+	eq(p.Anchored, not anch, "anchored toggled")
+	textBtn((anch and "[  ]" or "[x]") .. "  Anchored")
+	-- edit in Studio's own view (the real part shows the edit): Box while editing, Hull again after
+	MOCK.api.setStudioView(true) beat()
+	S.Selection:Set({ p }) beat()
+	press("Tab") beat() beat()
+	assert(inEdit(), "editing")
+	press("A") beat()
+	press("S") type_("2") press("Return") beat() beat()
+	eq(p.CollisionFidelity, Enum.CollisionFidelity.Box, "quick Box collision while editing")
+	press("Tab") beat()
+	eq(p.CollisionFidelity, Enum.CollisionFidelity.Hull, "the chosen detail is back")
+	eq(p.RenderFidelity, Enum.RenderFidelity.Performance, "render detail kept")
+	MOCK.api.setStudioView(false) beat()
+end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

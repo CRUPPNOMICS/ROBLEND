@@ -28,6 +28,7 @@ The Blender source files used are:
 | `source/blender/modifiers/intern/MOD_mirror.cc`, `MOD_subsurf.cc`, `MOD_solidify.cc`, `MOD_array.cc`, `MOD_bevel.cc`, `MOD_smooth.cc`, `MOD_weld.cc`, `MOD_screw.cc`, `MOD_triangulate.cc`, `MOD_decimate.cc`, `MOD_simpledeform.cc`, `MOD_cast.cc`, `MOD_wave.cc`, `MOD_displace.cc`, `MOD_wireframe.cc` | The modifier stack (Subdivision uses the Catmull-Clark rules OpenSubdiv implements) |
 | `scripts/startup/bl_ui/properties_data_modifier.py` | The Modifiers tab and the Add Modifier menu |
 | `source/blender/editors/mesh/editmesh_select_similar.cc`, `source/blender/editors/object/object_transform.cc` | Select Similar; Set Origin and Apply Rotation |
+| `source/blender/editors/object/object_convert.cc` | The idea of Object > Convert (turning other objects into editable meshes) |
 | `source/blender/editors/uvedit/uvedit_unwrap_ops.cc`, `source/blender/blenlib/intern/uvproject.cc` | Cube, cylinder and sphere UV projection |
 | `source/blender/editors/sculpt_paint/brushes/*.cc`, `sculpt.cc` | Sculpt brushes (draw, clay strips, inflate, grab, smooth, flatten, pinch, crease), area normal, falloff, symmetry |
 | `source/blender/editors/sculpt_paint/paint_vertex.cc` | Vertex Paint (draw, blur, average, fill, sample, front faces only) |

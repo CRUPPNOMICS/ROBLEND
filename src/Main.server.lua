@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.16.0"
+local VERSION = "0.17.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -29,6 +29,7 @@ local ModStack = require(script.ModStack)
 local Sculpt = require(script.Sculpt)
 local Paint = require(script.Paint)
 local Font = require(script.Font)
+local Convert = require(script.Convert)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -58,6 +59,7 @@ local modal = nil        -- the running G / S / R / inset / loop cut
 local hover = nil
 local lastWritten = nil
 local dirtyMesh, dirtyCage, lastBuild = false, false, 0
+local dirtyFast = nil     -- "pos" / "col": only points moved / colours changed - update the shown mesh in place
 local worldTris = nil    -- cache for picking
 local dataConn = nil
 local ui = nil            -- the Blender-style screen (UI.lua)
@@ -260,12 +262,12 @@ end
 local function ownView() return uiOn and view ~= nil and not useStudio end
 local applyBuilt
 local function applyMesh(p, b, tint)
-	local mp, c, err = Display.build(evaluated(p, b, tint), tint and SEL_COL or nil, tint, uvOf(p))
+	local mp, c, err = Display.build(evaluated(p, b, tint), tint and SEL_COL or nil, tint, uvOf(p), (Display.fidelity(p, tint)))
 	if not mp then return false, err end
-	return applyBuilt(p, mp, c)
+	return applyBuilt(p, mp, c, tint)
 end
 -- put an already-built MeshPart's mesh on the part (keeps the part where its origin is)
-applyBuilt = function(p, mp, c)
+applyBuilt = function(p, mp, c, preview)
 	local o = originOf(p)
 	local ok = pcall(function() p:ApplyMesh(mp) end)
 	if not ok then
@@ -284,6 +286,8 @@ applyBuilt = function(p, mp, c)
 		Display.emOf[mp] = nil
 		mp:Destroy()
 	end
+	-- the collision / render detail picked in Properties (Edit Mode's previews stay on quick Box collision)
+	if not preview then Display.applyFidelity(p) end
 	p.CFrame = o * CFrame.new(c)
 	p:SetAttribute("RB_Center", c)
 	p:SetAttribute("RB_Size", p.Size)
@@ -651,6 +655,7 @@ local function enterEdit(p)
 	obj, bm = p, m
 	origin = originOf(p)
 	editing = true
+	pcall(Display.rememberFidelity, p)
 	-- a curve (only line paths, no faces): edit its points
 	if m.nf == 0 and m.nv > 0 then mode = "vert" end
 	worldTris = nil
@@ -1168,7 +1173,9 @@ local function applyTransform()
 	if M.prop then M.info ..= ("   Proportional size %.2f (wheel)"):format(EDIT.propR) end
 	bm:normalsUpdate()
 	worldTris = nil
-	dirtyMesh, dirtyCage = true, true
+	if dirtyFast == "col" then dirtyMesh = true end
+	dirtyFast = "pos"
+	dirtyCage = true
 	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 
@@ -1676,6 +1683,7 @@ local ctx = {
 	NAME = NAME, Selection = Selection, CHS = CHS, HttpService = HttpService, UIS = UIS, MT = MT, Display = Display, BMesh = BMesh, Ops = Ops, Mods = Mods,
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
+	Convert = Convert, AssetService = AssetService, VERSION = VERSION,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -1686,6 +1694,14 @@ function ctx.setBm(m) bm = m worldTris = nil end
 function ctx.setModal(M) modal = M end
 function ctx.dirtyCage() dirtyCage = true end
 function ctx.dirtyMesh() dirtyMesh = true dirtyCage = true worldTris = nil end
+-- only points moved (sculpt) / only colours changed (paint): the shown mesh is updated in place
+function ctx.dirtyMeshFast(kind)
+	kind = kind or "pos"
+	if dirtyFast and dirtyFast ~= kind then dirtyMesh = true end
+	dirtyFast = kind
+	dirtyCage = true
+	if kind == "pos" then worldTris = nil end
+end
 local OT = ObjectTools.new(ctx)
 ctx.rayMesh, ctx.camera = rayMesh, camera
 function ctx.ctrlDown() return UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl) end
@@ -3115,6 +3131,12 @@ local function toggleXray() xray = not xray worldTris = nil dirtyCage = true set
 local function toggleEdit()
 	if editing then exitEdit() return end
 	local p = selectedPart()
+	-- Tab on an ordinary part / mesh: turn it into a ROBLEND mesh first (Blender edits any mesh object)
+	if p and p:IsA("BasePart") and not isRB(p) and p.Parent and not p.Locked and not p:IsA("Terrain") then
+		local made = OT.convert({ p })
+		if not made[1] then return end
+		p = made[1]
+	end
 	if not isRB(p) and uiOn then
 		-- like Blender's Modeling tab: use the active / last mesh, else the first one, else make a cube
 		if isRB(activeObj) and activeObj.Parent then p = activeObj end
@@ -3189,6 +3211,7 @@ local TOOL = {
 }
 TOOL.Move, TOOL.Rotate, TOOL.Scale = TOOL.G, TOOL.R, TOOL.S
 TOOL.Join = function() if not editing and not modal then OT.join() end end
+TOOL.Convert = function() if not editing and not modal then OT.convert() end end
 TOOL.OriginToGeometry = function() OT.setOrigin("geometry") end
 TOOL.OriginToCursor = function() OT.setOrigin("cursor") end
 TOOL.GeometryToOrigin = function() OT.setOrigin("origin") end
@@ -3234,6 +3257,8 @@ function api.state()
 		st.objRot = V3(math.deg(rx), math.deg(ry), math.deg(rz))
 		st.color, st.material = p.Color, p.Material and p.Material.Name
 		st.hidden = scene[p] ~= nil and scene[p].hidden == true
+		st.anchored, st.canCollide, st.castShadow = p.Anchored, p.CanCollide, p.CastShadow
+		if p:IsA("MeshPart") then local _, col, ren = Display.fidelity(p) st.collision, st.render = col, ren end
 		if isRB(p) then
 			st.text = p:GetAttribute("RB_Text")
 			st.textPixel, st.textDepth = p:GetAttribute("RB_TextPixel"), p:GetAttribute("RB_TextDepth")
@@ -3329,6 +3354,7 @@ api.setPivot = function(m) EDIT.pivot = m setStatus("Pivot: " .. ({ median = "Me
 api.setSnapTarget = function(m) EDIT.snapTarget = m EDIT.snap = true setStatus("Snap to " .. m .. " (snapping on).") end
 api.toggleOrtho = function() if view then view:toggleOrtho() dirtyCage = true end end
 api.join = OT.join
+api.convert = OT.convert
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
 	if modal then return end
@@ -3480,6 +3506,26 @@ api.setLook = function(prop, value)
 		if prop == "Material" then p.Material = Enum.Material[value] else p[prop] = value end
 	end)
 	dirtyMesh = editing
+end
+-- Properties > Object > Collision: collision / render detail (kept through mesh changes) and the physics switches
+function api.setPhys(key, value)
+	local ps = selectedParts()
+	if #ps == 0 then local p = selectedPart() if p then ps = { p } end end
+	if #ps == 0 then return end
+	record(key, function()
+		for _, p in ipairs(ps) do
+			if key == "collision" or key == "render" then
+				if p:IsA("MeshPart") then
+					p:SetAttribute(key == "collision" and "RB_Collision" or "RB_Render", value)
+					if not (editing and p == obj) then Display.applyFidelity(p) end
+				end
+			elseif key == "Anchored" or key == "CanCollide" or key == "CastShadow" then
+				p[key] = value == true
+			end
+		end
+	end)
+	local names = { collision = "Collision", render = "Render detail" }
+	setStatus(("%s: %s%s"):format(names[key] or key, tostring(value), (key == "collision" and editing) and " (used when you leave Edit Mode)" or ""))
 end
 function api.setProp(key, axis, value)
 	local p = selectedPart()
@@ -4156,8 +4202,18 @@ RunService.Heartbeat:Connect(function()
 		if not obj.Parent then exitEdit() return end
 		local ms = modsStr(obj)
 		if ms ~= MOD.modsSeen then MOD.modsSeen = ms dirtyMesh = true end
+		-- fast path: the mesh on screen is updated in place (no rebuild) while only points move / colours change
+		if dirtyFast and not dirtyMesh then
+			local kind = dirtyFast
+			dirtyFast = nil
+			local shown = ownView() and view.objects[obj] or obj
+			local em = shown and Display.emOf[shown]
+			local ok = em ~= nil and modsStr(obj) == "" and (kind == "col" and Display.updateColors(em, bm) or kind == "pos" and Display.updatePositions(em, bm))
+			if ok then MOD.fastUpdates = (MOD.fastUpdates or 0) + 1 dirtyCage = true else dirtyMesh = true end
+		end
 		if dirtyMesh and now - lastBuild > 0.05 then
 			dirtyMesh = false
+			dirtyFast = nil
 			lastBuild = now
 			if ownView() then
 				local _, err = showEdit()

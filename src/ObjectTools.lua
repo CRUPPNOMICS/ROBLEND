@@ -1,6 +1,6 @@
 --[[
 	ROBLEND - Object Mode tools: Join, Set Origin, Apply Rotation, Shade Smooth / Flat / Auto, Hide / Reveal,
-	Clear Location / Rotation, Local View. Converted from Blender's object operators
+	Clear Location / Rotation, Local View, Convert to ROBLEND Mesh. Converted from Blender's object operators
 	(source/blender/editors/object/object_transform.cc, object_relations.cc, view3d localview).
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Original: Copyright (C) Blender Authors. Luau conversion: Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -184,6 +184,71 @@ function ObjectTools.new(C)
 			setStatus("Local view: only the selection is shown (Numpad / again to leave).")
 		end
 		C.dirtyCage()
+	end
+
+	-- Object > Convert to ROBLEND Mesh (Blender's Object > Convert): any Part / Wedge / Ball / Cylinder / MeshPart
+	-- becomes a ROBLEND mesh in the same place, with the same look; the original is taken out (Ctrl Z brings it back)
+	local KEEP = { "Name", "Color", "Material", "Transparency", "Reflectance", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Locked" }
+	function OT.convert(parts)
+		parts = parts or selectedParts()
+		local made, why = {}, nil
+		for _, p in ipairs(parts) do
+			if p:IsA("BasePart") and not isRB(p) then
+				local m, err = C.Convert.meshOf(p, C.AssetService, C.BMesh, C.Ops, C.Mods, MT)
+				if not m then
+					why = err
+				else
+					-- a MeshPart keeps its collision / render detail; a plain part gets Roblox's Default
+					local fo = {}
+					if p:IsA("MeshPart") then pcall(function() fo.CollisionFidelity, fo.RenderFidelity = p.CollisionFidelity, p.RenderFidelity end) end
+					local mp, c, err2 = Display.build(m, nil, nil, nil, fo)
+					if not mp then
+						why = err2
+					else
+						record("Convert", function()
+							for _, k in ipairs(KEEP) do pcall(function() mp[k] = p[k] end) end
+							mp.CFrame = p.CFrame * CFrame.new(c)
+							local sv = Instance.new("StringValue")
+							sv.Name = "RB_Data"
+							sv.Value = encode(m)
+							sv.Parent = mp
+							for k, v in pairs(p:GetAttributes()) do pcall(function() mp:SetAttribute(k, v) end) end
+							mp:SetAttribute("RB_Center", c)
+							mp:SetAttribute("RB_Size", mp.Size)
+							mp:SetAttribute("ROBLEND", C.VERSION)
+							pcall(Display.rememberFidelity, mp)
+							-- children (decals, scripts, welds...) come along; joints elsewhere that held the old part hold the new one
+							for _, ch in ipairs(p:GetChildren()) do ch.Parent = mp end
+							local root = p.Parent
+							if root then
+								for _, d in ipairs(root:GetDescendants()) do
+									if d:IsA("WeldConstraint") or d:IsA("JointInstance") or d:IsA("NoCollisionConstraint") then
+										pcall(function()
+											if d.Part0 == p then d.Part0 = mp end
+											if d.Part1 == p then d.Part1 = mp end
+										end)
+									end
+								end
+							end
+							mp.Parent = root or workspace
+							Display.adopt(mp, Display.emOf[mp])
+							p.Parent = nil
+						end)
+						if scene then scene[mp] = scene[mp] or { part = mp } end
+						made[#made + 1] = mp
+					end
+				end
+			end
+		end
+		if #made > 0 then
+			Selection:Set(made)
+			C.setActive(made[#made])
+			C.dirtyCage()
+			setStatus(("Converted %d part%s into %s mesh%s (Tab to edit, Ctrl Z to undo)."):format(#made, #made == 1 and "" or "s", NAME, #made == 1 and "" or "es"))
+		else
+			setStatus(why and ("Couldn't convert: " .. why) or ("Select a Part, Wedge or MeshPart to turn into a " .. NAME .. " mesh."))
+		end
+		return made
 	end
 
 	return OT

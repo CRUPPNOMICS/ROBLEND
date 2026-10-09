@@ -164,7 +164,8 @@ end
 function Inst.IsA(o, c)
 	local cls = o._p.ClassName
 	if cls == c then return true end
-	if c == "BasePart" then return cls == "Part" or cls == "MeshPart" or cls == "WedgePart" or cls == "UnionOperation" end
+	if c == "BasePart" then return cls == "Part" or cls == "MeshPart" or cls == "WedgePart" or cls == "CornerWedgePart" or cls == "UnionOperation" end
+	if c == "JointInstance" then return cls == "Weld" or cls == "Motor6D" end
 	return false
 end
 function Inst.FindFirstChild(o, n) for _, c in ipairs(o._kids) do if c._p.Name == n then return c end end return nil end
@@ -192,6 +193,9 @@ function Inst.ApplyMesh(o, mp)
 	assert(o._p.ClassName == "MeshPart" and mp._p.ClassName == "MeshPart", "ApplyMesh needs MeshParts")
 	o._p.MeshSize = mp._p.Size
 	o._p.Mesh = mp._p.Mesh
+	-- (worst case: the part takes the source's collision detail - ROBLEND must put the chosen one back)
+	o._p.CollisionFidelity = mp._p.CollisionFidelity
+	o._p.RenderFidelity = mp._p.RenderFidelity
 end
 Instance = { new = function(class) return newInst(class) end }
 
@@ -288,6 +292,23 @@ function EM:AddUV(p) assert(p.X == p.X and p.Y == p.Y, "NaN uv") self.uv = self.
 function EM:SetFaceUVs(f, ids) assert(self.t[f] and #ids == 3, "face uvs") for _, i in ipairs(ids) do assert(self.uv[i], "bad uv id") end self.fuv = (self.fuv or 0) + 1 end
 function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.destroyed = true end
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
+-- reading a mesh back (Convert): ids are just the array indices
+function EM:GetVertices() local o = {} for i in ipairs(self.v) do o[i] = i end return o end
+function EM:GetPosition(i) return assert(self.v[i], "bad vert id") end
+function EM:SetPosition(i, p) assert(self.v[i], "bad vert id") assert(p.X == p.X, "NaN") self.v[i] = p MOCK.setPositions = (MOCK.setPositions or 0) + 1 end
+function EM:GetFaces() local o = {} for i in ipairs(self.t) do o[i] = i end return o end
+function EM:GetFaceVertices(f) return table.clone(assert(self.t[f], "bad face id")) end
+-- AssetService:CreateEditableMeshAsync(content): a copy of an uploaded mesh (MOCK.denyMesh = Roblox says no)
+function Inst.CreateEditableMeshAsync(_, content)
+	if MOCK.denyMesh then error("Failed to load asset: not allowed") end
+	local src
+	if content.obj then src = content.obj
+	elseif content.assetId then src = MOCK.uploads[content.assetId - 900000] and MOCK.uploads[content.assetId - 900000].em
+	elseif content.uri then local n = tonumber(content.uri:match("%d+$")) src = n and MOCK.uploads[n - 900000] and MOCK.uploads[n - 900000].em end
+	assert(src, "unknown mesh")
+	MOCK.emAlive += 1
+	return setmetatable({ v = table.clone(src.v), t = table.clone(src.t), c = 0, __kind = "EditableMesh" }, EM)
+end
 MOCK.meshesMade = 0
 MOCK.uploads = {}
 -- EditableImage (the logo)
@@ -309,7 +330,7 @@ function Inst.CreateAssetAsync(_, em, assetType, params)
 	MOCK.uploads[#MOCK.uploads + 1] = { em = em, params = params }
 	return Enum.CreateAssetResult.Success, 900000 + #MOCK.uploads
 end
-function Inst.CreateMeshPartAsync(_, content)
+function Inst.CreateMeshPartAsync(_, content, opts)
 	if content.assetId then content = { obj = assert(MOCK.uploads[content.assetId - 900000], "unknown asset").em } end
 	assert(content.obj, "content")
 	local em = content.obj
@@ -326,6 +347,9 @@ function Inst.CreateMeshPartAsync(_, content)
 	mp.MeshSize = hi - lo
 	mp.Mesh = em
 	mp.CFrame = CFrame.new()
+	mp.CollisionFidelity = opts and opts.CollisionFidelity or Enum.CollisionFidelity.Default
+	mp.RenderFidelity = opts and opts.RenderFidelity or Enum.RenderFidelity.Automatic
+	mp.CanCollide, mp.CastShadow = true, true
 	MOCK.meshesMade += 1
 	return mp
 end

@@ -153,7 +153,7 @@ function Paint.new(C)
 			opts.facing = nil
 			Paint.dab(st.bm, V3(-c.X, c.Y, c.Z), r, P.color, P.strength, opts)
 		end
-		C.dirtyMesh()
+		C.dirtyMeshFast("col")
 		return true
 	end
 

@@ -34,7 +34,7 @@ Click the **ROBLEND** button in the Plugins tab. A Blender-style window opens ov
 | Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
 | Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
 | Outliner | Every ROBLEND mesh in the place. Click a row to select it; the eye hides or shows it. |
-| Properties | Object tab: name, location, rotation, size. Modifiers tab (wrench): the modifier stack. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
+| Properties | Object tab: name, location, rotation, size, collision. Modifiers tab (wrench): the modifier stack. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
 | Status bar | Mouse hints and the last message. |
 
 **The Modeling tab (Edit Mode)**
@@ -262,6 +262,18 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - Object > Apply > Rotation bakes the part's rotation into the mesh.
 - Object > Shade Smooth / Shade Flat.
 
+**Edit any part** (Object > Convert to ROBLEND Mesh, or just select it and press Tab)
+- Parts (block, ball, cylinder), Wedges, Corner Wedges and MeshParts become ROBLEND meshes in the same place, with the same name, colour, material, children and welds. Ctrl Z brings the original back.
+- MeshParts are read with Roblox's `CreateEditableMeshAsync`, so only meshes you (or the experience's owner) uploaded can be opened. Unions can't be read by plugins.
+- A MeshPart's corners are welded back together so it edits as one surface; its old texture UVs aren't kept (use the UV menu).
+
+**Collision** (Properties > Object > Collision)
+- Collision detail (Box, Hull, Default, Precise), render detail (Auto, Fast, Precise), Can Collide, Anchored, Cast Shadow.
+- Your choice is kept every time the mesh changes. While you're in Edit Mode the part uses quick Box collision, and gets your choice back when you leave.
+
+**Speed**
+- Moving points (G / R / S), sculpting and painting update the mesh that's already on screen instead of building a new one each frame. Modifiers and texture UVs still rebuild it.
+
 ## What's in it
 
 | Path | What it holds |
@@ -276,7 +288,8 @@ Paint colours onto the mesh's points; the colour blends across each face.
 | `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
 | `src/Font.lua` | The block font for Add > Text (ROBLEND's own 5 x 7 letters). |
 | `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
-| `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View. |
+| `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View, Convert. |
+| `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
 | `src/ModStack.lua` | The commands behind the modifier stack, UVs and textures. |
 | `src/View.lua` | ROBLEND's own 3D view: a ViewportFrame with its own camera, grid, lighting and the edit cage. |
 | `src/Main.server.lua` | The plugin: picking, the selection cage, the modal tools and the keys. |

@@ -165,13 +165,59 @@ function Display.faceUVs(uv, vs, n, lo, size)
 	return out
 end
 
-function Display.build(bm, selColor, skipHidden, uv)
-	local c = Display.bounds(bm)
+-- the collision / render detail a part should get (Properties > Object > Collision, saved as attributes
+-- RB_Collision / RB_Render). preview = Edit Mode's live look: Box collision (fast to make every change)
+Display.COLLISION = { "Box", "Hull", "Default", "PreciseConvexDecomposition" }
+Display.RENDER = { "Automatic", "Performance", "Precise" }
+function Display.fidelity(p, preview)
+	local col, ren = p:GetAttribute("RB_Collision"), p:GetAttribute("RB_Render")
+	if not col then pcall(function() col = p.CollisionFidelity.Name end) end
+	if not ren then pcall(function() ren = p.RenderFidelity.Name end) end
+	col, ren = col or "Default", ren or "Automatic"
+	local o = {}
+	pcall(function()
+		o.CollisionFidelity = Enum.CollisionFidelity[preview and "Box" or col]
+		o.RenderFidelity = Enum.RenderFidelity[ren]
+	end)
+	return o, col, ren
+end
+-- remember what the part has now (before Edit Mode's Box previews change it)
+function Display.rememberFidelity(p)
+	local _, col, ren = Display.fidelity(p)
+	if not p:GetAttribute("RB_Collision") then p:SetAttribute("RB_Collision", col) end
+	if not p:GetAttribute("RB_Render") then p:SetAttribute("RB_Render", ren) end
+end
+-- put the chosen detail back on the part (after its mesh was swapped)
+function Display.applyFidelity(p)
+	local o = Display.fidelity(p)
+	pcall(function() if p.CollisionFidelity ~= o.CollisionFidelity then p.CollisionFidelity = o.CollisionFidelity end end)
+	pcall(function() if p.RenderFidelity ~= o.RenderFidelity then p.RenderFidelity = o.RenderFidelity end end)
+end
+
+function Display.build(bm, selColor, skipHidden, uv, partOpts)
 	local lo, size
 	if uv and uv.mode then
-		local _, sz = Display.bounds(bm)
+		local bc, sz = Display.bounds(bm)
 		size = sz
-		lo = c - sz / 2
+		lo = bc - sz / 2
+	end
+	-- centre on the box of the points that are actually drawn (a loose point or a hidden face must not shift it:
+	-- Roblox centres the mesh on its own box)
+	local c
+	do
+		local blo, bhi = V3(math.huge, math.huge, math.huge), V3(-math.huge, -math.huge, -math.huge)
+		local any = false
+		for f in pairs(bm.faces) do
+			if skipHidden and f.hide then continue end
+			local vs = BMesh.faceVerts(f)
+			local ok = true
+			for _, v in ipairs(vs) do if not finite(v.co) then ok = false break end end
+			if ok then
+				for _, v in ipairs(vs) do blo = blo:Min(v.co) bhi = bhi:Max(v.co) end
+				any = true
+			end
+		end
+		c = any and (blo + bhi) / 2 or Display.bounds(bm)
 	end
 	-- Roblox limit: 20,000 triangles / 60,000 verts per EditableMesh
 	local nt, nvx = 0, 0
@@ -187,6 +233,14 @@ function Display.build(bm, selColor, skipHidden, uv)
 	end)
 	local tris = 0
 	local shared = {}
+	-- for the fast path (updatePositions / updateColors): which EditableMesh points / triangles each mesh point / face became
+	local vmap, tmap = {}, {}
+	local function addV(v)
+		local id = em:AddVertex(v.co - c)
+		local l = vmap[v]
+		if l then l[#l + 1] = id else vmap[v] = { id } end
+		return id
+	end
 	-- vertex colours (Vertex Paint): one colour id per distinct colour
 	local painted = false
 	for v in pairs(bm.verts) do if v.col then painted = true break end end
@@ -238,10 +292,10 @@ function Display.build(bm, selColor, skipHidden, uv)
 				local g = fanOf(v, f)
 				local key = shared[v]
 				if not key then key = {} shared[v] = key end
-				if not key[g] then key[g] = em:AddVertex(v.co - c) end
+				if not key[g] then key[g] = addV(v) end
 				ids[i] = key[g]
 			else
-				ids[i] = em:AddVertex(v.co - c)
+				ids[i] = addV(v)
 			end
 		end
 		local uvids
@@ -254,6 +308,7 @@ function Display.build(bm, selColor, skipHidden, uv)
 		for _, t in ipairs(Display.triangulate(vs, f.no)) do
 			local fid = em:AddTriangle(ids[t[1]], ids[t[2]], ids[t[3]])
 			tris += 1
+			tmap[#tmap + 1] = { fid, vs[t[1]], vs[t[2]], vs[t[3]], f }
 			if uvids and uvids[t[3]] then pcall(function() em:SetFaceUVs(fid, { uvids[t[1]], uvids[t[2]], uvids[t[3]] }) end) end
 			if white then
 				pcall(function()
@@ -269,10 +324,53 @@ function Display.build(bm, selColor, skipHidden, uv)
 		end
 	end
 	if tris == 0 then pcall(function() em:Destroy() end) return nil, c, "no faces" end
-	local okM, mp = pcall(function() return AssetService:CreateMeshPartAsync(Content.fromObject(em)) end)
+	local okM, mp = pcall(function()
+		if partOpts and next(partOpts) then
+			local ok2, m2 = pcall(function() return AssetService:CreateMeshPartAsync(Content.fromObject(em), partOpts) end)
+			if ok2 and m2 then return m2 end
+		end
+		return AssetService:CreateMeshPartAsync(Content.fromObject(em))
+	end)
 	if not okM then pcall(function() em:Destroy() end) return nil, c, tostring(mp) end
 	Display.emOf[mp] = em
+	Display.maps[em] = { v = vmap, t = tmap, c = c, nv = bm.nv, white = white, sel = sel, colIds = colIds, uv = lo ~= nil }
 	return mp, c, nil, em
+end
+
+-- ===== the fast path: while dragging (G / R / S, sculpt strokes, paint strokes) only the points move or the
+-- colours change, so the EditableMesh already showing is updated in place instead of being built again
+Display.maps = setmetatable({}, { __mode = "k" })
+-- move the points of `em` (made by Display.build from this same bm) to where bm's points are now.
+-- false = can't (the mesh changed shape: points added / removed, or texture coords to redo) - build it again
+function Display.updatePositions(em, bm)
+	local info = em and Display.maps[em]
+	if not info or info.uv or bm.nv ~= info.nv then return false end
+	for v in pairs(info.v) do if not bm.verts[v] or not finite(v.co) then return false end end
+	local c = info.c
+	local ok = pcall(function()
+		for v, ids in pairs(info.v) do
+			local p = v.co - c
+			for _, id in ipairs(ids) do em:SetPosition(id, p) end
+		end
+	end)
+	return ok
+end
+-- repaint the triangles of `em` from the points' colours (Vertex Paint)
+function Display.updateColors(em, bm)
+	local info = em and Display.maps[em]
+	if not info or not info.white or bm.nv ~= info.nv then return false end
+	local ids = info.colIds
+	local function colId(col)
+		if not col then return info.white end
+		local k = math.floor(col.R * 255 + 0.5) * 65536 + math.floor(col.G * 255 + 0.5) * 256 + math.floor(col.B * 255 + 0.5)
+		if not ids[k] then ids[k] = em:AddColor(col, 1) end
+		return ids[k]
+	end
+	return (pcall(function()
+		for _, t in ipairs(info.t) do
+			if not (info.sel and t[5].sel) then em:SetFaceColors(t[1], { colId(t[2].col), colId(t[3].col), colId(t[4].col) }) end
+		end
+	end))
 end
 
 -- ===== save: upload the mesh as a real Roblox Mesh asset (AssetService:CreateAssetAsync, local plugins,

@@ -188,7 +188,7 @@ function Sculpt.new(C)
 		if S.symmetryX and math.abs(c.X) > r * 0.05 then
 			Sculpt.dab(bm, brush, V3(-c.X, c.Y, c.Z), r, S.strength, { BMesh = BMesh, invert = invert })
 		end
-		C.dirtyMesh()
+		C.dirtyMeshFast("pos")
 	end
 
 	function S.press(mp)
@@ -226,7 +226,7 @@ function Sculpt.new(C)
 					h.v.co = h.orig + dd * h.w
 				end
 				st.bm:normalsUpdate()
-				C.dirtyMesh()
+				C.dirtyMeshFast("pos")
 			end
 			return true
 		end

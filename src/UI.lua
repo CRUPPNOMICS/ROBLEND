@@ -1033,6 +1033,25 @@ function UI:buildPropContent()
 		self:panel(2, "vis", "Visibility", function(b)
 			self:wideButton(b, 1, s.hidden and "Show in Viewports" or "Hide in Viewports", function() api.toggleHidden(nil) self:buildPropContent() end)
 		end)
+		self:panel(3, "physics", "Collision", function(b)
+			if s.collision then
+				local items = {}
+				for _, m in ipairs({ { "Box", "Box" }, { "Hull", "Hull" }, { "Default", "Default" }, { "PreciseConvexDecomposition", "Precise" } }) do
+					items[#items + 1] = { m[2], s.collision == m[1], function() api.setPhys("collision", m[1]) self:buildPropContent() end }
+				end
+				self:toggleRow(b, 1, "Collision", items)
+				local ritems = {}
+				for _, m in ipairs({ { "Automatic", "Auto" }, { "Performance", "Fast" }, { "Precise", "Precise" } }) do
+					ritems[#ritems + 1] = { m[2], s.render == m[1], function() api.setPhys("render", m[1]) self:buildPropContent() end }
+				end
+				self:toggleRow(b, 2, "Render", ritems)
+			end
+			for i, k in ipairs({ { "CanCollide", "Can Collide", s.canCollide }, { "Anchored", "Anchored", s.anchored }, { "CastShadow", "Cast Shadow", s.castShadow } }) do
+				self:wideButton(b, 2 + i, (k[3] and "[x]" or "[  ]") .. "  " .. k[2], function() api.setPhys(k[1], not k[3]) self:buildPropContent() end, T.textField)
+			end
+			label(b, { LayoutOrder = 9, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "Box = cheapest, Hull = wraps the shape, Precise = follows every dent (slowest). Edit Mode uses Box while you work." })
+		end)
 	elseif tab == "modifiers" then
 		self:buildModifiers(s)
 	elseif tab == "data" then
@@ -1328,6 +1347,7 @@ function UI:objectMenu()
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		{ "Join", "Ctrl J", function() api.tool("Join") end },
+		{ "Convert to ROBLEND Mesh", "", function() api.tool("Convert") end },
 		"-",
 		{ "Set Origin", "", nil, sub = function() return {
 			{ "Geometry to Origin", "", function() api.tool("GeometryToOrigin") end },
@@ -1776,6 +1796,7 @@ function UI:openContextMenu(at)
 		"-",
 		{ "Duplicate Objects", "Shift D", function() api.tool("Duplicate") end },
 		{ "Join", "Ctrl J", function() api.tool("Join") end },
+		{ "Convert to ROBLEND Mesh", "", function() api.tool("Convert") end },
 		"-",
 		{ "Delete", "X", function() api.tool("DeleteObjects") end },
 	}, at, "Object")
