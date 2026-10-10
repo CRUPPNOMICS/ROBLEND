@@ -78,11 +78,38 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: var(--kbd); color
   .filters { margin-left: 0; }
 }
 @media (prefers-reduced-motion: no-preference) { .item { transition: box-shadow .15s; } }
+/* tabs: Checklist / Hotkeys */
+.tabs { display: flex; gap: 2px; margin: 2px 0 10px; border-bottom: 1px solid var(--line); }
+.tab { font: inherit; font-size: 13px; font-weight: 500; color: var(--fg-dim); background: none; border: 0; border-bottom: 2px solid transparent; padding: 6px 12px 7px; cursor: pointer; margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--select); }
+.tab:focus-visible { outline: 2px solid var(--select); outline-offset: 1px; }
+/* hotkeys sheet */
+.keytools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.keytools input { font: inherit; font-size: 13px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 5px 9px; width: min(320px, 100%); }
+.keytools input:focus-visible { outline: 2px solid var(--select); outline-offset: 1px; }
+.keytools .hint { font-size: 12px; color: var(--fg-dim); }
+.kgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 14px; margin-top: 18px; align-items: start; }
+.kgroup { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+.kgroup h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--select); margin: 0; padding: 9px 14px 8px; border-bottom: 1px solid var(--line); }
+.krow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 7px 14px; border-top: 1px solid var(--line); align-items: baseline; }
+.krow:first-of-type { border-top: 0; }
+.krow .what { min-width: 0; }
+.krow .what small { display: block; color: var(--fg-dim); font-size: 12px; }
+.krow .keys { text-align: right; display: flex; flex-wrap: wrap; gap: 3px 4px; justify-content: flex-end; align-items: baseline; max-width: 220px; }
+.krow .keys .or { color: var(--fg-dim); font-size: 11px; }
+.krow.new .what::after { content: "new"; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: #1d1d1d; background: var(--select); border-radius: 3px; padding: 0 4px; vertical-align: 1px; }
+.knone { color: var(--fg-dim); padding: 18px 2px; }
+@media (max-width: 560px) { .krow .keys { max-width: 150px; } }
 </style>
 
 <div class="wrap">
   <header class="top">
     <div class="brand"><h1>ROBLEND Test Run</h1><span class="ver">plugin 0.26.3</span></div>
+    <div class="tabs" role="tablist" aria-label="Page">
+      <button class="tab" role="tab" id="tabCheck" aria-selected="true" aria-controls="checkView">Checklist</button>
+      <button class="tab" role="tab" id="tabKeys" aria-selected="false" aria-controls="keysView">Hotkeys</button>
+    </div>
+    <div id="checkHead">
     <p class="lede">Go down the list in Studio. Mark each one Works, Broken or Skip, and say what went wrong in the note when something breaks. Claude reads these results and fixes what failed.</p>
     <div class="bar" aria-hidden="true"><span class="ok" id="barOk"></span><span class="bad" id="barBad"></span><span class="skip" id="barSkip"></span></div>
     <div class="stats">
@@ -97,8 +124,17 @@ kbd { font-family: var(--mono); font-size: 11.5px; background: var(--kbd); color
         <button class="chip" id="fBad" aria-pressed="false">Broken</button>
       </div>
     </div>
+    </div>
+    <div id="keysHead" hidden>
+      <p class="lede">Every ROBLEND key in one place. They work while the mouse is over the ROBLEND window. Most are Blender's own.</p>
+      <div class="keytools">
+        <input id="keySearch" type="search" placeholder="Find a key or a tool (try extrude, snap, paint)" aria-label="Find a hotkey">
+        <span class="hint" id="keyCount"></span>
+      </div>
+    </div>
   </header>
   <main id="list"></main>
+  <main id="keysView" hidden><div class="kgrid" id="kgrid"></div></main>
 </div>
 
 <script>
@@ -243,6 +279,23 @@ const TESTS = [
   ["paintpick", "Pick, fill, clear", "[S] over painted colour; [Shift+K] fill; Paint > Clear Colours.", "Picks the colour / fills everything / clears it."],
   ["paintsave", "Colours kept", "Tab out and save.", "The colours stay on the saved mesh."],
  ]},
+ { g: "Texture Paint", items: [
+  ["texin", "Enter Texture Paint", "[Q] > Texture Paint on a sphere with no UVs.", "The bottom bar says Smart UV Project laid out the UVs; the sphere shows its own colour as a picture."],
+  ["texdraw", "Paint the picture", "Drag on it. Hold [Shift] to soften, [Ctrl] for white, [S] picks a colour, [F] size, [Shift+K] fill, X sym in the header.", "Fine, sharp paint that follows the surface and runs across UV seams with no lines."],
+  ["texundo", "Undo a stroke", "Paint two strokes, [Ctrl+Z], then [Ctrl+Y].", "The last stroke goes away and comes back."],
+  ["texsave", "Saved as a texture", "Press [Tab]. (Needs the CreateAssetAsync beta.)", "The bottom bar says Texture saved to Roblox; the part keeps the paint after closing ROBLEND."],
+ ]},
+ { g: "Lining things up", items: [
+  ["planelock", "Plane lock", "Select something, [G] then [Shift+Y], move the mouse. Then [S] [Shift+Y] 2 [Enter].", "It slides across the ground at the same height; then it gets twice as wide and deep but not taller."],
+  ["typed", "Typed values", "[G] [X] 2 [Enter], [R] [Y] 90 [Enter].", "Moves exactly 2 studs; turns exactly 90 degrees."],
+ ]},
+ { g: "The workshop", items: [
+  ["wsimport", "Import from Studio", "Top bar > Import from Studio, click a model.", "It comes down to the workshop, centred, with a yellow box round it."],
+  ["wspick", "Click and Alt click", "Click one part of the model, then [Alt]+click it.", "A click picks that one part (outline); Alt + click picks the whole model."],
+  ["wsplace", "Place in Studio", "Place in Studio, move the mouse, [R] to turn, click to drop.", "It's in your hand on the map and stays where you click."],
+  ["wsbaseplate", "Baseplate stays", "Select the Baseplate in the Explorer and press Edit in ROBLEND.", "Nothing moves; the bottom bar says the Baseplate stays on your map."],
+  ["wscam", "Camera comes back", "Close ROBLEND with the toolbar button.", "Studio's camera is back where it was on the map."],
+ ]},
  { g: "Collision and saving", items: [
   ["collision", "Collision panel", "Properties > Object > Collision: Box / Hull / Default / Precise, Render detail, Can Collide, Anchored, Cast Shadow.", "Each changes the part (check in Studio's Properties); stays after editing the mesh."],
   ["save", "Save to Roblox", "File > Save Mesh (needs the CreateAssetAsync beta).", "Status says Saved with an rbxassetid; the part keeps its look."],
@@ -253,6 +306,124 @@ const TESTS = [
   ["speed", "Speed on a big mesh", "Subdivide a sphere a few times, then G-drag a big selection.", "Moves smoothly (no rebuild stutter)."],
  ]},
 ];
+
+// the hotkeys sheet: [what it does, keys, note, new?]. Keys: "A / B" = either, "A+B" = together, "A then B" = in turn.
+const HOTKEYS = [
+ { g: "Everywhere", rows: [
+  ["Add a mesh", "Shift+A"], ["Search every command", "F3"], ["Mode menu", "Q / Ctrl+Tab", "Object, Edit, Sculpt, Vertex Paint, Texture Paint"],
+  ["Edit Mode on / off", "Tab"], ["Undo / redo", "Ctrl+Z / Ctrl+Y"], ["Toolbar / sidebar", "T / N"],
+  ["Shading menu", "Z"], ["X-ray", "Alt+Z"], ["Snapping on / off", "Shift+Tab"], ["UV menu", "U"],
+ ]},
+ { g: "Moving the view", rows: [
+  ["Orbit", "MMB drag / RMB drag"], ["Pan", "Shift+MMB drag"], ["Zoom", "Wheel"],
+  ["Front / right / top", "Numpad 1 / Numpad 3 / Numpad 7", "Add Ctrl for back / left / bottom"],
+  ["Perspective / orthographic", "Numpad 5"], ["Turn in 15° steps", "Numpad 2 / Numpad 4 / Numpad 6 / Numpad 8"], ["Opposite side", "Numpad 9"],
+  ["Frame everything", "Home"], ["Frame the selection", "Numpad ."], ["Local view (only the selection)", "Numpad /"],
+ ]},
+ { g: "Moving, turning, sizing", rows: [
+  ["Move / rotate / scale", "G / R / S", "Click or Enter to finish, Esc or right-click to cancel"],
+  ["Lock to one axis", "X / Y / Z", "Press again for the mesh's own axis"],
+  ["Lock an axis out (slide flat)", "Shift+X / Shift+Y / Shift+Z", "G Shift Y = across the ground, same height", true],
+  ["Exact amount", "type a number then Enter", "G X 2 Enter = 2 studs along X"],
+  ["Snap while moving", "hold Ctrl", "1 stud, 0.1 scale, 15° turns"],
+  ["Snap menu", "Shift+S", "Selection to Grid, Cursor to Selected..."], ["Pivot point menu", "."],
+  ["Proportional editing", "O", "Wheel changes its size while moving"],
+ ]},
+ { g: "Object Mode", rows: [
+  ["Select / add to selection", "Click / Shift+click"], ["Select a whole model", "Alt+click", "In the workshop", true],
+  ["Duplicate", "Shift+D"], ["Delete", "X / Delete"], ["Join", "Ctrl+J"],
+  ["Hide / hide others / show all", "H / Shift+H / Alt+H"], ["Clear location / rotation", "Alt+G / Alt+R"],
+  ["Apply menu", "Ctrl+A"], ["Subdivision level", "Ctrl+0 to Ctrl+4"],
+ ]},
+ { g: "Edit Mode: selecting", rows: [
+  ["Point / edge / face", "1 / 2 / 3"], ["Select / add / box", "Click / Shift+click / drag"],
+  ["All / none / invert", "A / Alt+A / Ctrl+I"], ["Edge loop", "Alt+click / double-click"], ["Edge ring", "Ctrl+Alt+click"],
+  ["Shortest path", "Ctrl+click"], ["Circle select", "C", "Paint, wheel for size, Esc when done"],
+  ["Lasso / lasso deselect", "Ctrl+RMB drag / Shift+Ctrl+RMB drag"], ["Linked piece", "L / Ctrl+L"],
+  ["Grow / shrink selection", "Ctrl++ / Ctrl+-"], ["Select similar", "Shift+G"], ["Select mirror", "Shift+Ctrl+M"],
+ ]},
+ { g: "Edit Mode: modelling", rows: [
+  ["Extrude", "E"], ["Extrude menu", "Alt+E"], ["Extrude / add a point to the mouse", "Ctrl+RMB"],
+  ["Inset", "I", "I again = each face on its own, Ctrl = depth"], ["Bevel edges / points", "Ctrl+B / Shift+Ctrl+B"],
+  ["Loop cut", "Ctrl+R", "Wheel for more cuts"], ["Offset edge loops", "Shift+Ctrl+R"], ["Knife", "K", "C = angle steps, Z = cut through, Enter = done"],
+  ["Edge slide / vertex slide", "G then G / Shift+V"], ["Shrink / fatten", "Alt+S"], ["To sphere", "Shift+Alt+S"],
+  ["Fill / beautify", "F / Alt+F"], ["Connect two points", "J"], ["Rip", "V / Alt+D"], ["Split", "Y"], ["Separate", "P"],
+  ["Merge menu", "M"], ["Delete menu", "X"], ["Dissolve", "Ctrl+X / Ctrl+Delete"],
+  ["Triangulate / tris to quads", "Ctrl+T / Alt+J"], ["Recalculate normals", "Shift+N"], ["Edge crease", "Shift+E"],
+  ["Hide / reveal", "H / Shift+H / Alt+H"], ["Repeat last", "Shift+R"],
+ ]},
+ { g: "Sculpt Mode", rows: [
+  ["Draw / Clay Strips / Inflate", "X / C / I"], ["Grab / Smooth / Flatten", "G / S / T"], ["Pinch / Crease", "P / Shift+C"],
+  ["Invert the brush", "hold Ctrl"], ["Smooth with any brush", "hold Shift"],
+  ["Brush size / strength", "F / Shift+F", "Or [ and ]"],
+ ]},
+ { g: "Vertex Paint and Texture Paint", rows: [
+  ["Paint white", "hold Ctrl"], ["Blur / soften", "hold Shift"], ["Pick up a colour", "S"],
+  ["Fill everything", "Shift+K"], ["Brush size / strength", "F / Shift+F"],
+  ["Undo / redo a stroke (Texture Paint)", "Ctrl+Z / Ctrl+Y", null, true], ["Save the texture and leave", "Tab", "Texture Paint uploads the picture", true],
+ ]},
+ { g: "Workshop and placing", rows: [
+  ["Edit the selection in ROBLEND", "Edit in ROBLEND button", "Or Import from Studio in the top bar"],
+  ["Turn while placing", "R"], ["Drop it here", "Click"], ["Back where it was", "Enter"], ["Back to the workshop", "Esc"],
+ ]},
+];
+function keyCaps(spec) {
+  const frag = document.createDocumentFragment();
+  const plain = t => { const o = document.createElement("span"); o.className = "or"; o.textContent = t; frag.appendChild(o); };
+  const WORDS = /^(type a number|then|to|hold|drag|Edit in ROBLEND button)$/;
+  spec.split(" / ").forEach((alt, i) => {
+    if (i) plain("or");
+    alt.split(/(type a number|\bthen\b|\bto\b|\bhold\b|\bdrag\b|Edit in ROBLEND button)/).forEach(bit => {
+      const t = bit.trim();
+      if (!t) return;
+      if (WORDS.test(t)) plain(t);
+      else { const k = document.createElement("kbd"); k.textContent = t; frag.appendChild(k); }
+    });
+  });
+  return frag;
+}
+function renderKeys() {
+  const grid = document.getElementById("kgrid");
+  const q = (document.getElementById("keySearch").value || "").trim().toLowerCase();
+  grid.textContent = "";
+  let n = 0;
+  HOTKEYS.forEach(g => {
+    const rows = g.rows.filter(r => !q || (g.g + " " + r[0] + " " + r[1] + " " + (r[2] || "")).toLowerCase().includes(q));
+    if (!rows.length) return;
+    const box = document.createElement("section"); box.className = "kgroup";
+    const h = document.createElement("h2"); h.textContent = g.g; box.appendChild(h);
+    rows.forEach(([what, keys, note, isNew]) => {
+      n++;
+      const row = document.createElement("div"); row.className = "krow" + (isNew ? " new" : "");
+      const w = document.createElement("div"); w.className = "what"; w.textContent = what;
+      if (note) { const sm = document.createElement("small"); sm.textContent = note; w.appendChild(sm); }
+      const k = document.createElement("div"); k.className = "keys"; k.appendChild(keyCaps(keys));
+      row.append(w, k); box.appendChild(row);
+    });
+    grid.appendChild(box);
+  });
+  if (!n) { const e = document.createElement("p"); e.className = "knone"; e.textContent = "No key matches that. Try a shorter word, like move or paint."; grid.appendChild(e); }
+  document.getElementById("keyCount").textContent = q ? n + " found" : n + " keys";
+}
+function showTab(which) {
+  const keys = which === "keys";
+  document.getElementById("tabCheck").setAttribute("aria-selected", keys ? "false" : "true");
+  document.getElementById("tabKeys").setAttribute("aria-selected", keys ? "true" : "false");
+  document.getElementById("checkHead").hidden = keys;
+  document.getElementById("list").hidden = keys;
+  document.getElementById("keysHead").hidden = !keys;
+  document.getElementById("keysView").hidden = !keys;
+  try { localStorage.setItem("rbt-tab", which); } catch (e) {}
+}
+document.getElementById("tabCheck").addEventListener("click", () => showTab("check"));
+document.getElementById("tabKeys").addEventListener("click", () => showTab("keys"));
+document.getElementById("keySearch").addEventListener("input", renderKeys);
+renderKeys();
+{
+  let start = location.hash === "#hotkeys" ? "keys" : "check";
+  try { if (location.hash !== "#hotkeys" && localStorage.getItem("rbt-tab") === "keys") start = "keys"; } catch (e) {}
+  showTab(start);
+}
 
 const ALL = [];
 TESTS.forEach(g => g.items.forEach(it => ALL.push(it[0])));
