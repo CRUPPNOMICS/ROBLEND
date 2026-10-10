@@ -2315,6 +2315,32 @@ check("Studio's camera is never left down in the workshop: closing ROBLEND (any 
 	MOCK.api.setStudioView(false) beat()
 	if gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
 end)
+check("ROBLEND closed: no ROBLEND keys, Studio's camera is a normal Fixed camera again (0.26.5)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat()
+	local cam = workspace.CurrentCamera
+	cam.CameraType = Enum.CameraType.Custom          -- left by a script / the command bar: Studio's wheel stops working
+	local panelWas = MOCK.widget.Enabled
+	MOCK.widget.Enabled = false                      -- (and the old side panel closed too)
+	MOCK.toolbarButton.Click:Fire() beat()           -- close
+	assert(not gui.Enabled, "closed")
+	eq(cam.CameraType, Enum.CameraType.Fixed, "Studio's edit camera is Fixed again (wheel and orbit work)")
+	-- with ROBLEND closed, its keys do nothing: Tab doesn't start editing, Shift A adds nothing, Delete leaves the part
+	S.Selection:Set({ p }) beat()
+	press("Tab") beat()
+	assert(not inEdit(), "Tab is Studio's again")
+	local n0 = #workspace:GetChildren()
+	press("A", { "LeftShift" }) press("X") press("Delete") beat()
+	eq(#workspace:GetChildren(), n0, "nothing added or deleted")
+	eq(p.Parent, workspace, "the part is still there")
+	assert(not plugin:IsActivated(), "ROBLEND isn't holding the mouse")
+	MOCK.widget.Enabled = panelWas
+	MOCK.toolbarButton.Click:Fire() beat()
+	p.Parent = nil
+	MOCK.toolbarButton.Click:Fire() beat()
+end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
 	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end

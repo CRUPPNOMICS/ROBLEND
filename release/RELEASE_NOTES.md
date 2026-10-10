@@ -1,4 +1,4 @@
-# ROBLEND 0.26.4
+# ROBLEND 0.26.5
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.5:** With ROBLEND closed, Studio gets every key back: ROBLEND's keys (Tab, Shift A, X, Delete...) do nothing until it's opened again. Closing ROBLEND also puts Studio's edit camera back to a normal Fixed camera, so the mouse wheel and orbiting always work.
 
 **0.26.4:** Fixed: 0.26.0 to 0.26.3 wouldn't load in Studio ("Out of local registers... exceeded limit 200"). The main script uses fewer top-level names now, and the tests compile every file the way Studio does, keeping some room spare.
 

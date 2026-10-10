@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.4"
+local VERSION = "0.26.5"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4459,7 +4459,18 @@ function MOD.rememberCam(cf)
 	if not cf or MOD.underMap(cf) then return end
 	pcall(function() plugin:SetSetting(MOD.camKey(), { cf:GetComponents() }) end)
 end
+-- Studio's own edit camera is a Fixed camera: any other type (left by a script or the command bar) stops the
+-- mouse wheel and orbiting from working, so put it back whenever ROBLEND hands the view back to Studio
+MOD.fixCamType = function()
+	pcall(function()
+		local cam = workspace.CurrentCamera
+		if cam and RunService:IsEdit() and not RunService:IsRunning() and cam.CameraType ~= Enum.CameraType.Fixed then
+			cam.CameraType = Enum.CameraType.Fixed
+		end
+	end)
+end
 MOD.rescueCam = function()
+	MOD.fixCamType()
 	local cam = workspace.CurrentCamera
 	if not (cam and MOD.underMap(cam.CFrame)) then return false end
 	local back
@@ -5069,6 +5080,9 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 		elseif k == Enum.KeyCode.R then api.placeKey("R") end
 		return
 	end
+	-- ROBLEND closed: every key is Studio's again (nothing here reacts until ROBLEND is opened)
+	-- (the old side panel, Plugins > ROBLEND panel, counts as open too)
+	if not uiOn and not editing and not modal and not widget.Enabled then return end
 	-- typing in a text box: leave it alone (unless it's the invisible one holding the keyboard for ROBLEND)
 	local focusBox = UIS:GetFocusedTextBox()
 	if KC.showKeys and input.UserInputType == Enum.UserInputType.Keyboard then
