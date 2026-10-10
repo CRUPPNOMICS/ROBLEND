@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.27.0"
+local VERSION = "0.27.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -105,36 +105,13 @@ local FALLOFF_ORDER = { "Smooth", "Sphere", "Root", "Inverse Square", "Sharp", "
 -- ===== UI =====
 local toolbar = plugin:CreateToolbar(NAME)
 -- the button starts with the logo saved last time (or no icon yet: never a made-up id, Studio logs an error for that)
-local savedIconId
-pcall(function() savedIconId = plugin:GetSetting("RB_IconId") end)
+-- the toolbar button's logo: the ROBLEND logo already uploaded once (an Image asset everyone can see), so every
+-- copy shows it straight away. (Copies from the Creator Store can't upload anything themselves: Roblox doesn't let
+-- store plugins use CreateAssetAsync yet.) The window's own logo is drawn straight from the plugin (Icon.lua).
 local btnMain = toolbar:CreateButton(NAME, "Open " .. NAME .. " - free, open-source 3D modelling for Roblox Studio",
-	(type(savedIconId) == "number" or type(savedIconId) == "string") and savedIconId ~= "" and ("rbxassetid://" .. tostring(savedIconId)) or "", NAME)
+	"rbxassetid://100218459152942", NAME)
 btnMain.ClickableWhenViewportHidden = true
--- the ROBLEND logo: shown in the window straight from the plugin (an EditableImage), and uploaded once as an
--- Image asset for the toolbar button (needs the same "CreateAssetAsync" beta as saving meshes; the id is remembered)
 local logoImage = Icon.image(AssetService)
-local function setButtonIcon(id) pcall(function() btnMain.Icon = "rbxassetid://" .. tostring(id) end) end
-do
-	local saved
-	pcall(function() saved = plugin:GetSetting("RB_IconId") end)
-	if saved then
-		setButtonIcon(saved)
-	elseif logoImage then
-		task.spawn(function()
-			local lastTry
-			pcall(function() lastTry = plugin:GetSetting("RB_IconTry") end)
-			if lastTry and os.time() - lastTry < 3600 then return end
-			pcall(function() plugin:SetSetting("RB_IconTry", os.time()) end)
-			local ok, result, id = pcall(function()
-				return AssetService:CreateAssetAsync(logoImage, Enum.AssetType.Image, { Name = "ROBLEND icon", Description = "ROBLEND plugin icon (Cruppnomics)" })
-			end)
-			if ok and result == Enum.CreateAssetResult.Success and id then
-				pcall(function() plugin:SetSetting("RB_IconId", id) end)
-				setButtonIcon(id)
-			end
-		end)
-	end
-end
 local widget = plugin:CreateDockWidgetPluginGui(NAME .. "_Panel", DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 270, 520, 230, 300))
 widget.Title = NAME .. " " .. VERSION
 
@@ -415,6 +392,10 @@ end
 
 -- ===== saving to Roblox (real Mesh assets, so the mesh stays in the place and publishes) =====
 local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Lua API\", then restart Studio."
+-- Roblox doesn't let plugins installed from the Creator Store upload anything yet (it's coming, with a permission
+-- prompt). Until then a store copy can't save meshes to Roblox: say so once, and stop trying in the background.
+EDIT.STORE_MSG = "Roblox doesn't let Creator Store plugins save meshes yet. Your meshes stay in this place in Studio, but won't show in a published game. To save them: get the free file version of ROBLEND (GitHub: CRUPPNOMICS/ROBLEND, Releases), or use Bake to Parts / Export .obj (Mesh menu)."
+pcall(function() EDIT.storeBlocked = plugin:GetSetting("RB_StoreBlocked") == true end)
 local autoSave = true
 pcall(function() local v = plugin:GetSetting("RB_AutoSave") if v ~= nil then autoSave = v == true end end)
 local saving = {}
@@ -429,6 +410,7 @@ local function isSaved(p)
 end
 local function saveMesh(p, quiet, silent)
 	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
+	if EDIT.storeBlocked and (quiet or silent) then return end   -- (no background tries from a store copy)
 	saving[p] = true
 	task.spawn(function()
 		local ok, err = pcall(function()
@@ -444,7 +426,13 @@ local function saveMesh(p, quiet, silent)
 			end)
 			local id, uerr, kind, c = Display.upload(m, params, uvOf(p))
 			if not id then
-				setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
+				if tostring(uerr):lower():find("store plugin", 1, true) then
+					EDIT.storeBlocked = true
+					pcall(function() plugin:SetSetting("RB_StoreBlocked", true) end)
+					setStatus(EDIT.STORE_MSG)
+				else
+					setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
+				end
 				return
 			end
 			p:SetAttribute("RB_AssetId", id)
@@ -4557,7 +4545,7 @@ setUIOn = function(on)
 		if workshopOn then
 			local up = 0
 			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
-			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: select it in Studio and press Edit in ROBLEND (Plugins tab) to edit it here."):format(up, up == 1 and " is" or "es are")) end
+			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: pick it in Import from Studio (top bar) to edit it here."):format(up, up == 1 and " is" or "es are")) end
 		end
 		-- the first time ever: open the tutorial (Help > Tutorial brings it back) - after "Before you start"
 		-- has checked the two switches ROBLEND needs (it covers everything until they're on)
@@ -4599,15 +4587,8 @@ end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
 -- Studio opened the place with its camera left down in the workshop (closed with ROBLEND open, a crash...): bring it up
 task.delay(1, function() if not uiOn then pcall(MOD.rescueCam) end end)
--- Studio toolbar: Import (selected -> ROBLEND's workshop) and Export (back up to the map)
-pcall(function()
-	local bi = toolbar:CreateButton("RB_Import", "Edit the selected parts / models in ROBLEND", "", "Edit in ROBLEND")
-	bi.ClickableWhenViewportHidden = true
-	bi.Click:Connect(function() pcall(function() bi:SetActive(false) end) importSelected() end)
-	local be = toolbar:CreateButton("RB_Export", "Pick up the selected ROBLEND work and place it on your map", "", "Place")
-	be.ClickableWhenViewportHidden = true
-	be.Click:Connect(function() pcall(function() be:SetActive(false) end) api.exportSelected() end)
-end)
+-- (Studio's Plugins tab has just the one ROBLEND button: bringing things in and placing them is done from inside
+-- ROBLEND - Import from Studio / the Bring in button / Place in Studio - or from keys set in Customize Shortcuts)
 plugin.Unloading:Connect(function()
 	pcall(function() if editing then exitEdit() end end)
 	pcall(function() if uiOn then restoreStudioCam() end MOD.rescueCam() end)

@@ -1,4 +1,4 @@
-# ROBLEND 0.27.0
+# ROBLEND 0.27.2
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,10 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.27.2:** The toolbar button shows the ROBLEND logo straight away in every copy (it's built in now; nothing gets uploaded). A copy installed from the Creator Store can't save meshes to Roblox yet, because Roblox doesn't let store plugins upload anything (coming later, with a permission prompt). ROBLEND now says so once, points to the file version and Bake to Parts / Export .obj, and stops retrying in the background.
+
+**0.27.1:** Studio's Plugins tab shows just the ROBLEND button (the extra Edit in ROBLEND and Place buttons are gone; the same things are inside ROBLEND: Import from Studio, Bring in, Place in Studio).
 
 **0.27.0:** Texture Paint is taken out again: it was slow on real meshes and the paint didn't show reliably. Vertex Paint (Q > Vertex Paint) stays.
 

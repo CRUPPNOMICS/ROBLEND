@@ -1271,9 +1271,9 @@ check("Pivot: Individual Origins; X X = local axis; Fill Holes; Offset Edge Loop
 	assert(select(2, counts(p4)) > 6, "offset loops made new faces")
 	press("Tab") beat()
 end)
-check("ROBLEND logo: toolbar button icon (uploaded once), top bar + status bar, Help > About", function()
-	eq(MOCK.imageUploads, 1, "logo uploaded once")
-	eq(MOCK.toolbarButton.Icon, "rbxassetid://800001", "toolbar button uses it")
+check("ROBLEND logo: toolbar button icon (built in, nothing uploaded), top bar + status bar, Help > About", function()
+	eq(MOCK.imageUploads, 0, "nothing uploaded (store copies can't)")
+	eq(MOCK.toolbarButton.Icon, "rbxassetid://100218459152942", "toolbar button shows the logo straight away")
 	local logos = findAll("ImageLabel", function(d) return d.Name == "RB_Logo" end)
 	assert(#logos >= 2, "logo in the top bar and the status bar: " .. #logos)
 	headerBtn("Help") menuItem("About ROBLEND") beat()
@@ -2081,7 +2081,7 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	S.Selection:Set({ q }) beat()
 	local bb = api.bringInButton()
 	assert(bb and bb.Visible and bb.Text:find("MapRock"), "Bring in button: " .. tostring(bb and bb.Text))
-	assert(MOCK.toolbarButtons.RB_Import and MOCK.toolbarButtons.RB_Export, "Studio toolbar has Edit in ROBLEND and Place")
+	assert(not MOCK.toolbarButtons.RB_Import and not MOCK.toolbarButtons.RB_Export, "Studio's Plugins tab has just the ROBLEND button")
 	bb.Activated:Fire() beat() beat()
 	assert(not bb.Visible, "button goes once it's in")
 	local rock = workspace:FindFirstChild("MapRock")
@@ -2319,6 +2319,23 @@ check("the view never gets stuck: a lost button-up ends the drag, the wheel work
 	beat()
 	assert(view.dist >= 0.3 and (view.focus - f0).Magnitude > 3, "kept going forward: " .. (view.focus - f0).Magnitude)
 	press("Home") beat()
+end)
+check("a Creator Store copy: Roblox refuses uploads, ROBLEND says why once and stops trying in the background (0.27.2)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	if inEdit() then press("Tab") beat() end
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat()
+	MOCK.storePlugin = true
+	local up0 = #MOCK.uploads
+	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()
+	assert(MOCK.status:find("Creator Store plugins", 1, true), "explains: " .. MOCK.status)
+	eq(#MOCK.uploads, up0, "nothing uploaded")
+	-- edits that would auto save: no more tries (each one would only fail again)
+	press("Tab") beat() press("A") press("G") press("Z") type_("1") press("Return") beat() press("Tab") beat() beat()
+	assert(not MOCK.storeTries or MOCK.storeTries <= 1, "no background retries: " .. tostring(MOCK.storeTries))
+	MOCK.storePlugin = nil
+	p.Parent = nil
 end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")

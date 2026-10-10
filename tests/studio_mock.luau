@@ -438,6 +438,7 @@ function EI:Destroy() end
 MOCK.imageUploads = 0
 function Inst.CreateAssetAsync(_, em, assetType, params)
 	if MOCK.noAssetApi then error("CreateAssetAsync is not enabled") end
+	if MOCK.storePlugin then MOCK.storeTries = (MOCK.storeTries or 0) + 1 error("CreateAssetAsync and CreateAssetVersionAsync can not be used from store plugins yet") end
 	if assetType.Name == "Image" then
 		assert(em.__kind == "EditableImage" and em.written, "uploads a picture that was drawn")
 		MOCK.imageUploads += 1
@@ -504,8 +505,9 @@ MOCK.actions = {}
 function Inst.GetSelectedRibbonTool() return MOCK.ribbonTool or Enum.RibbonTool.None end
 function Inst.SelectRibbonTool(_, t) MOCK.ribbonTool = t end
 function Inst.CreatePluginAction(_, id, text) local a = newInst("PluginAction") a.Name = id a.Text = text MOCK.actions[id] = a return a end
-function Inst.CreateButton(_, id)
+function Inst.CreateButton(_, id, tip, icon)
 	local b = newInst("ToolbarButton")
+	b.Icon = icon
 	MOCK.toolbarButtons = MOCK.toolbarButtons or {}
 	MOCK.toolbarButtons[id] = b
 	if not MOCK.toolbarButton then MOCK.toolbarButton = b end
