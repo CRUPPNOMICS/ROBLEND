@@ -1581,6 +1581,35 @@ check("convert: a MeshPart's own mesh is read back like a Blender import (welded
 	MOCK.api.convert({ r }) beat()
 	assert(MOCK.status:find("Select a Part", 1, true), "already a ROBLEND mesh")
 end)
+check("plane lock: G / S then Shift Y keeps everything at the same height (Blender's Shift axis)", function()
+	local p = editCube()
+	press("A") beat()
+	local function hl()
+		local lo, hi = bounds(worldVerts(p))
+		return lo, hi
+	end
+	local lo0, hi0 = hl()
+	local ctr = (lo0 + hi0) / 2
+	mouseTo(ctr) beat()
+	press("G") press("Y", { "LeftShift" }) beat()
+	assert(MOCK.status:find("locking Y", 1, true), "says it: " .. MOCK.status)
+	mouseXY(mouse.X + 60, mouse.Y + 40) beat()
+	press("Return") beat()
+	local lo1, hi1 = hl()
+	assert(near(lo1.Y, lo0.Y) and near(hi1.Y, hi0.Y), "same height: " .. tostring(lo1.Y) .. " vs " .. tostring(lo0.Y))
+	assert(math.abs(lo1.X - lo0.X) + math.abs(lo1.Z - lo0.Z) > 0.3, "but it moved across the ground")
+	-- S Shift Y 2: twice as wide and deep, the same height
+	press("S") press("Y", { "LeftShift" }) type_("2") press("Return") beat()
+	local lo2, hi2 = hl()
+	assert(near(hi2.Y - lo2.Y, hi1.Y - lo1.Y), "height kept")
+	assert(near(hi2.X - lo2.X, 2 * (hi1.X - lo1.X)) and near(hi2.Z - lo2.Z, 2 * (hi1.Z - lo1.Z)), "width and depth doubled")
+	-- Shift Y twice turns it off again; X after Shift Y swaps to the axis
+	press("G") press("Y", { "LeftShift" }) press("X") beat()
+	assert(MOCK.status:find("along X", 1, true) and not MOCK.status:find("locking", 1, true), "X replaces the plane lock")
+	press("Escape") beat()
+	press("Tab") for _ = 1, 4 do MOCK.t += 0.2 beat() end
+	p.Parent = nil beat()
+end)
 check("speed: dragging points updates the shown mesh in place (no rebuild per frame)", function()
 	local p = editCube()
 	press("A") beat()

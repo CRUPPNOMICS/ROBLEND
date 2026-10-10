@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.0"
+local VERSION = "0.26.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -1139,7 +1139,7 @@ local function startTransform(kind, opts)
 			end
 		end
 	end
-	setStatus(({ G = "MOVE", S = "SCALE", R = "ROTATE" })[kind] .. ": move the mouse. X / Y / Z = lock to an axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
+	setStatus(({ G = "MOVE", S = "SCALE", R = "ROTATE" })[kind] .. ": move the mouse. X / Y / Z = lock to an axis, Shift X / Y / Z = lock it out (flat on the other two), type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
 end
 
 -- ===== object mode: G / R / S on whole parts (our 3D view) =====
@@ -1163,7 +1163,30 @@ local function startObjTransform(kind)
 	local rec
 	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND " .. kind) end)
 	modal = { kind = kind, obj = true, parts = ps, orig = orig, cw = c, cs = toScreen(c), m0 = mousePos(), ray0 = getRay(), num = "", rec = rec }
-	setStatus(({ G = "Move", S = "Resize", R = "Rotate" })[kind] .. ": move the mouse. X / Y / Z = axis, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
+	setStatus(({ G = "Move", S = "Resize", R = "Rotate" })[kind] .. ": move the mouse. X / Y / Z = axis, Shift X / Y / Z = plane, type a number, Ctrl = snap. Click / Enter = done, Esc = cancel.")
+end
+-- plane lock (Shift X / Y / Z): the mouse slides the selection over the flat plane that leaves out that axis.
+-- Looking straight along the plane, the screen move is used with the locked part taken out.
+local PLANE_NAME = { X = "Y-Z", Y = "X-Z (ground)", Z = "X-Y" }
+local function planeMove(M, nW, num, snap)
+	local dW
+	if num then
+		local r = camera().CFrame.RightVector
+		r -= nW * r:Dot(nW)
+		return r.Magnitude > 1e-6 and r.Unit * num or V3()
+	end
+	local ray = getRay()
+	local p1, p0 = planeHit(ray, M.cw, nW), planeHit(M.ray0, M.cw, nW)
+	if p1 and p0 and math.abs(ray.Direction.Unit:Dot(nW)) > 0.08 then
+		dW = p1 - p0
+	else
+		local n = camera().CFrame.LookVector
+		local q1, q0 = planeHit(ray, M.cw, n), planeHit(M.ray0, M.cw, n)
+		dW = (q1 and q0) and (q1 - q0) or V3()
+	end
+	dW -= nW * dW:Dot(nW)
+	if snap then dW = V3(math.floor(dW.X + 0.5), math.floor(dW.Y + 0.5), math.floor(dW.Z + 0.5)) end
+	return dW
 end
 local function applyObjTransform()
 	local M = modal
@@ -1171,6 +1194,7 @@ local function applyObjTransform()
 	local num = tonumber(M.num)
 	local snap = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 	local axisW = M.axis and AXES[M.axis]
+	local planeW = M.plane and AXES[M.plane]
 	local cam = camera()
 	if M.kind == "G" then
 		local dW
@@ -1182,6 +1206,8 @@ local function applyObjTransform()
 				if snap then t = math.floor(t + 0.5) end
 			end
 			dW = axisW * t
+		elseif planeW then
+			dW = planeMove(M, planeW, num, snap)
 		else
 			local n = cam.CFrame.LookVector
 			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
@@ -1202,6 +1228,13 @@ local function applyObjTransform()
 				local la = o.cf:VectorToObjectSpace(axisW)
 				k = V3(1, 1, 1) + V3(math.abs(la.X), math.abs(la.Y), math.abs(la.Z)) * (f - 1)
 				pos = M.cw + (pos - M.cw) + axisW * ((pos - M.cw):Dot(axisW) * (f - 1))
+			elseif planeW then
+				-- plane lock: everything but the locked axis
+				local la = o.cf:VectorToObjectSpace(planeW)
+				k = V3(f, f, f) + V3(math.abs(la.X), math.abs(la.Y), math.abs(la.Z)) * (1 - f)
+				local rel = pos - M.cw
+				local along = planeW * rel:Dot(planeW)
+				pos = M.cw + along + (rel - along) * f
 			else
 				pos = M.cw + (pos - M.cw) * f
 			end
@@ -1214,13 +1247,13 @@ local function applyObjTransform()
 		local a1 = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
 		local ang = num and math.rad(num) or -(a1 - a0)
 		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
-		local ax = axisW or -cam.CFrame.LookVector
+		local ax = axisW or planeW or -cam.CFrame.LookVector
 		local rot = CFrame.fromAxisAngle(ax, ang)
 		for p, o in pairs(M.orig) do p.CFrame = CFrame.new(M.cw) * rot * CFrame.new(-M.cw) * o.cf end
 		M.info = ("Rot %.1f"):format(math.deg(ang))
 	end
 	dirtyCage = true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. PLANE_NAME[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 local function finishObjModal(M, cancel)
 	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
@@ -1281,6 +1314,8 @@ local function applyTransform()
 	local snap = (keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)) ~= EDIT.snap
 	local axisW = M.axisWorld or (M.axis and (M.axisLocal and origin:VectorToWorldSpace(AXES[M.axis]) or AXES[M.axis]))
 	local axisL = axisW and origin:VectorToObjectSpace(axisW).Unit
+	local planeW = M.plane and AXES[M.plane]
+	local planeL = planeW and origin:VectorToObjectSpace(planeW).Unit
 	if M.kind == "G" then
 		local dL
 		if axisW then
@@ -1291,6 +1326,8 @@ local function applyTransform()
 				if snap then t = math.floor(t + 0.5) end
 			end
 			dL = axisL * t
+		elseif planeW then
+			dL = origin:VectorToObjectSpace(planeMove(M, planeW, num, snap))
 		else
 			local n = camera().CFrame.LookVector
 			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
@@ -1317,6 +1354,9 @@ local function applyTransform()
 			if axisL then
 				local along = axisL * r:Dot(axisL)
 				v.co = pc + (r - along) + along * f
+			elseif planeL then
+				local along = planeL * r:Dot(planeL)
+				v.co = pc + along + (r - along) * f
 			else
 				v.co = pc + r * f
 			end
@@ -1327,6 +1367,9 @@ local function applyTransform()
 			if axisL then
 				local along = axisL * r:Dot(axisL)
 				v.co = M.c + (r - along) + along * fw
+			elseif planeL then
+				local along = planeL * r:Dot(planeL)
+				v.co = M.c + along + (r - along) * fw
 			else
 				v.co = M.c + r * fw
 			end
@@ -1337,7 +1380,7 @@ local function applyTransform()
 		local a1 = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
 		local ang = num and math.rad(num) or -(a1 - a0)
 		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
-		local axL = axisL or origin:VectorToObjectSpace(-camera().CFrame.LookVector).Unit
+		local axL = axisL or planeL or origin:VectorToObjectSpace(-camera().CFrame.LookVector).Unit
 		local rot = CFrame.fromAxisAngle(axL, ang)
 		for _, v in ipairs(M.verts) do local pc = M.ic and M.ic[v] or M.c v.co = pc + rot * (M.orig[v] - pc) end
 		for v, w in pairs(M.prop or {}) do v.co = M.c + CFrame.fromAxisAngle(axL, ang * w) * (M.orig[v] - M.c) end
@@ -1353,7 +1396,7 @@ local function applyTransform()
 	if dirtyFast == "col" then dirtyMesh = true end
 	dirtyFast = "pos"
 	dirtyCage = true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. PLANE_NAME[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 
 local function finishModal(cancel)
@@ -4885,9 +4928,17 @@ local function modalKey(k)
 		return
 	end
 	if modal.kind == "G" or modal.kind == "S" or modal.kind == "R" then
+		if (k == Enum.KeyCode.X or k == Enum.KeyCode.Y or k == Enum.KeyCode.Z) and shiftDown() then
+			-- Shift X / Y / Z: lock that axis, move / scale on the flat plane of the other two (Blender)
+			local a = k.Name
+			modal.axisWorld, modal.axis, modal.axisLocal = nil, nil, nil
+			modal.plane = modal.plane ~= a and a or nil
+			applyTransform()
+			return
+		end
 		if k == Enum.KeyCode.X or k == Enum.KeyCode.Y or k == Enum.KeyCode.Z then
 			local a = k.Name
-			modal.axisWorld = nil
+			modal.axisWorld, modal.plane = nil, nil
 			-- X = global X, X again = the mesh's own (local) X, again = off (Blender)
 			if modal.axis == a and not modal.axisLocal and not modal.obj then modal.axisLocal = true
 			elseif modal.axis == a then modal.axis, modal.axisLocal = nil, nil

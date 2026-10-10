@@ -1,4 +1,4 @@
-# ROBLEND 0.26.0
+# ROBLEND 0.26.1
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.1:** Plane lock, like Blender: while moving / scaling / rotating, Shift X / Y / Z locks that axis out so the selection slides flat on the other two (G Shift Y = across the ground at the same height, S Shift Y = wider and deeper, not taller). Works in Edit Mode and Object Mode.
 
 **0.26.0 - Texture Paint:** Q > Texture Paint paints straight onto the model's picture through its UVs, like Blender: Draw / Soften / Average brushes, S picks a colour, Shift K fills, X symmetry, Ctrl Z / Y per stroke. The brush works in 3D, so strokes cross UV seams, and paint bleeds past island edges so no seams show. Meshes without UVs get Smart UV Project first. Leaving saves the picture to Roblox as an Image and puts it on the part as its texture.
 

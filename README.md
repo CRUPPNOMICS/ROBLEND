@@ -198,6 +198,7 @@ Modifiers change how a mesh looks without touching your edits, like Blender's. C
 - Roblox allows 20,000 triangles per mesh, so Subdivision stops a level early if the next one would go over.
 
 **Handy shortcuts in Edit Mode**
+- While moving / scaling / rotating (G / S / R): X, Y or Z keeps it on that one axis (press again for the mesh's own axis). Shift X, Y or Z locks that axis out instead, so it slides flat on the other two: G Shift Y moves across the ground without going up or down, S Shift Y makes it wider and deeper but not taller. Works on objects too.
 - Ctrl + right-click: extrude the selection to the mouse, or add a vertex there when nothing is selected.
 - Shift R: repeat the last operator (also in the Edit menu).
 - Auto Merge (the header button next to Mirror X): after a move, vertices that land on each other are welded.
