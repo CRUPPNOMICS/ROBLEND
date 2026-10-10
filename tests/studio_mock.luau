@@ -364,7 +364,13 @@ function EM:AddTriangle(a, b, c)
 end
 function EM:AddColor() self.c += 1 return self.c end
 function EM:AddUV(p) assert(p.X == p.X and p.Y == p.Y, "NaN uv") self.uv = self.uv or {} self.uv[#self.uv + 1] = p return #self.uv end
-function EM:SetFaceUVs(f, ids) assert(self.t[f] and #ids == 3, "face uvs") for _, i in ipairs(ids) do assert(self.uv[i], "bad uv id") end self.fuv = (self.fuv or 0) + 1 end
+function EM:SetFaceUVs(f, ids) assert(self.t[f] and #ids == 3, "face uvs") for _, i in ipairs(ids) do assert(self.uv[i], "bad uv id") end self.fuv = (self.fuv or 0) + 1 self.fuvs = self.fuvs or {} self.fuvs[f] = table.clone(ids) end
+function EM:GetFaceUVs(f) local u = self.fuvs and self.fuvs[f] if not u then error("face has no UVs") end return table.clone(u) end
+function EM:GetUV(i) return assert(self.uv and self.uv[i], "bad uv id") end
+function EM:AddNormal(n) self.n = self.n or {} self.n[#self.n + 1] = n return #self.n end
+function EM:SetFaceNormals(f, ids) assert(self.t[f] and #ids == 3, "face normals") self.fns = self.fns or {} self.fns[f] = table.clone(ids) end
+function EM:GetFaceNormals(f) local u = self.fns and self.fns[f] if not u then error("face has no normals") end return table.clone(u) end
+function EM:GetNormal(i) return assert(self.n and self.n[i], "bad normal id") end
 function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.destroyed = true end
 function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
 -- reading a mesh back (Convert): ids are just the array indices
@@ -382,7 +388,9 @@ function Inst.CreateEditableMeshAsync(_, content)
 	elseif content.uri then local n = tonumber(content.uri:match("%d+$")) src = n and MOCK.uploads[n - 900000] and MOCK.uploads[n - 900000].em end
 	assert(src, "unknown mesh")
 	MOCK.emAlive += 1
-	return setmetatable({ v = table.clone(src.v), t = table.clone(src.t), c = 0, __kind = "EditableMesh" }, EM)
+	local function cl(x) return x and table.clone(x) or nil end
+	local function cl2(x) if not x then return nil end local o = {} for k, v in pairs(x) do o[k] = table.clone(v) end return o end
+	return setmetatable({ v = table.clone(src.v), t = table.clone(src.t), c = 0, uv = cl(src.uv), fuvs = cl2(src.fuvs), n = cl(src.n), fns = cl2(src.fns), __kind = "EditableMesh" }, EM)
 end
 MOCK.meshesMade = 0
 MOCK.uploads = {}

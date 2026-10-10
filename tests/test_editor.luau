@@ -1464,21 +1464,31 @@ check("convert: Ball and Cylinder (cylinders lie along X)", function()
 	assert(allOut(rbNamed("Pipe")), "cylinder faces point out")
 	eq(#S.Selection:Get(), 2, "both selected")
 end)
-check("convert: a MeshPart's own mesh is read back, welded and scaled to the part", function()
+check("convert: a MeshPart's own mesh is read back like a Blender import (welded, scaled, UVs, shading, quads)", function()
 	-- a cube as a mesh file stores it: 4 corners per side (24 points), 2 triangles per side
 	local em = S.AssetService:CreateEditableMesh()
 	local sides = { { V3(1, 0, 0), V3(0, 1, 0), V3(0, 0, 1) }, { V3(-1, 0, 0), V3(0, 0, 1), V3(0, 1, 0) }, { V3(0, 1, 0), V3(0, 0, 1), V3(1, 0, 0) },
 		{ V3(0, -1, 0), V3(1, 0, 0), V3(0, 0, 1) }, { V3(0, 0, 1), V3(1, 0, 0), V3(0, 1, 0) }, { V3(0, 0, -1), V3(0, 1, 0), V3(1, 0, 0) } }
-	for _, sd in ipairs(sides) do
+	-- (and like a Blender export: a normal per side, and each side's own square of the texture)
+	for si, sd in ipairs(sides) do
 		local n, u, v = sd[1], sd[2], sd[3]
-		local ids = {}
-		for i, k in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do ids[i] = em:AddVertex(n + u * k[1] + v * k[2]) end
-		em:AddTriangle(ids[1], ids[2], ids[3]) em:AddTriangle(ids[1], ids[3], ids[4])
+		local ids, uvs = {}, {}
+		local nid = em:AddNormal(n)
+		for i, k in ipairs({ { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } }) do
+			ids[i] = em:AddVertex(n + u * k[1] + v * k[2])
+			uvs[i] = em:AddUV(Vector2.new((si - 1) / 6 + (k[1] + 1) / 12, (k[2] + 1) / 2))
+		end
+		for _, t in ipairs({ { 1, 2, 3 }, { 1, 3, 4 } }) do
+			local fid = em:AddTriangle(ids[t[1]], ids[t[2]], ids[t[3]])
+			em:SetFaceUVs(fid, { uvs[t[1]], uvs[t[2]], uvs[t[3]] })
+			em:SetFaceNormals(fid, { nid, nid, nid })
+		end
 	end
 	local _, id = S.AssetService:CreateAssetAsync(em, Enum.AssetType.Mesh, {})
 	local mp = newPart("MeshPart", "Rock", V3(4, 6, 4), V3(0, 3, 60))
 	mp.MeshId = "rbxassetid://" .. id
 	mp.MeshSize = V3(2, 2, 2)
+	mp.TextureID = "rbxassetid://4242"
 	MOCK.denyMesh = true
 	MOCK.api.convert({ mp }) beat()
 	assert(MOCK.status:find("won't let", 1, true), "explains a locked mesh: " .. MOCK.status)
@@ -1487,9 +1497,18 @@ check("convert: a MeshPart's own mesh is read back, welded and scaled to the par
 	MOCK.api.convert({ mp }) beat()
 	local r = rbNamed("Rock")
 	local nv, nf = counts(r)
-	eq(nv, 8, "corners welded back together") eq(nf, 12, "its triangles")
+	eq(nv, 8, "corners welded back together") eq(nf, 6, "the export's triangles joined back into quads")
 	local lo, hi = bounds(worldVerts(r))
 	assert(near(hi.Y - lo.Y, 6) and near(hi.X - lo.X, 4), "scaled to the part's size")
+	-- the texture still fits: every corner kept its UV, the part keeps its texture and builds with the UVs
+	local d = data(r)
+	assert(d.uv, "UVs kept")
+	for i, list in ipairs(d.uv) do assert(type(list) == "table" and #list == 8, "face " .. i .. " has a UV on each corner") end
+	eq(r:GetAttribute("RB_UVMode"), "unwrap", "built with its own UVs")
+	eq(r.TextureID, "rbxassetid://4242", "texture kept")
+	-- shading: the file's normals split at every cube edge, so smooth faces with those 12 edges sharp
+	eq(#(d.s or {}), 6, "smooth faces")
+	eq(#(d.sh or {}) / 2, 12, "sharp where the normals split")
 	-- Ctrl Z-able: converting a ROBLEND mesh again does nothing
 	MOCK.api.convert({ r }) beat()
 	assert(MOCK.status:find("Select a Part", 1, true), "already a ROBLEND mesh")

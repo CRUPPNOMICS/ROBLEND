@@ -205,6 +205,31 @@ check2("poke, triangulate, tris to quads, solidify, extrude individual", functio
 	g:validate()
 	eq(MT.count(nf), 2, "two tops") eq(g.nf, 10, "faces")
 end)
+check2("tris to quads keeps UVs, and with uv / sharp / shape only joins clean pairs (MeshPart import)", function()
+	-- a square as two triangles that share their UVs: joins, and the quad keeps the four UVs
+	local function square(seam)
+		local bm = BMesh.new()
+		local a, b, c, d = bm:vertCreate(Vector3.new(0, 0, 0)), bm:vertCreate(Vector3.new(1, 0, 0)), bm:vertCreate(Vector3.new(1, 0, 1)), bm:vertCreate(Vector3.new(0, 0, 1))
+		local uv = { [a] = Vector2.new(0, 0), [b] = Vector2.new(1, 0), [c] = Vector2.new(1, 1), [d] = Vector2.new(0, 1) }
+		local f1, f2 = bm:faceCreate({ a, c, b }), bm:faceCreate({ a, d, c })
+		for _, l in ipairs(BMesh.faceLoops(f1)) do l.uv = uv[l.v] end
+		for _, l in ipairs(BMesh.faceLoops(f2)) do l.uv = (seam and l.v == c) and Vector2.new(5, 5) or uv[l.v] end
+		bm:normalsUpdate()
+		return bm, { [f1] = true, [f2] = true }, uv
+	end
+	local bm, fs, uv = square(false)
+	eq(MT.trisToQuads(bm, fs, nil, { uv = true, sharp = true, shape = true }), 1, "joined")
+	local q = next(bm.faces)
+	eq(q.len, 4, "a quad")
+	for _, l in ipairs(BMesh.faceLoops(q)) do assert(l.uv and (l.uv - uv[l.v]).Magnitude < 1e-9, "UV kept on the quad") end
+	-- a UV seam down the diagonal: stays two triangles
+	local s2, fs2 = square(true)
+	eq(MT.trisToQuads(s2, fs2, nil, { uv = true }), 0, "not across a UV seam")
+	-- a sharp diagonal: stays
+	local s3, fs3 = square(false)
+	for e in pairs(s3.edges) do if BMesh.edgeFaceCount(e) == 2 then e.sharp = true end end
+	eq(MT.trisToQuads(s3, fs3, nil, { sharp = true }), 0, "not across a sharp edge")
+end)
 check2("convex hull, symmetrize, recalc normals", function()
 	local h = BMesh.new()
 	local vs = {}

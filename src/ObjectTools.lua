@@ -188,7 +188,7 @@ function ObjectTools.new(C)
 
 	-- Object > Convert to ROBLEND Mesh (Blender's Object > Convert): any Part / Wedge / Ball / Cylinder / MeshPart
 	-- becomes a ROBLEND mesh in the same place, with the same look; the original is taken out (Ctrl Z brings it back)
-	local KEEP = { "Name", "Color", "Material", "Transparency", "Reflectance", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Locked" }
+	local KEEP = { "Name", "Color", "Material", "Transparency", "Reflectance", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Locked", "TextureID" }
 	function OT.convert(parts)
 		parts = parts or selectedParts()
 		local made, why = {}, nil
@@ -201,7 +201,9 @@ function ObjectTools.new(C)
 					-- a MeshPart keeps its collision / render detail; a plain part gets Roblox's Default
 					local fo = {}
 					if p:IsA("MeshPart") then pcall(function() fo.CollisionFidelity, fo.RenderFidelity = p.CollisionFidelity, p.RenderFidelity end) end
-					local mp, c, err2 = Display.build(m, nil, nil, nil, fo)
+					-- a mesh that brought its UVs keeps them (its texture / SurfaceAppearance still fits)
+					local uv = C.Convert.hasUV(m, C.BMesh) and { mode = "unwrap", scale = 4 } or nil
+					local mp, c, err2 = Display.build(m, nil, nil, uv, fo)
 					if not mp then
 						why = err2
 					else
@@ -216,6 +218,7 @@ function ObjectTools.new(C)
 							mp:SetAttribute("RB_Center", c)
 							mp:SetAttribute("RB_Size", mp.Size)
 							mp:SetAttribute("ROBLEND", C.VERSION)
+							if uv then mp:SetAttribute("RB_UVMode", "unwrap") end
 							pcall(Display.rememberFidelity, mp)
 							-- children (decals, scripts, welds...) come along; joints elsewhere that held the old part hold the new one
 							for _, ch in ipairs(p:GetChildren()) do ch.Parent = mp end

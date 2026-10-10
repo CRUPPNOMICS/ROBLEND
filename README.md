@@ -292,7 +292,7 @@ Paint colours onto the mesh's points; the colour blends across each face.
 **Edit any part** (Object > Convert to ROBLEND Mesh, or just select it and press Tab)
 - Parts (block, ball, cylinder), Wedges, Corner Wedges and MeshParts become ROBLEND meshes in the same place, with the same name, colour, material, children and welds. Ctrl Z brings the original back.
 - MeshParts are read with Roblox's `CreateEditableMeshAsync`, so only meshes you (or the experience's owner) uploaded can be opened. Unions can't be read by plugins.
-- A MeshPart's corners are welded back together so it edits as one surface; its old texture UVs aren't kept (use the UV menu).
+- A MeshPart made in Blender comes back the way Blender showed it: its corners welded into one surface, its UVs kept (so its texture or SurfaceAppearance still fits after you edit it), smooth shading with sharp edges where the file's normals split, and the export's triangles joined back into quads where they're clean (same UVs, no sharp edge, a good shape). A model made of several MeshParts converts part by part (Tab on each one).
 
 **Bridge Edge Loops** (Edge menu): once bridged, move the mouse right for Smoothness (the bridge bulges to carry on the shapes it joins), the wheel adds Cuts, T / Shift T twists it. Click or Enter when done.
 

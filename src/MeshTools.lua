@@ -856,11 +856,20 @@ function MT.dissolveEdge(bm, e)
 	local seen = {}
 	for _, w in ipairs(poly) do if seen[w] then return nil end seen[w] = true end
 	local sel = f1.sel or f2.sel
+	-- the UVs come along (where the two faces disagree at a corner, the first face's wins)
+	local uvAt, full = {}, true
+	for _, f in ipairs({ f2, f1 }) do
+		for _, l in ipairs(BMesh.faceLoops(f)) do if l.uv then uvAt[l.v] = l.uv else full = false end end
+	end
 	bm:faceKill(f1)
 	bm:faceKill(f2)
 	bm:edgeKill(e)
 	local nf = bm:faceCreate(poly, f1)
-	if nf then nf.sel = sel BMesh.faceNormalUpdate(nf) end
+	if nf then
+		nf.sel = sel
+		BMesh.faceNormalUpdate(nf)
+		if full then for _, l in ipairs(BMesh.faceLoops(nf)) do l.uv = uvAt[l.v] end end
+	end
 	return nf
 end
 function MT.dissolveEdges(bm, es)
@@ -1155,15 +1164,55 @@ function MT.triangulate(bm, fs, triangulateFn)
 	bm:normalsUpdate()
 	return out
 end
-function MT.trisToQuads(bm, fs, maxAngle)
+-- opts (Blender's Tris to Quads options): uv = only where the UVs match, sharp = never across a sharp edge,
+-- shape = only convex quads, best-shaped first (how a triangulated export gets its own quads back)
+local function uvOn(f, v)
+	for _, l in ipairs(BMesh.faceLoops(f)) do if l.v == v then return l.uv end end
+end
+local function quadShape(e, f1, f2)
+	local function other(f)
+		for _, w in ipairs(fverts(f)) do if w ~= e.v1 and w ~= e.v2 then return w end end
+	end
+	local p, q = other(f1), other(f2)
+	if not (p and q) then return nil end
+	local n = f1.no + f2.no
+	if n.Magnitude < 1e-9 then return nil end
+	n = n.Unit
+	local function side(x, a, b) return (b.co - a.co):Cross(x.co - a.co):Dot(n) end
+	local s1, s2 = side(e.v1, p, q), side(e.v2, p, q)
+	if s1 * s2 >= 0 then return nil end           -- not convex: the diagonals don't cross
+	local quad = { p, e.v1, q, e.v2 }
+	local err = 0
+	for i = 1, 4 do
+		local a, b, c = quad[(i + 2) % 4 + 1].co, quad[i].co, quad[i % 4 + 1].co
+		local u, w = a - b, c - b
+		if u.Magnitude < 1e-9 or w.Magnitude < 1e-9 then return nil end
+		err += math.abs(math.acos(math.clamp(u.Unit:Dot(w.Unit), -1, 1)) - math.pi / 2)
+	end
+	return err / 4
+end
+function MT.trisToQuads(bm, fs, maxAngle, opts)
 	maxAngle = maxAngle or math.rad(40)
+	opts = opts or {}
 	local cands = {}
 	for e in pairs(bm.edges) do
-		if BMesh.edgeFaceCount(e) == 2 then
+		if BMesh.edgeFaceCount(e) == 2 and not (opts.sharp and e.sharp) then
 			local f = BMesh.edgeFaces(e)
 			if fs[f[1]] and fs[f[2]] and f[1].len == 3 and f[2].len == 3 then
 				local ang = math.acos(math.clamp(f[1].no:Dot(f[2].no), -1, 1))
-				if ang <= maxAngle then cands[#cands + 1] = { e = e, a = ang } end
+				local ok = ang <= maxAngle
+				if ok and opts.uv then
+					for _, v in ipairs({ e.v1, e.v2 }) do
+						local a, b = uvOn(f[1], v), uvOn(f[2], v)
+						if (a == nil) ~= (b == nil) or (a and (a - b).Magnitude > 1e-5) then ok = false end
+					end
+				end
+				local score = ang
+				if ok and opts.shape then
+					local err = quadShape(e, f[1], f[2])
+					if not err or err > math.rad(40) then ok = false else score = ang + err end
+				end
+				if ok then cands[#cands + 1] = { e = e, a = score } end
 			end
 		end
 	end

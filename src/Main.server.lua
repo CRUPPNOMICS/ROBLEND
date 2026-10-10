@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.6"
+local VERSION = "0.25.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -422,7 +422,7 @@ applyBuilt = function(p, mp, c, preview)
 end
 
 -- ===== saving to Roblox (real Mesh assets, so the mesh stays in the place and publishes) =====
-local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Luau API\", then restart Studio."
+local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Lua API\", then restart Studio."
 local autoSave = true
 pcall(function() local v = plugin:GetSetting("RB_AutoSave") if v ~= nil then autoSave = v == true end end)
 local saving = {}
@@ -1633,7 +1633,7 @@ r = row()
 button(r, "Bake to parts", 116, Tools.bake, Color3.fromRGB(40, 130, 80))
 button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
-label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Luau API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
+label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Lua API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
 
 -- ===== the Blender-style window (UI.lua + View.lua) =====
 -- (in its own function: Luau allows 200 locals per function)

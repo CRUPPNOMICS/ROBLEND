@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.24.6"
+local VERSION = "0.25.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -422,7 +422,7 @@ applyBuilt = function(p, mp, c, preview)
 end
 
 -- ===== saving to Roblox (real Mesh assets, so the mesh stays in the place and publishes) =====
-local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Luau API\", then restart Studio."
+local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Lua API\", then restart Studio."
 local autoSave = true
 pcall(function() local v = plugin:GetSetting("RB_AutoSave") if v ~= nil then autoSave = v == true end end)
 local saving = {}
@@ -1633,7 +1633,7 @@ r = row()
 button(r, "Bake to parts", 116, Tools.bake, Color3.fromRGB(40, 130, 80))
 button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
-label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Luau API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
+label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Lua API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
 
 -- ===== the Blender-style window (UI.lua + View.lua) =====
 -- (in its own function: Luau allows 200 locals per function)
@@ -7408,7 +7408,9 @@ return Boolean
 
 	Convert.meshOf(part, AssetService, BMesh, Ops, Mods, MT) -> bm (in the part's own space, real size) or nil, why
 	  Part (Block / Ball / Cylinder), WedgePart, CornerWedgePart, MeshPart (read with CreateEditableMeshAsync -
-	  only meshes you're allowed to edit: your own uploads / the experience's).
+	  only meshes you're allowed to edit: your own uploads / the experience's). A MeshPart keeps its UVs (so its
+	  texture still fits), its smooth / sharp shading, and gets its quads back.
+	Convert.hasUV(bm, BMesh) -> true when every face corner has a UV
 ]]
 local Convert = {}
 local V3 = Vector3.new
@@ -7466,8 +7468,10 @@ local function fixWinding(bm, MT)
 	return bm
 end
 
--- read a MeshPart's mesh (its own triangles), scaled to the part's real size, corners welded back together
-local function fromMeshPart(p, AssetService, BMesh, Mods)
+-- read a MeshPart's mesh the way Blender would show it after an import: the points the file splits per normal / UV
+-- welded back into one surface, the texture's UVs kept on every corner, smooth shading with sharp edges where the
+-- file's normals split, and the triangles the export made joined back into the quads they came from
+local function fromMeshPart(p, AssetService, BMesh, MT)
 	local content
 	pcall(function() content = p.MeshContent end)
 	if not content or (typeof and typeof(content) == "Content" and content.SourceType == Enum.ContentSourceType.None) then
@@ -7480,37 +7484,110 @@ local function fromMeshPart(p, AssetService, BMesh, Mods)
 		return nil, "Roblox won't let plugins open this mesh (" .. tostring(em) .. "). Only meshes you or this experience uploaded can be edited."
 	end
 	local bm = BMesh.new()
-	local scale = V3(1, 1, 1)
 	local okS, ms = pcall(function() return p.MeshSize end)
 	local lo, hi
-	local idTo = {}
 	local okV, verts = pcall(function() return em:GetVertices() end)
 	if not okV then pcall(function() em:Destroy() end) return nil, "couldn't read the mesh's points" end
+	local pos = {}
 	for _, vid in ipairs(verts) do
-		local pos = em:GetPosition(vid)
-		lo = lo and lo:Min(pos) or pos
-		hi = hi and hi:Max(pos) or pos
+		local q = em:GetPosition(vid)
+		pos[vid] = q
+		lo = lo and lo:Min(q) or q
+		hi = hi and hi:Max(q) or q
 	end
 	if not lo then pcall(function() em:Destroy() end) return nil, "the mesh is empty" end
 	local span = hi - lo
 	local ref = (okS and ms and ms.Magnitude > 0) and ms or span
-	scale = V3(ref.X > 1e-6 and p.Size.X / ref.X or 1, ref.Y > 1e-6 and p.Size.Y / ref.Y or 1, ref.Z > 1e-6 and p.Size.Z / ref.Z or 1)
+	local scale = V3(ref.X > 1e-6 and p.Size.X / ref.X or 1, ref.Y > 1e-6 and p.Size.Y / ref.Y or 1, ref.Z > 1e-6 and p.Size.Z / ref.Z or 1)
 	local centre = (lo + hi) / 2
-	for _, vid in ipairs(verts) do idTo[vid] = bm:vertCreate((em:GetPosition(vid) - centre) * scale) end
+	-- weld: the file keeps a copy of a point for every normal / UV it has; one point per place here
+	local tol = math.max(span.Magnitude * 1e-6, 1e-7)
+	local at, idTo = {}, {}
+	for _, vid in ipairs(verts) do
+		local q = pos[vid]
+		local k = math.floor(q.X / tol + 0.5) .. "," .. math.floor(q.Y / tol + 0.5) .. "," .. math.floor(q.Z / tol + 0.5)
+		local v = at[k]
+		if not v then v = bm:vertCreate((q - centre) * scale) at[k] = v end
+		idTo[vid] = v
+	end
 	local nf = 0
+	local useUV, useN = true, true
+	local corner = {}      -- face -> { [vert] = the file's normal there }
 	for _, fid in ipairs(em:GetFaces()) do
 		local ids = em:GetFaceVertices(fid)
 		local a, b, c = idTo[ids[1]], idTo[ids[2]], idTo[ids[3]]
 		if a and b and c and a ~= b and b ~= c and a ~= c then
-			if bm:faceCreate({ a, b, c }) then nf += 1 end
+			local f = bm:faceCreate({ a, b, c })
+			if f then
+				nf += 1
+				local ls = BMesh.faceLoops(f)
+				if useUV then
+					local okU, uv = pcall(function()
+						local u = em:GetFaceUVs(fid)
+						return { em:GetUV(u[1]), em:GetUV(u[2]), em:GetUV(u[3]) }
+					end)
+					if okU and uv and uv[1] and uv[2] and uv[3] then
+						-- Roblox's V runs down the picture, Blender's (and ROBLEND's) runs up
+						for i = 1, 3 do ls[i].uv = Vector2.new(uv[i].X, 1 - uv[i].Y) end
+					else
+						useUV = false
+					end
+				end
+				if useN then
+					local okN, nn = pcall(function()
+						local u = em:GetFaceNormals(fid)
+						return { em:GetNormal(u[1]), em:GetNormal(u[2]), em:GetNormal(u[3]) }
+					end)
+					if okN and nn and nn[1] and nn[2] and nn[3] then
+						local m = {}
+						-- a stretched part bends its normals the other way (divide by the stretch)
+						for i = 1, 3 do local w = nn[i] / scale m[ls[i].v] = w.Magnitude > 1e-9 and w.Unit or w end
+						corner[f] = m
+					else
+						useN = false
+					end
+				end
+			end
 		end
 	end
 	pcall(function() em:Destroy() end)
 	if nf == 0 then return nil, "the mesh has no faces" end
-	-- the file splits corners per normal / UV: weld them back so it edits as one surface
-	local welded = Mods.mergeDoubles(bm, 1e-4)
-	welded:normalsUpdate()
-	return welded
+	-- all or nothing: a mesh with UVs on only some faces would look wrong
+	if not useUV then for f in pairs(bm.faces) do for _, l in ipairs(BMesh.faceLoops(f)) do l.uv = nil end end end
+	-- shading: smooth everywhere, sharp where the file's normals split along an edge (Blender's Smooth by Angle look)
+	if useN then
+		for f in pairs(bm.faces) do f.smooth = true end
+		for e in pairs(bm.edges) do
+			local fs = BMesh.edgeFaces(e)
+			if #fs == 2 then
+				local c1, c2 = corner[fs[1]], corner[fs[2]]
+				for _, v in ipairs({ e.v1, e.v2 }) do
+					local n1, n2 = c1 and c1[v], c2 and c2[v]
+					if not (n1 and n2) or n1:Dot(n2) < 0.9995 then e.sharp = true break end
+				end
+			end
+		end
+	end
+	bm:normalsUpdate()
+	-- the export cut every quad into two triangles: join them back where it's clean (same UVs, no sharp edge, a good shape)
+	if MT and MT.trisToQuads then
+		local all = {}
+		for f in pairs(bm.faces) do all[f] = true end
+		pcall(MT.trisToQuads, bm, all, math.rad(40), { uv = true, sharp = true, shape = true })
+	end
+	return bm
+end
+
+-- true when every face corner has a UV (the mesh brought its texture layout with it)
+function Convert.hasUV(bm, BMesh)
+	local any = false
+	for f in pairs(bm.faces) do
+		for _, l in ipairs(BMesh.faceLoops(f)) do
+			if not l.uv then return false end
+			any = true
+		end
+	end
+	return any
 end
 
 function Convert.meshOf(p, AssetService, BMesh, Ops, Mods, MT)
@@ -7518,7 +7595,7 @@ function Convert.meshOf(p, AssetService, BMesh, Ops, Mods, MT)
 	local bm = BMesh.new()
 	local size = p.Size
 	if p:IsA("MeshPart") then
-		return fromMeshPart(p, AssetService, BMesh, Mods)
+		return fromMeshPart(p, AssetService, BMesh, MT)
 	elseif p:IsA("WedgePart") then
 		wedge(bm, size)
 	elseif p:IsA("CornerWedgePart") then
@@ -7927,7 +8004,7 @@ function Display.updateColors(em, bm)
 end
 
 -- ===== save: upload the mesh as a real Roblox Mesh asset (AssetService:CreateAssetAsync, local plugins,
--- Studio beta "CreateAssetAsync Luau API"). Returns id, err, errKind ("api" = the API isn't available), centre
+-- Studio beta "CreateAssetAsync Lua API"). Returns id, err, errKind ("api" = the API isn't available), centre
 function Display.upload(bm, params, uv)
 	local mp, c, err, em = Display.build(bm, nil, nil, uv)
 	if not mp or not em then return nil, err or "no mesh" end
@@ -9347,11 +9424,20 @@ function MT.dissolveEdge(bm, e)
 	local seen = {}
 	for _, w in ipairs(poly) do if seen[w] then return nil end seen[w] = true end
 	local sel = f1.sel or f2.sel
+	-- the UVs come along (where the two faces disagree at a corner, the first face's wins)
+	local uvAt, full = {}, true
+	for _, f in ipairs({ f2, f1 }) do
+		for _, l in ipairs(BMesh.faceLoops(f)) do if l.uv then uvAt[l.v] = l.uv else full = false end end
+	end
 	bm:faceKill(f1)
 	bm:faceKill(f2)
 	bm:edgeKill(e)
 	local nf = bm:faceCreate(poly, f1)
-	if nf then nf.sel = sel BMesh.faceNormalUpdate(nf) end
+	if nf then
+		nf.sel = sel
+		BMesh.faceNormalUpdate(nf)
+		if full then for _, l in ipairs(BMesh.faceLoops(nf)) do l.uv = uvAt[l.v] end end
+	end
 	return nf
 end
 function MT.dissolveEdges(bm, es)
@@ -9646,15 +9732,55 @@ function MT.triangulate(bm, fs, triangulateFn)
 	bm:normalsUpdate()
 	return out
 end
-function MT.trisToQuads(bm, fs, maxAngle)
+-- opts (Blender's Tris to Quads options): uv = only where the UVs match, sharp = never across a sharp edge,
+-- shape = only convex quads, best-shaped first (how a triangulated export gets its own quads back)
+local function uvOn(f, v)
+	for _, l in ipairs(BMesh.faceLoops(f)) do if l.v == v then return l.uv end end
+end
+local function quadShape(e, f1, f2)
+	local function other(f)
+		for _, w in ipairs(fverts(f)) do if w ~= e.v1 and w ~= e.v2 then return w end end
+	end
+	local p, q = other(f1), other(f2)
+	if not (p and q) then return nil end
+	local n = f1.no + f2.no
+	if n.Magnitude < 1e-9 then return nil end
+	n = n.Unit
+	local function side(x, a, b) return (b.co - a.co):Cross(x.co - a.co):Dot(n) end
+	local s1, s2 = side(e.v1, p, q), side(e.v2, p, q)
+	if s1 * s2 >= 0 then return nil end           -- not convex: the diagonals don't cross
+	local quad = { p, e.v1, q, e.v2 }
+	local err = 0
+	for i = 1, 4 do
+		local a, b, c = quad[(i + 2) % 4 + 1].co, quad[i].co, quad[i % 4 + 1].co
+		local u, w = a - b, c - b
+		if u.Magnitude < 1e-9 or w.Magnitude < 1e-9 then return nil end
+		err += math.abs(math.acos(math.clamp(u.Unit:Dot(w.Unit), -1, 1)) - math.pi / 2)
+	end
+	return err / 4
+end
+function MT.trisToQuads(bm, fs, maxAngle, opts)
 	maxAngle = maxAngle or math.rad(40)
+	opts = opts or {}
 	local cands = {}
 	for e in pairs(bm.edges) do
-		if BMesh.edgeFaceCount(e) == 2 then
+		if BMesh.edgeFaceCount(e) == 2 and not (opts.sharp and e.sharp) then
 			local f = BMesh.edgeFaces(e)
 			if fs[f[1]] and fs[f[2]] and f[1].len == 3 and f[2].len == 3 then
 				local ang = math.acos(math.clamp(f[1].no:Dot(f[2].no), -1, 1))
-				if ang <= maxAngle then cands[#cands + 1] = { e = e, a = ang } end
+				local ok = ang <= maxAngle
+				if ok and opts.uv then
+					for _, v in ipairs({ e.v1, e.v2 }) do
+						local a, b = uvOn(f[1], v), uvOn(f[2], v)
+						if (a == nil) ~= (b == nil) or (a and (a - b).Magnitude > 1e-5) then ok = false end
+					end
+				end
+				local score = ang
+				if ok and opts.shape then
+					local err = quadShape(e, f[1], f[2])
+					if not err or err > math.rad(40) then ok = false else score = ang + err end
+				end
+				if ok then cands[#cands + 1] = { e = e, a = score } end
 			end
 		end
 	end
@@ -11682,7 +11808,7 @@ function ObjectTools.new(C)
 
 	-- Object > Convert to ROBLEND Mesh (Blender's Object > Convert): any Part / Wedge / Ball / Cylinder / MeshPart
 	-- becomes a ROBLEND mesh in the same place, with the same look; the original is taken out (Ctrl Z brings it back)
-	local KEEP = { "Name", "Color", "Material", "Transparency", "Reflectance", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Locked" }
+	local KEEP = { "Name", "Color", "Material", "Transparency", "Reflectance", "Anchored", "CanCollide", "CanTouch", "CanQuery", "CastShadow", "Massless", "Locked", "TextureID" }
 	function OT.convert(parts)
 		parts = parts or selectedParts()
 		local made, why = {}, nil
@@ -11695,7 +11821,9 @@ function ObjectTools.new(C)
 					-- a MeshPart keeps its collision / render detail; a plain part gets Roblox's Default
 					local fo = {}
 					if p:IsA("MeshPart") then pcall(function() fo.CollisionFidelity, fo.RenderFidelity = p.CollisionFidelity, p.RenderFidelity end) end
-					local mp, c, err2 = Display.build(m, nil, nil, nil, fo)
+					-- a mesh that brought its UVs keeps them (its texture / SurfaceAppearance still fits)
+					local uv = C.Convert.hasUV(m, C.BMesh) and { mode = "unwrap", scale = 4 } or nil
+					local mp, c, err2 = Display.build(m, nil, nil, uv, fo)
 					if not mp then
 						why = err2
 					else
@@ -11710,6 +11838,7 @@ function ObjectTools.new(C)
 							mp:SetAttribute("RB_Center", c)
 							mp:SetAttribute("RB_Size", mp.Size)
 							mp:SetAttribute("ROBLEND", C.VERSION)
+							if uv then mp:SetAttribute("RB_UVMode", "unwrap") end
 							pcall(Display.rememberFidelity, mp)
 							-- children (decals, scripts, welds...) come along; joints elsewhere that held the old part hold the new one
 							for _, ch in ipairs(p:GetChildren()) do ch.Parent = mp end
@@ -13996,7 +14125,7 @@ return SelfTest
 ]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - "Before you start": ROBLEND needs two things switched on, and this screen checks them itself.
 	  1. Mesh / Image APIs for this game (Game Settings > Security) - without it Roblox won't let any plugin make meshes.
-	  2. Studio's "CreateAssetAsync Luau API" beta (File > Beta Features) - saving meshes to Roblox needs it.
+	  2. Studio's "CreateAssetAsync Lua API" beta (File > Beta Features) - saving meshes to Roblox needs it.
 	Until both are on, the screen covers ROBLEND; when they are, Start lets you in.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -14058,7 +14187,7 @@ function Setup.new(C)
 		{ key = "mesh", title = "Mesh / Image APIs  (this game)",
 			how = "Home tab > Game Settings > Security > turn on \"Allow Mesh / Image APIs\" > Save. Every game needs this once." },
 		{ key = "beta", title = "CreateAssetAsync beta  (Studio)",
-			how = "File > Beta Features > tick \"CreateAssetAsync Luau API\" > Save, then close and reopen Studio." },
+			how = "File > Beta Features > tick \"CreateAssetAsync Lua API\" > Save, then close and reopen Studio." },
 	}
 	local function build()
 		local st = C.get()
@@ -15511,7 +15640,7 @@ function UI:buildPropContent()
 			self:wideButton(b, 3, "Save All Meshes", function() api.tool("SaveAll") end)
 			self:wideButton(b, 4, (s.autoSave and "[x]" or "[  ]") .. "  Auto save when leaving Edit Mode", function() api.setAutoSave(not s.autoSave) self:buildPropContent() end, T.textField)
 			label(b, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
-				Text = "Needs Studio's beta \"CreateAssetAsync Luau API\" (File > Beta Features)." })
+				Text = "Needs Studio's beta \"CreateAssetAsync Lua API\" (File > Beta Features)." })
 		end)
 		self:panel(2, "keep", "Other Ways", function(b)
 			self:wideButton(b, 1, "Bake to Parts", function() api.tool("Bake") end, rgb(0x2f6f46))

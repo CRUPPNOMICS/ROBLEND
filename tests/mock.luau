@@ -13,7 +13,7 @@ V.__mul = function(a, b)
 	if type(b) == "number" then return V.new(a.X * b, a.Y * b, a.Z * b) end
 	return V.new(a.X * b.X, a.Y * b.Y, a.Z * b.Z)
 end
-V.__div = function(a, b) return V.new(a.X / b, a.Y / b, a.Z / b) end
+V.__div = function(a, b) if type(b) == "number" then return V.new(a.X / b, a.Y / b, a.Z / b) end return V.new(a.X / b.X, a.Y / b.Y, a.Z / b.Z) end
 V.__unm = function(a) return V.new(-a.X, -a.Y, -a.Z) end
 V.__eq = function(a, b) return a.X == b.X and a.Y == b.Y and a.Z == b.Z end
 V.__tostring = function(a) return string.format("%g, %g, %g", a.X, a.Y, a.Z) end
@@ -37,7 +37,10 @@ Color3 = { new = function(r, g, b) return { R = r, G = g, B = b } end, fromRGB =
 
 -- Vector2 stand-in (UVs); the Studio mock replaces it with a fuller one
 local V2m = {}
-V2m.__index = V2m
+V2m.__index = function(t, k)
+	if k == "Magnitude" then return math.sqrt(t.X * t.X + t.Y * t.Y) end
+	return V2m[k]
+end
 function V2m.new(x, y) return setmetatable({ X = x or 0, Y = y or 0 }, V2m) end
 V2m.__add = function(a, b) return V2m.new(a.X + b.X, a.Y + b.Y) end
 V2m.__sub = function(a, b) return V2m.new(a.X - b.X, a.Y - b.Y) end
