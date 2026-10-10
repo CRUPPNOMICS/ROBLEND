@@ -397,16 +397,46 @@ MOCK.uploads = {}
 -- EditableImage (the logo)
 local EI = {}
 EI.__index = EI
-function Inst.CreateEditableImage(_, opts) return setmetatable({ size = opts.Size, __kind = "EditableImage" }, EI) end
-function EI:WritePixelsBuffer(pos, size, buf) assert(buffer.len(buf) == size.X * size.Y * 4, "pixel buffer size") self.written = true end
+MOCK.imagesMade = 0
+function Inst.CreateEditableImage(_, opts)
+	MOCK.imagesMade += 1
+	local img = setmetatable({ size = opts.Size, Size = opts.Size, __kind = "EditableImage", writes = 0 }, EI)
+	img.pix = buffer.create(opts.Size.X * opts.Size.Y * 4)
+	return img
+end
+-- (a picture already uploaded: only when MOCK.ownImages says the asset is ours)
+function Inst.CreateEditableImageAsync(_, content)
+	local n = content.uri and tonumber(content.uri:match("%d+$"))
+	local src = n and MOCK.ownImages and MOCK.ownImages[n]
+	if not src then error("Failed to load asset: not allowed") end
+	local img = Inst.CreateEditableImage(nil, { Size = src.Size })
+	buffer.copy(img.pix, 0, src.pix)
+	return img
+end
+function EI:WritePixelsBuffer(pos, size, buf)
+	assert(buffer.len(buf) == size.X * size.Y * 4, "pixel buffer size")
+	assert(pos.X >= 0 and pos.Y >= 0 and pos.X + size.X <= self.size.X and pos.Y + size.Y <= self.size.Y, "inside the picture")
+	if self.pix then
+		for y = 0, size.Y - 1 do buffer.copy(self.pix, ((pos.Y + y) * self.size.X + pos.X) * 4, buf, y * size.X * 4, size.X * 4) end
+	end
+	self.written = true
+	self.writes += 1
+end
+function EI:ReadPixelsBuffer(pos, size)
+	local out = buffer.create(size.X * size.Y * 4)
+	for y = 0, size.Y - 1 do buffer.copy(out, y * size.X * 4, self.pix, ((pos.Y + y) * self.size.X + pos.X) * 4, size.X * 4) end
+	return out
+end
 function EI:Destroy() end
 MOCK.imageUploads = 0
 function Inst.CreateAssetAsync(_, em, assetType, params)
 	if MOCK.noAssetApi then error("CreateAssetAsync is not enabled") end
 	if assetType.Name == "Image" then
-		assert(em.__kind == "EditableImage" and em.written, "uploads the logo image")
+		assert(em.__kind == "EditableImage" and em.written, "uploads a picture that was drawn")
 		MOCK.imageUploads += 1
-		return Enum.CreateAssetResult.Success, 800001
+		MOCK.ownImages = MOCK.ownImages or {}
+		MOCK.ownImages[800000 + MOCK.imageUploads] = em
+		return Enum.CreateAssetResult.Success, 800000 + MOCK.imageUploads
 	end
 	assert(assetType.Name == "Mesh", "mesh asset")
 	assert(em.__kind == "EditableMesh", "uploads an EditableMesh")

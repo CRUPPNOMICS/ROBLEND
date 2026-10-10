@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.25.0"
+local VERSION = "0.26.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -28,6 +28,7 @@ local ObjectTools = require(script.ObjectTools)
 local ModStack = require(script.ModStack)
 local Sculpt = require(script.Sculpt)
 local Paint = require(script.Paint)
+local TexPaint = require(script.TexPaint)
 local Font = require(script.Font)
 local Convert = require(script.Convert)
 local Boolean = require(script.Boolean)
@@ -61,7 +62,7 @@ local bm = nil           -- its mesh
 local origin = CFrame.identity
 local editing = false
 local mode = "vert"      -- vert / edge / face
-local paintMode = nil    -- nil = Edit Mode, "sculpt" = Sculpt Mode (both edit the mesh in `bm`)
+local paintMode = nil    -- nil = Edit Mode, "sculpt" = Sculpt Mode, "paint" = Vertex Paint, "texture" = Texture Paint
 local paintHooks = {}    -- exit() set by the Sculpt controller
 local xray = false
 local modal = nil        -- the running G / S / R / inset / loop cut
@@ -747,6 +748,9 @@ local function lookOf(p)
 	if shading == "wire" then tr = 1 end
 	local tex
 	pcall(function() tex = p.TextureID end)
+	-- a picture being painted (Texture Paint) shows straight from memory until it's saved
+	local img = paintHooks.texImage and paintHooks.texImage(p)
+	if img then return { Color = p.Color, Material = p.Material, Transparency = tr, TextureID = "roblend://painting", TextureImage = img } end
 	return { Color = p.Color, Material = p.Material, Transparency = tr, TextureID = tex }
 end
 local function showEdit()
@@ -1723,7 +1727,7 @@ local function syncScene()
 					local d = view.objects[p]
 					if d then
 						d.Color, d.Material, d.Transparency = p.Color, p.Material, look.Transparency
-						pcall(function() d.TextureID = look.TextureID or "" end)
+						View.applyLook(d, look)
 					end
 					r.col, r.mat, r.tr, r.tex = p.Color, p.Material, look.Transparency, look.TextureID
 					changed = true
@@ -1983,6 +1987,8 @@ ctx.rayMesh, ctx.camera = rayMesh, camera
 function ctx.ctrlDown() return keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl) end
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
+local TEX = TexPaint.new(ctx, PAINT)
+paintHooks.texImage = function(p) return TEX.imageFor(p) end
 local UVE = UVEditor.new(ctx)
 ctx.plugin = plugin
 ctx.Sculpt, ctx.Paint, ctx.Font = Sculpt, Paint, Font
@@ -1999,8 +2005,8 @@ SETUP.onMesh = function(ok)
 	if ok and was == false then fixedLook = setmetatable({}, { __mode = "k" }) if ownView() then pcall(syncScene) dirtyCage = true end end
 end
 -- the brush controller for the current mode (Sculpt Mode / Vertex Paint)
-local function brushCtl() return paintMode == "paint" and PAINT or SCULPT end
-paintHooks.exit = function() SCULPT.exit() PAINT.exit() end
+local function brushCtl() return paintMode == "paint" and PAINT or paintMode == "texture" and TEX or SCULPT end
+paintHooks.exit = function() SCULPT.exit() PAINT.exit() TEX.exit() end
 
 -- ===== the Modeling tab: Blender's Edit Mode tools (own function: Luau's 200-local limit) =====
 local function modelingTools()
@@ -3815,19 +3821,24 @@ api.setPaintMode = function(m)
 	if modal then return end
 	if not m then
 		paintMode = nil
-		SCULPT.exit() PAINT.exit()
+		SCULPT.exit() PAINT.exit() TEX.exit()
 		dirtyCage, dirtyMesh = true, true
 		if editing then setStatus("Edit Mode.") end
 		return
 	end
 	if not editing then toggleEdit() end
 	if not editing then return end
-	SCULPT.exit() PAINT.exit()
+	SCULPT.exit() PAINT.exit() TEX.exit()
 	paintMode = m
 	clearSel()
 	flush()
 	worldTris = nil
 	dirtyCage, dirtyMesh = true, true
+	if m == "texture" then
+		TEX.setBrush(TEX.brush)
+		if not TEX.enter() then paintMode = nil end
+		return
+	end
 	if m == "paint" then
 		PAINT.setBrush(PAINT.brush)
 		local c = obj and obj.Color
@@ -4189,7 +4200,8 @@ api.setPaintColor = function(c)
 	if type(c) == "string" then c = Paint.fromHex(c) elseif type(c) == "number" then c = Paint.fromInt(c) end
 	if c then PAINT.setColor(c) else setStatus("Colour: type 6 hex digits, like FF8800.") end
 end
-api.paintFill = function() if editing and paintMode == "paint" then PAINT.fill() end end
+api.paintFill = function() if editing and paintMode == "paint" then PAINT.fill() elseif editing and paintMode == "texture" then TEX.fill() end end
+api.texPaint = function() return TEX end
 -- a white hexagon picture for the colour picker's swatches (tinted per colour); nil if this Studio can't make one
 local hexImage
 api.hexImage = function()
@@ -4280,8 +4292,8 @@ end
 api.frameAll = frameAll
 api.frameSelected = frameSelected
 api.setShading = function(s) shading = s dirtyCage = true dirtyMesh = editing end
-api.undo = function() pcall(function() CHS:Undo() end) end
-api.redo = function() pcall(function() CHS:Redo() end) end
+api.undo = function() if editing and paintMode == "texture" then TEX.undo() return end pcall(function() CHS:Undo() end) end
+api.redo = function() if editing and paintMode == "texture" then TEX.redo() return end pcall(function() CHS:Redo() end) end
 api.close = function() setUIOn(false) end
 api.setStudioView = function(b) setStudioView(b) end
 api.setAutoSave = function(b, quiet)

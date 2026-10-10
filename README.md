@@ -142,7 +142,7 @@ ROBLEND works in its own space 10,000 studs under your map, so models you're mak
 - Studio's Plugins tab also has **Edit in ROBLEND** and **Place**, and both can be given keys in *File > Advanced > Customize Shortcuts*.
 - Anything left in the workshop saves and publishes with your place, so place finished work before publishing. *Edit > Workshop Under the Map* turns the workshop off.
 
-**Q** opens the mode menu (Object / Edit / Sculpt / Vertex Paint); Studio keeps Ctrl Tab for itself. In Vertex Paint the colour square opens a honeycomb colour picker.
+**Q** opens the mode menu (Object / Edit / Sculpt / Vertex Paint / Texture Paint); Studio keeps Ctrl Tab for itself. In Vertex Paint the colour square opens a honeycomb colour picker.
 
 ## Saving (needs a Studio beta)
 
@@ -256,6 +256,16 @@ Paint colours onto the mesh's points; the colour blends across each face.
 - The part's own colour tints the paint: Paint > White Base Colour shows the true colours.
 - More points = finer painting (Subdivide first). Colours are saved with the mesh and go up when it's saved to Roblox.
 
+**Texture Paint** (Q > Texture Paint)
+
+Paint straight onto the model's picture (its texture), like Blender's Texture Paint. Much finer than Vertex Paint: detail doesn't depend on how many points the mesh has.
+- It paints through the mesh's UVs. A mesh without any gets them by itself (Smart UV Project) when you go in; a MeshPart from Blender keeps its own.
+- Brushes: Draw, Soften (or hold Shift), Average. Ctrl paints white. S picks up the colour under the mouse. F / Shift F = size / strength, Shift K fills the whole picture, X sym paints both sides.
+- The brush is a ball in 3D, so strokes carry on across UV seams, and paint bleeds a pixel or two past each island's edge so no seams show.
+- Ctrl Z / Ctrl Y take back / redo whole strokes (the last 8).
+- The picture is 1024 x 1024. A part that already has a texture you uploaded starts from it; anything else starts in the part's colour.
+- Leaving Texture Paint (or Tab) saves the picture to Roblox as an Image and puts it on the part as its TextureID (needs the CreateAssetAsync beta, like saving meshes).
+
 **Curves and pipes** (Add > Curve > Bezier / Circle / Path)
 - A curve is a line path with a **Tube** modifier that turns it into a smooth round pipe: radius, sides, smoothness (resolution) and end caps in Properties > Modifiers.
 - Tab edits the path's points: move them, Ctrl + right click to extend the path, E to extrude a point.
@@ -332,6 +342,7 @@ The Help menu has three ways to test ROBLEND in your own Studio, each printing i
 | `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
 | `src/Font.lua` | The block font for Add > Text (ROBLEND's own 5 x 7 letters). |
 | `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
+| `src/TexPaint.lua` | Texture Paint: the 3D brush painting the picture through the UVs, soften / fill / sample, stroke undo, saving the picture as a texture. |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View, Convert. |
 | `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
 | `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |

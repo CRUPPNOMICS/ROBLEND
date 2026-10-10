@@ -1084,6 +1084,36 @@ function AutoTest.run(C, api, only)
 		check(coloured() == nv(), "colours lost after leaving: " .. coloured() .. " of " .. nv())
 	end)
 
+	-- ===== Texture Paint =====
+	T("texpaint", function()
+		local p = addObj("Sphere")
+		api.toggleEdit() beat()
+		api.setPaintMode("texture") beat(2)
+		check(api.state().paintMode == "texture", "Texture Paint")
+		local TEX = api.texPaint()
+		check(TEX.rec ~= nil, "no picture to paint on")
+		if not TEX.rec then return end
+		check(p:GetAttribute("RB_UVMode") == "unwrap", "UVs laid out first")
+		local cv = TEX.rec.cv
+		local function reds()
+			local n = 0
+			for i = 0, cv.w * cv.h - 1, 5 do
+				local o = i * 4
+				if buffer.readu8(cv.buf, o) > 200 and buffer.readu8(cv.buf, o + 1) < 40 then n += 1 end
+			end
+			return n
+		end
+		api.setPaintColor("ff0000")
+		stroke()
+		local n = reds()
+		check(n > 0, "the stroke painted nothing on the picture")
+		api.undo() beat()
+		check(reds() < n, "Ctrl Z didn't take the stroke back")
+		-- (leave without uploading: saving to Roblox is left to you)
+		TEX.rec.dirty = false
+		api.setPaintMode(nil) beat()
+	end)
+
 	-- ===== Collision and saving =====
 	T("collision", function()
 		local p = addObj("Sphere")

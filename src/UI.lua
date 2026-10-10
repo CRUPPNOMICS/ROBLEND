@@ -483,6 +483,7 @@ function UI:buildView()
 		local st = api.state()
 		if st.paintMode == "sculpt" then return self:sculptMenu() end
 		if st.paintMode == "paint" then return self:paintMenu() end
+		if st.paintMode == "texture" then return self:texPaintMenu() end
 		return st.editing and self:meshMenu() or self:objectMenu()
 	end)
 	self.vertMenuBtn = pd("Vertex", function() return self:vertexMenu() end)
@@ -1232,7 +1233,7 @@ function UI:buildPropContent()
 			self:wideButton(b, 3, "Save All Meshes", function() api.tool("SaveAll") end)
 			self:wideButton(b, 4, (s.autoSave and "[x]" or "[  ]") .. "  Auto save when leaving Edit Mode", function() api.setAutoSave(not s.autoSave) self:buildPropContent() end, T.textField)
 			label(b, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
-				Text = "Needs Studio's beta \"CreateAssetAsync Luau API\" (File > Beta Features)." })
+				Text = "Needs Studio's beta \"CreateAssetAsync Lua API\" (File > Beta Features)." })
 		end)
 		self:panel(2, "keep", "Other Ways", function(b)
 			self:wideButton(b, 1, "Bake to Parts", function() api.tool("Bake") end, rgb(0x2f6f46))
@@ -1781,6 +1782,7 @@ function UI:modeItems()
 		{ "Edit Mode", "Tab", function() local st = api.state() if st.paintMode then api.setPaintMode(nil) elseif not st.editing then api.toggleEdit() end end, icon = "mesh" },
 		{ "Sculpt Mode", "", function() api.setPaintMode("sculpt") end, icon = "smooth" },
 		{ "Vertex Paint", "", function() api.setPaintMode("paint") end, icon = "material" },
+		{ "Texture Paint", "", function() api.setPaintMode("texture") end, icon = "material" },
 	}
 end
 -- Sculpt menu (header, in Sculpt Mode)
@@ -1808,6 +1810,22 @@ function UI:paintMenu()
 	items[#items + 1] = { "Fill (whole mesh)", "Shift K", function() api.paintFill() end }
 	items[#items + 1] = { "Clear Colours", "", function() api.paintClear() end }
 	items[#items + 1] = { "White Base Colour", "", function() api.paintWhiteBase() end }
+	items[#items + 1] = "-"
+	items[#items + 1] = { "Symmetry X", "", function() api.sculptSet("symmetryX", not st.symmetryX) end, check = st.symmetryX }
+	return items
+end
+-- Paint menu (header, in Texture Paint)
+function UI:texPaintMenu()
+	local api = self.api
+	local st = api.state()
+	local items = { { header = "Brushes" } }
+	local names = { draw = "Draw", blur = "Soften", average = "Average" }
+	for _, b in ipairs(api.paintBrushes or {}) do items[#items + 1] = { names[b.id] or b.name, b.key, function() api.setBrush(b.id) end, check = st.brush == b.id } end
+	items[#items + 1] = "-"
+	items[#items + 1] = { "Colour...", "", function() self:openHexPicker(self.colorSwatch) end }
+	items[#items + 1] = { "Fill (whole picture)", "Shift K", function() api.paintFill() end }
+	items[#items + 1] = { "Undo Stroke", "Ctrl Z", function() api.undo() end }
+	items[#items + 1] = { "Redo Stroke", "Ctrl Y", function() api.redo() end }
 	items[#items + 1] = "-"
 	items[#items + 1] = { "Symmetry X", "", function() api.sculptSet("symmetryX", not st.symmetryX) end, check = st.symmetryX }
 	return items
@@ -2274,9 +2292,9 @@ function UI:refresh(force)
 	end
 	-- 3D header
 	local sculptOnly = s.paintMode == "sculpt"
-	local painting = s.paintMode == "paint"
-	local sculpting = s.paintMode ~= nil   -- either brush mode (sculpt or paint)
-	self.modeBtn.Text = "      " .. (sculptOnly and "Sculpt Mode" or painting and "Vertex Paint" or s.editing and "Edit Mode" or "Object Mode") .. "   v"
+	local painting = s.paintMode == "paint" or s.paintMode == "texture"
+	local sculpting = s.paintMode ~= nil   -- any brush mode (sculpt or paint)
+	self.modeBtn.Text = "      " .. (sculptOnly and "Sculpt Mode" or s.paintMode == "texture" and "Texture Paint" or painting and "Vertex Paint" or s.editing and "Edit Mode" or "Object Mode") .. "   v"
 	if self.lastModeIcon ~= s.editing then
 		self.lastModeIcon = s.editing
 		local parent = self.modeIcon.Parent
@@ -2389,7 +2407,9 @@ function UI:refresh(force)
 	end
 	-- status bar (Blender 5 style mouse hints)
 	if painting then
-		self.hints.Text = "<b>LMB</b> Paint      <b>Ctrl</b> White      <b>Shift</b> Blur      <b>S</b> Pick Colour      <b>F</b> Size      <b>Shift K</b> Fill      <b>Tab</b> Object Mode"
+		self.hints.Text = s.paintMode == "texture"
+			and "<b>LMB</b> Paint      <b>Ctrl</b> White      <b>Shift</b> Soften      <b>S</b> Pick Colour      <b>F</b> Size      <b>Ctrl Z</b> Undo Stroke      <b>Tab</b> Save + Object Mode"
+			or "<b>LMB</b> Paint      <b>Ctrl</b> White      <b>Shift</b> Blur      <b>S</b> Pick Colour      <b>F</b> Size      <b>Shift K</b> Fill      <b>Tab</b> Object Mode"
 	elseif sculpting then
 		self.hints.Text = "<b>LMB</b> Sculpt      <b>Ctrl</b> Invert      <b>Shift</b> Smooth      <b>F</b> Size  <b>Shift F</b> Strength      <b>MMB</b> Rotate View      <b>Tab</b> Object Mode"
 	elseif s.modal then

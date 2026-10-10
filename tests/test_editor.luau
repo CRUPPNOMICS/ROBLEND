@@ -1351,6 +1351,74 @@ check("Vertex Paint: colour box, a stroke paints, S picks, Shift K fills, colour
 	press("Tab") beat()
 	assert(g.Mesh.c >= 2, "the part's mesh carries the colours")
 end)
+check("Texture Paint: UVs made if missing, a stroke paints the picture, Ctrl Z / Y, S picks, saved as a texture on leaving (0.26)", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Grid")
+	local g = S.Selection:Get()[1]
+	beat()
+	view.focus = g.CFrame.Position view.dist = 14 view.pitch = math.rad(60) view.ortho = false view:update() beat()
+	assert(not data(g).uv, "a new grid has no UVs")
+	local made0 = MOCK.imagesMade
+	press("Tab", { "LeftControl" }) beat()
+	menuItem("Texture Paint") beat()
+	eq(MOCK.api.state().paintMode, "texture", "texture paint")
+	assert(hasText("Texture Paint   v"), "header")
+	eq(g:GetAttribute("RB_UVMode"), "unwrap", "Smart UV Project laid out UVs first")
+	assert(data(g).uv, "UVs saved")
+	eq(MOCK.imagesMade, made0 + 1, "one new picture")
+	local TEX = MOCK.api.texPaint()
+	local cv = TEX.rec.cv
+	eq(cv.w, 1024, "1024 x 1024")
+	for _ = 1, 3 do MOCK.t += 0.2 beat() end
+	local shown = view.objects[g]
+	assert(shown and shown.TextureContent and shown.TextureContent.obj == TEX.rec.img, "the view shows the picture being painted")
+	local function greens()
+		local n = 0
+		for i = 0, cv.w * cv.h - 1, 7 do
+			local o = i * 4
+			if buffer.readu8(cv.buf, o) < 30 and buffer.readu8(cv.buf, o + 1) > 200 and buffer.readu8(cv.buf, o + 2) < 30 then n += 1 end
+		end
+		return n
+	end
+	MOCK.api.setPaintColor("00FF00")
+	local writes0 = TEX.rec.img.writes
+	mouseTo(g.CFrame.Position) beat()
+	mouse.Button1Down:Fire()
+	for _ = 1, 4 do mouseXY(mouse.X + 6, mouse.Y) beat() end
+	mouse.Button1Up:Fire() beat()
+	local painted = greens()
+	assert(painted > 50, "the stroke painted the picture: " .. painted)
+	assert(TEX.rec.img.writes > writes0, "and the picture on screen was updated")
+	press("Z", { "LeftControl" }) beat()
+	eq(greens(), 0, "Ctrl Z takes the stroke back")
+	press("Y", { "LeftControl" }) beat()
+	eq(greens(), painted, "Ctrl Y puts it back")
+	MOCK.api.setPaintColor("0000FF")
+	mouseTo(g.CFrame.Position) beat()
+	press("S") beat()
+	eq(MOCK.api.state().paintColor, "00FF00", "S picked the green up from the picture")
+	-- leaving saves the picture to Roblox and puts it on the part
+	local up0 = MOCK.imageUploads
+	press("Tab") beat() beat()
+	eq(MOCK.imageUploads, up0 + 1, "uploaded once")
+	eq(g.TextureID, "rbxassetid://" .. (800000 + MOCK.imageUploads), "the part wears the new texture")
+	-- back in: the same picture, nothing new made, nothing uploaded again until it changes
+	press("Tab", { "LeftControl" }) beat()
+	menuItem("Texture Paint") beat()
+	eq(MOCK.imagesMade, made0 + 1, "same picture")
+	eq(greens(), painted, "still painted")
+	press("Tab") beat() beat()
+	eq(MOCK.imageUploads, up0 + 1, "not uploaded again (nothing changed)")
+	-- a part whose texture is someone else's: a fresh picture in its colour, and it says why
+	g.TextureID = "rbxassetid://5555"
+	MOCK.api.texPaint().images[g] = nil
+	press("Tab", { "LeftControl" }) beat()
+	menuItem("Texture Paint") beat()
+	assert(MOCK.status:find("couldn't be opened", 1, true), "explains: " .. MOCK.status)
+	press("Tab") beat()
+	g.Parent = nil
+end)
 check("Add > Curve makes a pipe you can edit as points; Add > Text, change the words", function()
 	if inEdit() then press("Tab") beat() end
 	S.Selection:Set({}) beat()

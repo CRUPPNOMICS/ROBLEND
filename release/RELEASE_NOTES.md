@@ -1,4 +1,4 @@
-# ROBLEND 0.25.0
+# ROBLEND 0.26.0
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.0 - Texture Paint:** Q > Texture Paint paints straight onto the model's picture through its UVs, like Blender: Draw / Soften / Average brushes, S picks a colour, Shift K fills, X symmetry, Ctrl Z / Y per stroke. The brush works in 3D, so strokes cross UV seams, and paint bleeds past island edges so no seams show. Meshes without UVs get Smart UV Project first. Leaving saves the picture to Roblox as an Image and puts it on the part as its texture.
 
 **0.25.0 - meshes from Blender:** Tab on a MeshPart you made in Blender now brings it back the way Blender showed it: welded into one surface, its UVs kept so the texture / SurfaceAppearance still fits after editing (and its TextureID stays on), smooth shading with sharp edges where the file's normals split, and the export's triangles joined back into quads. Tris to Quads and Dissolve now keep UVs too. Wording: the Studio beta is "CreateAssetAsync Lua API".
 

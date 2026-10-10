@@ -213,6 +213,14 @@ function View:drop(part)
 	if not part then return end
 	if self.discard then self.discard(part) else part.Parent = nil end
 end
+-- the texture: a picture being painted (an EditableImage) or the part's own TextureID
+function View.applyLook(part, look)
+	if look.TextureImage then
+		pcall(function() part.TextureContent = Content.fromObject(look.TextureImage) end)
+	elseif look.TextureID then
+		pcall(function() part.TextureID = look.TextureID end)
+	end
+end
 function View:setObject(key, part, cf, look)
 	local old = self.objects[key]
 	if old and old ~= part then self:drop(old) end
@@ -222,7 +230,7 @@ function View:setObject(key, part, cf, look)
 		part.Color = look.Color or part.Color
 		part.Material = look.Material or part.Material
 		part.Transparency = look.Transparency or 0
-		if look.TextureID then pcall(function() part.TextureID = look.TextureID end) end
+		View.applyLook(part, look)
 	end
 	part.Parent = self.sceneFolder
 	self.objects[key] = part

@@ -453,6 +453,17 @@ add(G, "paintpick", "Pick, fill, clear", "Paint a bit, then press S over it (pic
 add(G, "paintsave", "Colours kept", "It's been filled with colour. Press Tab to leave.",
 	"The colours stay on the object.", function(H, api) H.paint(1) api.paintFill() end)
 
+G = "Texture Paint"
+add(G, "texin", "Enter Texture Paint", "Press Q > Texture Paint.",
+	"The sphere gets UVs by itself (bottom bar says so) and turns its own colour as a picture; the header shows the colour square.",
+	function(H) H.edit("Sphere", "face", "none") end)
+add(G, "texdraw", "Paint the picture", "Drag on the sphere. Hold Shift to soften, Ctrl for white, S picks a colour, Ctrl Z undoes a stroke.",
+	"Sharp, smooth paint that follows the surface (much finer than Vertex Paint), even across the UV seams.",
+	function(H, api) H.edit("Sphere", "face", "none") api.setPaintMode("texture") end)
+add(G, "texsave", "Texture saved", "Paint a bit, then press Tab. (Needs the CreateAssetAsync beta.)",
+	"The bottom bar says Texture saved to Roblox; the sphere keeps its painted look after closing ROBLEND.",
+	function(H, api) H.edit("Sphere", "face", "none") api.setPaintMode("texture") end)
+
 G = "Collision and saving"
 add(G, "collision", "Collision panel", "Properties > orange square tab (Object) > Collision: try Box / Hull / Precise, Can Collide, Anchored.",
 	"Each one changes the part (check in Studio's Properties after closing ROBLEND).", function(H) local p = H.add("Sphere") H.select({ p }) H.frame() end)
