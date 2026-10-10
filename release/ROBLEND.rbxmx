@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.27.0"
+local VERSION = "0.27.1"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4557,7 +4557,7 @@ setUIOn = function(on)
 		if workshopOn then
 			local up = 0
 			for _, d in ipairs(workspace:GetDescendants()) do if d:IsA("MeshPart") and d:FindFirstChild("RB_Data") and not shownHere(d) then up += 1 end end
-			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: select it in Studio and press Edit in ROBLEND (Plugins tab) to edit it here."):format(up, up == 1 and " is" or "es are")) end
+			if up > 0 then setStatus(("%d ROBLEND mesh%s on your map: pick it in Import from Studio (top bar) to edit it here."):format(up, up == 1 and " is" or "es are")) end
 		end
 		-- the first time ever: open the tutorial (Help > Tutorial brings it back) - after "Before you start"
 		-- has checked the two switches ROBLEND needs (it covers everything until they're on)
@@ -4599,15 +4599,8 @@ end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
 -- Studio opened the place with its camera left down in the workshop (closed with ROBLEND open, a crash...): bring it up
 task.delay(1, function() if not uiOn then pcall(MOD.rescueCam) end end)
--- Studio toolbar: Import (selected -> ROBLEND's workshop) and Export (back up to the map)
-pcall(function()
-	local bi = toolbar:CreateButton("RB_Import", "Edit the selected parts / models in ROBLEND", "", "Edit in ROBLEND")
-	bi.ClickableWhenViewportHidden = true
-	bi.Click:Connect(function() pcall(function() bi:SetActive(false) end) importSelected() end)
-	local be = toolbar:CreateButton("RB_Export", "Pick up the selected ROBLEND work and place it on your map", "", "Place")
-	be.ClickableWhenViewportHidden = true
-	be.Click:Connect(function() pcall(function() be:SetActive(false) end) api.exportSelected() end)
-end)
+-- (Studio's Plugins tab has just the one ROBLEND button: bringing things in and placing them is done from inside
+-- ROBLEND - Import from Studio / the Bring in button / Place in Studio - or from keys set in Customize Shortcuts)
 plugin.Unloading:Connect(function()
 	pcall(function() if editing then exitEdit() end end)
 	pcall(function() if uiOn then restoreStudioCam() end MOD.rescueCam() end)
