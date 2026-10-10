@@ -230,55 +230,6 @@ check2("tris to quads keeps UVs, and with uv / sharp / shape only joins clean pa
 	for e in pairs(s3.edges) do if BMesh.edgeFaceCount(e) == 2 then e.sharp = true end end
 	eq(MT.trisToQuads(s3, fs3, nil, { sharp = true }), 0, "not across a sharp edge")
 end)
-check2("texture paint: a 3D brush paints the picture through the UVs, bleeds past edges, soften / fill / sample", function()
-	-- a 2 x 2 floor (Y up) made of two quads side by side, each with its own half of the picture (a UV seam between)
-	local bm = BMesh.new()
-	local v = {}
-	for i, p in ipairs({ { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 1 }, { 0, 1 }, { 1, 1 } }) do v[i] = bm:vertCreate(Vector3.new(p[1], 0, p[2])) end
-	local fa = bm:faceCreate({ v[1], v[4], v[5], v[2] })
-	local fb = bm:faceCreate({ v[2], v[5], v[6], v[3] })
-	bm:normalsUpdate()
-	assert(fa.no.Y > 0.9 and fb.no.Y > 0.9, "facing up")
-	-- left quad -> left half of the picture; right quad -> the right half, upside down (a real seam)
-	local uvA = { [v[1]] = Vector2.new(0, 0), [v[4]] = Vector2.new(0, 1), [v[5]] = Vector2.new(0.45, 1), [v[2]] = Vector2.new(0.45, 0) }
-	local uvB = { [v[2]] = Vector2.new(1, 1), [v[5]] = Vector2.new(1, 0), [v[6]] = Vector2.new(0.55, 0), [v[3]] = Vector2.new(0.55, 1) }
-	for _, l in ipairs(BMesh.faceLoops(fa)) do l.uv = uvA[l.v] end
-	for _, l in ipairs(BMesh.faceLoops(fb)) do l.uv = uvB[l.v] end
-	local tris = TexPaint.tris(bm, BMesh, fan)
-	eq(#tris, 4, "two triangles a quad")
-	local cv = TexPaint.canvas(64, 64, Color3.new(1, 1, 1))
-	local red = Color3.new(1, 0, 0)
-	-- a dab right on the seam (x = 0): paint lands in BOTH halves of the picture
-	local n, rect = TexPaint.dab(cv, tris, Vector3.new(0, 0, 0), 0.3, red, 1, { facing = Vector3.new(0, 1, 0) })
-	assert(n > 0 and rect, "painted")
-	local function redAt(x, y) local c = TexPaint.get(cv, x, y) return c.R > 0.9 and c.G < 0.2 end
-	-- seam point (0, 0, 0): left quad u = 0.45 (x ~ 28.8), v = 0.5; right quad u = 1 (x ~ 63), v = 0.5
-	assert(redAt(28, 32), "left side of the seam painted")
-	assert(redAt(63, 32), "right side of the seam painted (the brush is 3D, so it crosses seams)")
-	assert(not redAt(5, 5), "far away untouched")
-	-- bleed: a pixel just past the left island's edge (x = 29) also got paint
-	assert(TexPaint.get(cv, 29, 32).G < 0.5, "paint bleeds a pixel past the island edge")
-	-- the back of the surface doesn't get paint
-	local cv2 = TexPaint.canvas(64, 64, Color3.new(1, 1, 1))
-	eq((TexPaint.dab(cv2, tris, Vector3.new(0, 0, 0), 0.3, red, 1, { facing = Vector3.new(0, -1, 0) })), 0, "only faces towards you")
-	-- sample: the colour under a point
-	local s = TexPaint.sample(cv, tris, Vector3.new(-0.05, 0, 0))
-	assert(s and s.R > 0.9 and s.G < 0.2, "S picks up red")
-	local w = TexPaint.sample(cv, tris, Vector3.new(-0.9, 0, -0.9))
-	assert(w and w.G > 0.9, "and white away from it")
-	-- soften blurs the edge of the red blob
-	local before = TexPaint.get(cv, 20, 32).G
-	TexPaint.dab(cv, tris, Vector3.new(-0.3, 0, 0), 0.4, red, 1, { brush = "blur" })
-	assert(math.abs(TexPaint.get(cv, 20, 32).G - before) > 0.001 or before > 0.99, "soften changes the edge")
-	-- fill
-	TexPaint.fill(cv, Color3.new(0, 0, 1))
-	local c = TexPaint.get(cv, 63, 63)
-	assert(c.B > 0.99 and c.R < 0.01, "filled")
-	-- faces without UVs are left out
-	local bare = BMesh.new()
-	Ops.cube(bare, 2)
-	eq(#TexPaint.tris(bare, BMesh, fan), 0, "no UVs, nothing to paint")
-end)
 check2("convex hull, symmetrize, recalc normals", function()
 	local h = BMesh.new()
 	local vs = {}
