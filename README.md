@@ -139,7 +139,7 @@ ROBLEND works in its own space 10,000 studs under your map, so models you're mak
 - **Import from Studio** (top bar) lists what's on your map, like the Explorer: click one, or drag it into the 3D view. Or click something in Studio's Explorer while ROBLEND is open and press the **Bring in** button that appears. It comes down to the ROBLEND scene, centred, and the view frames it. Parts, meshes, unions, models and groups (folders) all come in as they are (picking one part of a model brings the whole model, and Place in Studio takes the whole model back); **Tab** on a part turns it into a ROBLEND mesh to edit. (Roblox doesn't let plugins read a union's shape, so unions can be moved and placed but not edited.)
 - **Place in Studio** (top bar) closes ROBLEND with your work in your hand in Studio's view: it follows the mouse, **click** to place it, **R** turns it, **Enter** puts things back exactly where they came from, **Esc** cancels.
 - **Back to Studio** closes ROBLEND; Studio's camera is where you left it.
-- Studio's Plugins tab also has **Edit in ROBLEND** and **Place**, and both can be given keys in *File > Advanced > Customize Shortcuts*.
+- Studio's Plugins tab has just the one ROBLEND button. *Edit in ROBLEND* and *Place in Studio* can also be given keys in *File > Advanced > Customize Shortcuts*.
 - Anything left in the workshop saves and publishes with your place, so place finished work before publishing. *Edit > Workshop Under the Map* turns the workshop off.
 
 **Q** opens the mode menu (Object / Edit / Sculpt / Vertex Paint); Studio keeps Ctrl Tab for itself. In Vertex Paint the colour square opens a honeycomb colour picker.
@@ -153,8 +153,9 @@ ROBLEND saves each mesh to Roblox as a real **Mesh asset**, using `AssetService:
 2. Install ROBLEND as a **local plugin** (the .rbxmx in your Plugins folder). Roblox only allows this API in local plugins, not in plugins installed from the Creator Store.
 
 **When it saves**
-- Automatically when you leave Edit Mode, if the mesh changed. You can turn this off under File > Auto Save.
+- When you **Place in Studio**: every mesh you place that has unsaved changes is saved first, so it works in the published game. Output says when it's saved, or why it couldn't be.
 - When you choose File > Save Mesh to Roblox or File > Save All Meshes.
+- Nothing uploads by itself while you work (no timed or background saves).
 - Unsaved meshes have a `*` after their name in the Outliner.
 
 **Things to know**

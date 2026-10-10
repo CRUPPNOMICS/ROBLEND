@@ -339,7 +339,6 @@ function UI:buildTopBar()
 		"-",
 		{ "Save Mesh to Roblox", "", function() api.tool("Save") end },
 		{ "Save All Meshes", "", function() api.tool("SaveAll") end },
-		{ "Auto Save (leaving Edit Mode)", "", function() api.setAutoSave(not api.state().autoSave) end, check = api.state().autoSave },
 		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
@@ -1230,7 +1229,8 @@ function UI:buildPropContent()
 			label(b, { LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = s.saved and rgb(0x8bdc00) or T.textDim, Text = txt })
 			self:wideButton(b, 2, "Save Mesh to Roblox", function() api.tool("Save") end, T.blue)
 			self:wideButton(b, 3, "Save All Meshes", function() api.tool("SaveAll") end)
-			self:wideButton(b, 4, (s.autoSave and "[x]" or "[  ]") .. "  Auto save when leaving Edit Mode", function() api.setAutoSave(not s.autoSave) self:buildPropContent() end, T.textField)
+			label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "Meshes save by themselves when you Place in Studio. Nothing uploads while you work." })
 			label(b, { LayoutOrder = 5, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
 				Text = "Needs Studio's beta \"CreateAssetAsync Lua API\" (File > Beta Features)." })
 		end)

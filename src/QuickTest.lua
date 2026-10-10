@@ -458,8 +458,8 @@ add(G, "collision", "Collision panel", "Properties > orange square tab (Object) 
 	"Each one changes the part (check in Studio's Properties after closing ROBLEND).", function(H) local p = H.add("Sphere") H.select({ p }) H.frame() end)
 add(G, "save", "Save to Roblox", "File > Save Mesh (needs the CreateAssetAsync beta). Skip if you haven't turned that on.",
 	"The bottom bar says Saved with an rbxassetid; the shape looks the same.", function(H) local p = H.add("Torus") H.select({ p }) H.frame() end)
-add(G, "autosave", "Auto save", "Press Tab, change something (E on a face), press Tab again. (Needs the CreateAssetAsync beta; skip if not.)",
-	"It saves by itself after leaving Edit Mode (bottom bar).", function(H) local p = H.add("Cube") H.select({ p }) H.frame() end)
+add(G, "autosave", "Saves on Place in Studio", "Press Tab, change something (E on a face), press Tab again, then File > Place in Studio and click to drop it on the map. (Needs the CreateAssetAsync beta; skip if not.)",
+	"Nothing uploads while you edit; Output says \"saved ... good to go\" once it's placed.", function(H) local p = H.add("Cube") H.select({ p }) H.frame() end)
 I[#I].autoSave = true
 add(G, "bake", "Bake to Parts / Export .obj", "Mesh menu (Edit Mode) > Bake to Parts. Then Export .obj.",
 	"A copy made of normal parts appears / an OBJ script opens to copy.", function(H) H.edit("Cube", "face", "none") end)
@@ -559,7 +559,7 @@ function QuickTest.new(C)
 		if msg then msg.Text = "Setting up..." end
 		task.defer(function()
 			H.clean()
-			-- auto save is paused during the test (it would upload every test shape), except for its own test
+			-- (there's no auto save since 0.28.0; this just keeps the flag as it was)
 			pcall(C.api.setAutoSave, it.autoSave == true and true or false, true)
 			local ok, err = true, nil
 			if it.setup then ok, err = pcall(it.setup, H, C.api) end

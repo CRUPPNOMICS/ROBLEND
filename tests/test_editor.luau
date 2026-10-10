@@ -431,7 +431,7 @@ check("Tab out; Properties: Location X, Material, colour", function()
 	tabBtns[1].Activated:Fire() beat()
 end)
 check("Outliner: click a row selects, eye hides", function()
-	local row = find("TextLabel", function(d) return d.Text == "ROBLEND Plane" and d.Parent and d.Parent.ClassName == "TextButton" end)
+	local row = find("TextLabel", function(d) return (d.Text == "ROBLEND Plane" or d.Text == "ROBLEND Plane *") and d.Parent and d.Parent.ClassName == "TextButton" end)   -- (* = not saved yet)
 	assert(row, "plane row")
 	row.Parent.Activated:Fire() beat()
 	eq(S.Selection:Get()[1].Name, "ROBLEND Plane", "selected from outliner")
@@ -440,7 +440,7 @@ check("Outliner: click a row selects, eye hides", function()
 	for _, c in ipairs(row.Parent:GetChildren()) do if c.ClassName == "TextButton" then eye = c end end
 	eye.Activated:Fire() beat() beat() beat()
 	assert(view.objects[plane] == nil, "hidden from the view")
-	local row2 = find("TextLabel", function(d) return d.Text == "ROBLEND Plane" and d.Parent and d.Parent.ClassName == "TextButton" end)
+	local row2 = find("TextLabel", function(d) return (d.Text == "ROBLEND Plane" or d.Text == "ROBLEND Plane *") and d.Parent and d.Parent.ClassName == "TextButton" end)
 	for _, c in ipairs(row2.Parent:GetChildren()) do if c.ClassName == "TextButton" then eye = c end end
 	eye.Activated:Fire() beat() beat() beat()
 	assert(view.objects[plane] ~= nil, "shown again")
@@ -454,12 +454,15 @@ check("Shift D duplicates, X deletes", function()
 	eq(rbParts(), n0, "deleted")
 	eq(#S.Selection:Get(), 0, "nothing selected")
 end)
-check("leaving Edit Mode saves the mesh as a real Roblox asset; unchanged edit keeps it", function()
+check("Save uploads the mesh as a real Roblox asset; leaving Edit Mode uploads nothing (0.28.0); unchanged edit keeps it", function()
 	S.Selection:Set({ p3 }) beat()
 	local n0 = #MOCK.uploads
 	press("Tab") beat()
 	press("One") press("A") press("G") press("Y") type_("1") press("Return") beat()
 	press("Tab") beat()
+	for _ = 1, 30 do beat() end
+	eq(#MOCK.uploads, n0, "nothing uploads by itself")
+	S.Selection:Set({ p3 }) MOCK.api.tool("Save") beat() beat()
 	eq(#MOCK.uploads, n0 + 1, "uploaded once")
 	local id = p3:GetAttribute("RB_AssetId")
 	assert(id and p3:GetAttribute("RB_SavedHash"), "saved attrs")
@@ -470,6 +473,7 @@ check("leaving Edit Mode saves the mesh as a real Roblox asset; unchanged edit k
 	assert(p3.Mesh == MOCK.uploads[#MOCK.uploads].em, "saved mesh put back")
 	MOCK.noAssetApi = true
 	press("Tab") beat() press("One") press("A") press("G") press("Y") type_("1") press("Return") beat() press("Tab") beat()
+	S.Selection:Set({ p3 }) MOCK.api.tool("Save") beat() beat()
 	assert(MOCK.status:find("Beta Features", 1, true), "tells you to turn on the beta")
 	MOCK.noAssetApi = false
 	headerBtn("File") menuItem("Save Mesh to Roblox")
@@ -845,14 +849,16 @@ check("Modifiers tab: add Subdivision Surface, change levels, eye, apply", funct
 	eq(#modsOf(p4), 1, "removed")
 	local n0 = #MOCK.uploads
 	for _ = 1, 50 do beat() end
-	assert(#MOCK.uploads > n0, "saved a few seconds after the change")
+	eq(#MOCK.uploads, n0, "no upload by itself (0.28.0)")
+	S.Selection:Set({ p4 }) MOCK.api.tool("Save") beat() beat()
+	assert(#MOCK.uploads > n0, "saved")
 	eq(#MOCK.uploads[#MOCK.uploads].em.t, 192, "the upload has the modifier in it")
 	textBtn("Apply")
 	eq(#modsOf(p4), 0, "applied = gone from the stack")
 	eq(select(2, counts(p4)), 96, "real geometry now")
 	propTab(1)
 end)
-check("Mirror modifier in Edit Mode; Tab out saves the mirrored mesh", function()
+check("Mirror modifier in Edit Mode; saving uploads the mirrored mesh", function()
 	p4 = editCube()
 	press("A") press("G") press("X") type_("3") press("Return") beat()
 	MOCK.api.modAdd("mirror") beat() beat()
@@ -861,7 +867,9 @@ check("Mirror modifier in Edit Mode; Tab out saves the mirrored mesh", function(
 	local n0 = #MOCK.uploads
 	press("Tab") beat() beat()
 	eq(tris(p4), 24, "two cubes on the part")
-	assert(#MOCK.uploads > n0, "auto saved")
+	eq(#MOCK.uploads, n0, "Tab out doesn't upload (0.28.0)")
+	S.Selection:Set({ p4 }) MOCK.api.tool("Save") beat() beat()
+	assert(#MOCK.uploads > n0, "saved")
 	eq(#MOCK.uploads[#MOCK.uploads].em.t, 24, "mirrored upload")
 end)
 check("Ctrl right-click adds / extrudes to the mouse, Shift R repeats, Auto Merge welds", function()
@@ -1157,7 +1165,9 @@ check("UVs + texture: box projection on the part, texture id, upload carries UVs
 	for _, p in ipairs(c.Mesh.uv) do assert(p.X >= -1e-6 and p.X <= 1 + 1e-6 and p.Y >= -1e-6 and p.Y <= 1 + 1e-6, "fit UVs stay in 0..1") end
 	local n0 = #MOCK.uploads
 	for _ = 1, 50 do beat() end
-	assert(#MOCK.uploads > n0, "saved after the change")
+	eq(#MOCK.uploads, n0, "nothing uploads by itself (0.28.0)")
+	S.Selection:Set({ c }) MOCK.api.tool("Save") beat() beat()
+	assert(#MOCK.uploads > n0, "saved")
 	eq(MOCK.uploads[#MOCK.uploads].em.fuv, 12, "upload has UVs")
 	propTab(1)
 end)
@@ -2335,6 +2345,57 @@ check("a Creator Store copy: Roblox refuses uploads, ROBLEND says why once and s
 	press("Tab") beat() press("A") press("G") press("Z") type_("1") press("Return") beat() press("Tab") beat() beat()
 	assert(not MOCK.storeTries or MOCK.storeTries <= 1, "no background retries: " .. tostring(MOCK.storeTries))
 	MOCK.storePlugin = nil
+	p.Parent = nil
+end)
+check("Place in Studio saves any unsaved mesh first, so it works in the published game (0.28.0)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	MOCK.api.setWorkshop(true) beat()
+	local auto0 = MOCK.api.state().autoSave
+	MOCK.api.setAutoSave(false)   -- (so only Place in Studio can be the one saving it)
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat()
+	-- (the store-copy check above left this copy marked as blocked: one save that works clears it)
+	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()
+	assert(not MOCK.status:find("Creator Store plugins", 1, true), "a working save clears the store block: " .. MOCK.status)
+	p:SetAttribute("RB_SavedHash", nil)
+	local up0 = #MOCK.uploads
+	MOCK.warns = {}
+	S.Selection:Set({ p }) MOCK.api.exportSelected() beat()
+	assert(MOCK.api.placing(), "holding it")
+	press("Return") beat() beat()
+	assert(not MOCK.api.placing(), "placed")
+	assert(#MOCK.uploads > up0, "saved to Roblox when placed")
+	assert(p:GetAttribute("RB_SavedHash") ~= nil and p:GetAttribute("RB_AssetId") ~= nil, "it's saved")
+	eq(#MOCK.warns, 0, "no warnings: " .. table.concat(MOCK.warns, " | "))
+	-- placing it again when nothing changed doesn't upload it again
+	local function bringBack()
+		if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+		S.Selection:Set({ p }) MOCK.api.importSelected() beat()
+		assert(p.CFrame.Position.Y < -5000, "back in the workshop")
+	end
+	bringBack()
+	local up1 = #MOCK.uploads
+	S.Selection:Set({ p }) MOCK.api.exportSelected() beat()
+	assert(MOCK.api.placing(), "holding it again")
+	press("Return") beat() beat()
+	eq(#MOCK.uploads, up1, "already saved: no second upload")
+	-- a Creator Store copy can't save: Output says so (ROBLEND is closed while placing)
+	bringBack()
+	p:SetAttribute("RB_SavedHash", nil)
+	MOCK.storePlugin = true
+	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()   -- (the store block is found on the first try)
+	MOCK.warns = {}
+	S.Selection:Set({ p }) MOCK.api.exportSelected() beat()
+	assert(MOCK.api.placing(), "holding it a third time")
+	press("Return") beat() beat()
+	assert(#MOCK.warns >= 1 and MOCK.warns[1]:find("checkered cube", 1, true), "Output explains: " .. table.concat(MOCK.warns, " | "))
+	MOCK.warns = {}   -- (expected here)
+	MOCK.storePlugin = nil
+	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()   -- (unblock again for the tests after this)
+	MOCK.api.setAutoSave(auto0)
+	MOCK.toolbarButton.Click:Fire() beat() beat()
 	p.Parent = nil
 end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()

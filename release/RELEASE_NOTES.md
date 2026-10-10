@@ -1,4 +1,4 @@
-# ROBLEND 0.27.2
+# ROBLEND 0.28.0
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.28.0 - Place in Studio saves first:** Placing work on your map now saves any ROBLEND mesh that isn't saved yet, so it shows in the published game straight away (an unsaved mesh only lives in your Studio session, and in a game it shows as Roblox's checkered cube). Output says when it's saved, or why it couldn't be. A copy from the Creator Store still can't save (Roblox blocks store plugins from uploading), so Output warns you instead. Nothing uploads by itself any more: the save when leaving Edit Mode, the timed save every 90 seconds and the save after a modifier change are gone (every save is an upload, and that was too many). You can still save any time with File > Save Mesh to Roblox / Save All Meshes. A save that works after a store-copy block clears that block.
 
 **0.27.2:** The toolbar button shows the ROBLEND logo straight away in every copy (it's built in now; nothing gets uploaded). A copy installed from the Creator Store can't save meshes to Roblox yet, because Roblox doesn't let store plugins upload anything (coming later, with a permission prompt). ROBLEND now says so once, points to the file version and Bake to Parts / Export .obj, and stops retrying in the background.
 

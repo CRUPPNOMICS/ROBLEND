@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.27.2"
+local VERSION = "0.28.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -396,8 +396,9 @@ local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"C
 -- prompt). Until then a store copy can't save meshes to Roblox: say so once, and stop trying in the background.
 EDIT.STORE_MSG = "Roblox doesn't let Creator Store plugins save meshes yet. Your meshes stay in this place in Studio, but won't show in a published game. To save them: get the free file version of ROBLEND (GitHub: CRUPPNOMICS/ROBLEND, Releases), or use Bake to Parts / Export .obj (Mesh menu)."
 pcall(function() EDIT.storeBlocked = plugin:GetSetting("RB_StoreBlocked") == true end)
-local autoSave = true
-pcall(function() local v = plugin:GetSetting("RB_AutoSave") if v ~= nil then autoSave = v == true end end)
+-- 0.28.0 (Dylan): no automatic saves while you work (every save is an upload, and uploads are limited). Meshes save
+-- when you Place in Studio (EDIT.saveOnPlace) or press File > Save Mesh to Roblox / Save All Meshes.
+local autoSave = false
 local saving = {}
 local function dataHash(str)
 	local h = 2166136261
@@ -436,6 +437,11 @@ local function saveMesh(p, quiet, silent)
 				return
 			end
 			p:SetAttribute("RB_AssetId", id)
+			-- an upload worked: this copy can save (again) - background saves start back up
+			if EDIT.storeBlocked then
+				EDIT.storeBlocked = false
+				pcall(function() plugin:SetSetting("RB_StoreBlocked", false) end)
+			end
 			local real, lerr = Display.fromAsset(id)
 			if not real then
 				setStatus(("Uploaded %s as rbxassetid://%s but Roblox hasn't made it ready yet (%s). Save again in a minute."):format(p.Name, tostring(id), tostring(lerr)))
@@ -450,12 +456,49 @@ local function saveMesh(p, quiet, silent)
 				setStatus(("Saved %s to Roblox (rbxassetid://%s). It stays in the place and publishes."):format(p.Name, tostring(id)))
 			else
 				real:Destroy()
-				if not silent then setStatus(p.Name .. " changed while saving - it will save again when you leave Edit Mode.") end
+				if not silent then setStatus(p.Name .. " changed while saving - it will save again when you Place in Studio (or File > Save Mesh to Roblox).") end
 			end
 		end)
 		saving[p] = nil
 		if not ok then setStatus("Couldn't save " .. p.Name .. ": " .. tostring(err)) end
 	end)
+end
+-- Place in Studio saves every ROBLEND mesh it carries that isn't saved yet (0.28.0). An unsaved mesh only lives in
+-- this Studio session: in the published game it's Roblox's checkered cube. ROBLEND is closed while placing, so the
+-- result goes to Output too.
+function EDIT.saveOnPlace(things)
+	local todo, seen = {}, {}
+	local function add(p) if isRB(p) and not seen[p] and not isSaved(p) then seen[p] = true todo[#todo + 1] = p end end
+	for _, x in ipairs(things or {}) do
+		add(x)
+		for _, d in ipairs(x:GetDescendants()) do add(d) end
+	end
+	if #todo == 0 then return 0 end
+	local what = #todo == 1 and todo[1].Name or (#todo .. " meshes")
+	if EDIT.storeBlocked then
+		setStatus(EDIT.STORE_MSG)
+		warn(NAME .. ": " .. what .. " isn't saved, so it will show as a checkered cube in the published game. " .. EDIT.STORE_MSG)
+		return #todo
+	end
+	print(NAME .. ": saving " .. what .. " to Roblox so it works in the published game...")
+	for _, p in ipairs(todo) do saveMesh(p) end
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < 120 do
+			local busy = false
+			for _, p in ipairs(todo) do if saving[p] then busy = true break end end
+			if not busy then break end
+			task.wait(0.25)
+		end
+		local bad = {}
+		for _, p in ipairs(todo) do if p.Parent and not isSaved(p) then bad[#bad + 1] = p.Name end end
+		if #bad == 0 then
+			print(NAME .. ": saved " .. what .. " - good to go, it will show in the published game.")
+		else
+			warn(NAME .. ": couldn't save " .. table.concat(bad, ", ") .. " (" .. tostring(lastStatus) .. "). Until it's saved it shows as a checkered cube in the published game: open ROBLEND, select it, File > Save Mesh to Roblox.")
+		end
+	end)
+	return #todo
 end
 -- a ROBLEND part that was never saved shows nothing / Roblox's checker after Studio restarts: rebuild its look
 -- from RB_Data (only once per session, and only for parts not saved to Roblox)
@@ -825,7 +868,7 @@ local function exitEdit()
 		local ok, _, np = applyMesh(obj, bm, false)
 		if np then obj = np end
 		local done = obj
-		task.defer(function() if isSaved(done) then restoreSaved(done) elseif autoSave then saveMesh(done, true) end end)
+		task.defer(function() if isSaved(done) then restoreSaved(done) end end)
 		Selection:Set({ obj })
 		activeObj = obj
 		if scene[obj] then scene[obj].data = nil end -- redraw it untinted
@@ -1656,7 +1699,7 @@ r = row()
 button(r, "Bake to parts", 116, Tools.bake, Color3.fromRGB(40, 130, 80))
 button(r, "Export .obj", 116, Tools.exportOBJ)
 label("KEYS: Tab edit | 1 2 3 modes | click / Shift-click / drag box / Alt-click loop | A all, Alt+A none, Ctrl+I invert | G S R (+ X Y Z, numbers, Ctrl snap) | E extrude | I inset | Ctrl+R loop cut | X delete | M merge | F fill | Alt+Z x-ray | Ctrl+Z undo", 10, Color3.fromRGB(150, 155, 170))
-label("SAVING: leaving Edit Mode uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Lua API\"), so it stays in the place and publishes. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
+label("SAVING: Place in Studio uploads the mesh as a real Roblox Mesh asset (needs the Studio beta \"CreateAssetAsync Lua API\"), so it stays in the place and publishes. File > Save Mesh to Roblox saves it any time. Bake to parts / Export .obj still work too.", 10, Color3.fromRGB(255, 200, 120))
 
 -- ===== the Blender-style window (UI.lua + View.lua) =====
 -- (in its own function: Luau allows 200 locals per function)
@@ -3749,8 +3792,6 @@ local function modsChanged(p)
 		local ok, m = pcall(loadFrom, p)
 		if ok and m then applyMesh(p, m, false) end
 		if scene[p] then scene[p].data = nil end
-		-- save it a few seconds after the last change (not on every click: uploads are rate limited)
-		if autoSave then MOD.modSave = MOD.modSave or {} MOD.modSave[p] = os.clock() end
 	end
 	dirtyCage = true
 end
@@ -4151,6 +4192,7 @@ local function finishPlacing(how)
 		print(NAME .. ": placing cancelled - it's back in the workshop (open ROBLEND to see it).")
 	else
 		Selection:Set(P.things)
+		EDIT.saveOnPlace(P.things)
 	end
 end
 api.exportSelected = function(list)
@@ -4331,11 +4373,11 @@ api.undo = function() pcall(function() CHS:Undo() end) end
 api.redo = function() pcall(function() CHS:Redo() end) end
 api.close = function() setUIOn(false) end
 api.setStudioView = function(b) setStudioView(b) end
+-- (kept for older callers: there are no automatic saves any more - nothing reads this flag)
 api.setAutoSave = function(b, quiet)
 	autoSave = b
-	pcall(function() plugin:SetSetting("RB_AutoSave", b) end)
 	if quiet then return end
-	setStatus(b and "Meshes save to Roblox when you leave Edit Mode." or "Auto save off - use File > Save Mesh.")
+	setStatus("Meshes save to Roblox when you Place in Studio, or with File > Save Mesh to Roblox.")
 end
 api.rename = function(name)
 	local p = selectedPart()
@@ -5256,16 +5298,6 @@ RunService.Heartbeat:Connect(function()
 			elseif not ok then warn(NAME .. ": " .. tostring(changed)) end
 		end
 	end
-	-- timed save while editing in our view, so a crash loses little
-	if editing and obj and ownView() and autoSave then
-		MOD.lastAuto = MOD.lastAuto or now
-		if now - MOD.lastAuto > 90 then
-			MOD.lastAuto = now
-			if not isSaved(obj) and not saving[obj] then saveMesh(obj, true, true) end
-		end
-	else
-		MOD.lastAuto = nil
-	end
 	-- Boolean / Shrinkwrap modifiers follow the part they point at (the real part is redone once it stops moving)
 	MOD.envSeen = MOD.envSeen or setmetatable({}, { __mode = "k" })
 	for p in pairs(scene) do
@@ -5278,21 +5310,12 @@ RunService.Heartbeat:Connect(function()
 				e.t = nil
 				pcall(function() applyMesh(p, loadFrom(p), false) end)
 				if scene[p] then scene[p].data = nil end
-				if autoSave then MOD.modSave = MOD.modSave or {} MOD.modSave[p] = now end
 			end
 		end
 	end
 	pcall(UVE.tick)
 	pcall(TUT.tick, now)
 	pcall(SETUP.tick, now)
-	if MOD.modSave then
-		for p, t0 in pairs(MOD.modSave) do
-			if now - t0 > 4 then
-				MOD.modSave[p] = nil
-				if p.Parent and not (editing and p == obj) and isRB(p) and not isSaved(p) then saveMesh(p, true, true) end
-			end
-		end
-	end
 	if editing and obj then
 		if not obj.Parent then exitEdit() return end
 		local ms = modsStr(obj) .. envKey(obj)
