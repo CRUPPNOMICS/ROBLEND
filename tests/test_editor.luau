@@ -2341,6 +2341,53 @@ check("ROBLEND closed: no ROBLEND keys, Studio's camera is a normal Fixed camera
 	p.Parent = nil
 	MOCK.toolbarButton.Click:Fire() beat()
 end)
+check("the view never gets stuck: a lost button-up ends the drag, the wheel works from either source, zooming in goes through (0.26.6)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	if inEdit() then press("Tab") beat() end
+	local UIS = S.UserInputService
+	mouseXY(500, 400) beat()
+	-- middle button down, drag: the view turns
+	MOCK.btnDown = { MouseButton3 = true }
+	UIS.InputBegan:Fire({ UserInputType = Enum.UserInputType.MouseButton3, KeyCode = Enum.KeyCode.Unknown }, false) beat()
+	local yaw0 = view.yaw
+	mouseXY(540, 400) beat()
+	assert(view.yaw ~= yaw0, "dragging turns the view")
+	-- the button comes up somewhere ROBLEND never hears about (no InputEnded)
+	MOCK.btnDown = { MouseButton3 = false }
+	beat()
+	local yaw1 = view.yaw
+	mouseXY(600, 420) beat() mouseXY(650, 440) beat()
+	eq(view.yaw, yaw1, "the view stops turning once the button is really up")
+	-- even when Studio can't tell which buttons are down: a left click or Esc ends it
+	MOCK.btnDown = nil
+	UIS.InputBegan:Fire({ UserInputType = Enum.UserInputType.MouseButton3, KeyCode = Enum.KeyCode.Unknown }, false) beat()
+	press("Escape") beat()
+	local yaw2 = view.yaw
+	mouseXY(700, 400) beat()
+	eq(view.yaw, yaw2, "Esc ends a stuck drag")
+	UIS.InputBegan:Fire({ UserInputType = Enum.UserInputType.MouseButton3, KeyCode = Enum.KeyCode.Unknown }, false) beat()
+	MOCK.t += 0.5 mouse.Button1Down:Fire() mouse.Button1Up:Fire() beat()
+	local yaw3 = view.yaw
+	mouseXY(520, 380) beat()
+	eq(view.yaw, yaw3, "a left click ends it too")
+	-- the wheel: one turn arriving both ways zooms once; the second source alone still works
+	mouseXY(600, 400) beat()
+	local d0 = view.dist
+	MOCK.t += 1
+	mouse.WheelForward:Fire()
+	UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseWheel, Position = Vector3.new(0, 0, 1) }, false) beat()
+	assert(math.abs(view.dist - d0 * 0.85) < 1e-6, "zoomed once, not twice: " .. view.dist / d0)
+	MOCK.t += 1
+	local d1 = view.dist
+	UIS.InputChanged:Fire({ UserInputType = Enum.UserInputType.MouseWheel, Position = Vector3.new(0, 0, -1) }, false) beat()
+	assert(view.dist > d1, "the wheel still works from UserInputService alone")
+	-- zooming right in carries on forward instead of stopping at the pivot
+	local f0 = view.focus
+	for _ = 1, 60 do MOCK.t += 1 mouse.WheelForward:Fire() end
+	beat()
+	assert(view.dist >= 0.3 and (view.focus - f0).Magnitude > 3, "kept going forward: " .. (view.focus - f0).Magnitude)
+	press("Home") beat()
+end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
 	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end

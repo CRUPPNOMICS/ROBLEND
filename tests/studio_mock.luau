@@ -286,6 +286,8 @@ SIGNALS.InputBegan = true
 function Inst.IsKeyDown(_, k) return held[k.Name] == true end
 function Inst.GetKeysPressed() local o = {} for k, v in pairs(MOCK.held) do if v then o[#o + 1] = { KeyCode = Enum.KeyCode[k] } end end return o end
 function Inst.GetFocusedTextBox() return MOCK.focused end
+-- (MOCK.btnDown: which mouse buttons are physically held; nil = the tests don't say, like a Studio that can't tell)
+function Inst.IsMouseButtonPressed(_, t) if not MOCK.btnDown then return nil end return MOCK.btnDown[t.Name] == true end
 function Inst.IsEdit() return not MOCK.playing end
 function Inst.IsRunning() return MOCK.playing == true end
 -- (only ROBLEND's invisible keyboard box keeps focus in the fake; other boxes are driven by their events)

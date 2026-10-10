@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.5"
+local VERSION = "0.26.6"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4759,6 +4759,8 @@ end
 
 hook("Button1Down", mouse.Button1Down, function()
 	if placing then finishPlacing("place") return end
+	-- a left click always ends a view drag whose button-up went missing
+	if navDrag then navDrag = nil end
 	local mp = mousePos()
 	-- (only in the 3D view itself: a click on a text box in Properties must keep the keyboard for typing)
 	if uiOn and ownView() and ui:inCanvas(mp) then task.defer(KC.grab) end
@@ -4875,7 +4877,7 @@ hook("Button2Down", mouse.Button2Down, function()
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
 		return
 	end
-	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true } end
+	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true, t0 = os.clock() } end
 end)
 pcall(function()
 	hook("Button2Up", mouse.Button2Up, function()
@@ -4891,7 +4893,16 @@ pcall(function()
 		end
 	end)
 end)
-local wheelFromMouse = false
+-- one turn of the wheel can arrive twice (the plugin mouse and UserInputService): take the first, skip its twin.
+-- (Before, once the plugin mouse had sent one, the other was ignored for good, so the wheel died when Studio
+-- stopped sending the plugin mouse's.)
+local lastWheel = { t = -1, dir = 0, src = "" }
+function MOD.wheelFrom(src, dir)
+	local now = os.clock()
+	if lastWheel.src ~= src and lastWheel.dir == dir and now - lastWheel.t < 0.06 then lastWheel.t = -1 return false end
+	lastWheel.t, lastWheel.dir, lastWheel.src = now, dir, src
+	return true
+end
 local function wheel(steps)
 	if (editing or modal) and MOD.wheel(steps) then return end
 	if not ownView() or ui.menuOpen or not ui:inCanvas(mousePos()) then return end
@@ -4899,9 +4910,27 @@ local function wheel(steps)
 	dirtyCage = true
 end
 pcall(function()
-	hook("WheelForward", mouse.WheelForward, function() wheelFromMouse = true wheel(1) end)
-	hook("WheelBackward", mouse.WheelBackward, function() wheelFromMouse = true wheel(-1) end)
+	hook("WheelForward", mouse.WheelForward, function() if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
+	hook("WheelBackward", mouse.WheelBackward, function() if MOD.wheelFrom("mouse", -1) then wheel(-1) end end)
 end)
+-- a view drag (middle / right button held) ends when the button comes up. If that release never reaches ROBLEND
+-- (let go over another window, a panel, or outside Studio), the view kept turning with every mouse move and
+-- nothing else worked: "stuck". So check the button is really still down, and any left click or Esc ends it too.
+function MOD.navAlive()
+	local nd = navDrag
+	if not nd then return false end
+	local btn = nd.rmb and Enum.UserInputType.MouseButton2 or Enum.UserInputType.MouseButton3
+	local ok, down = pcall(function() return UIS:IsMouseButtonPressed(btn) end)
+	if ok and type(down) == "boolean" then
+		if down then
+			nd.seenDown = true
+		elseif nd.seenDown and (nd.moved >= 4 or os.clock() - (nd.t0 or 0) > 0.5) then
+			navDrag = nil
+			return false
+		end
+	end
+	return true
+end
 hook("Move", mouse.Move, function()
 	if placing then placeUpdate() return end
 	local mp = mousePos()
@@ -4914,7 +4943,7 @@ hook("Move", mouse.Move, function()
 		if d >= 3 then lasso.pts[#lasso.pts + 1] = mp lasso.len += d drawLasso() end
 		return
 	end
-	if navDrag then
+	if navDrag and MOD.navAlive() then
 		local dx, dy = mp.X - navDrag.last.X, mp.Y - navDrag.last.Y
 		navDrag.last = mp
 		navDrag.moved += math.abs(dx) + math.abs(dy)
@@ -5094,11 +5123,12 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	local shift = shiftDown()
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
 		local mp = mousePos()
-		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0 } end
+		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0, t0 = os.clock() } end
 		return
 	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
+	if k == Enum.KeyCode.Escape and navDrag then navDrag = nil return end
 	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
 	if focusBox and ctrl and not alt then
@@ -5187,8 +5217,9 @@ pcall(function()
 		end
 	end)
 	hook("InputChanged", UIS.InputChanged, function(input)
-		if input.UserInputType == Enum.UserInputType.MouseWheel and not wheelFromMouse then
-			wheel(input.Position.Z > 0 and 1 or -1)
+		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			local dir = input.Position.Z > 0 and 1 or -1
+			if MOD.wheelFrom("uis", dir) then wheel(dir) end
 		end
 	end)
 end)
@@ -5236,6 +5267,7 @@ local function catchRibbonTool()
 end
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
+	if navDrag then MOD.navAlive() end
 	if placing then pcall(placeUpdate) end
 	if uiOn and ownView() then catchRibbonTool() end
 	if uiOn and now - lastUI > 0.1 then

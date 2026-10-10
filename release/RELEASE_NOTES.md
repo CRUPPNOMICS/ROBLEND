@@ -1,4 +1,4 @@
-# ROBLEND 0.26.5
+# ROBLEND 0.26.6
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.6 - the view can't get stuck:** If the middle / right mouse button was let go somewhere ROBLEND didn't hear about (over another window or panel), the view kept turning with every mouse move and nothing else worked. Now ROBLEND checks the button is really still held, and a left click or Esc always ends the drag. The mouse wheel takes its turns from both places Studio sends them (it could go dead before), and zooming right in carries on forward instead of stopping at the point you're turning round.
 
 **0.26.5:** With ROBLEND closed, Studio gets every key back: ROBLEND's keys (Tab, Shift A, X, Delete...) do nothing until it's opened again. Closing ROBLEND also puts Studio's edit camera back to a normal Fixed camera, so the mouse wheel and orbiting always work.
 

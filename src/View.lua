@@ -133,7 +133,14 @@ function View:pan(dx, dy)
 	self:update()
 end
 function View:zoom(steps)
-	self.dist = math.clamp(self.dist * (0.85 ^ steps), 0.3, 20000)
+	local nd = self.dist * (0.85 ^ steps)
+	if steps > 0 and nd < 1 then
+		-- already right up close: carry on forward instead of creeping towards the pivot and stopping there
+		-- (zooming in would otherwise get "stuck" a stud away from the point you're turning round)
+		self.focus += self.CFrame.LookVector * (0.5 * steps)
+		nd = math.min(self.dist, 1)
+	end
+	self.dist = math.clamp(nd, 0.3, 20000)
 	self:update()
 end
 local VIEWS = {
