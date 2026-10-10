@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.2"
+local VERSION = "0.26.3"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -95,7 +95,7 @@ local function shownHere(p)
 	return ok and y < WORKSHOP.Y / 2
 end
 local CURSOR = home() + Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local importSelected -- (Import: further down)
+local importSelected, isFloor -- (Import: further down)
 local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment", pivot = "median" }
 -- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
 local FALLOFF = {
@@ -3570,6 +3570,11 @@ local function toggleEdit()
 	end
 	local p = selectedPart()
 	-- a part up on the map: bring it down to the workshop first (Import)
+	-- the map's floor is never edited (it would become a huge mesh and leave the map without a floor)
+	if p and p:IsA("BasePart") and isFloor and not isRB(p) and isFloor(p) then
+		setStatus(p.Name .. " stays as it is: ROBLEND doesn't edit the Baseplate or anything floor-sized (512 x 512 studs or more).")
+		return
+	end
 	if workshopOn and p and p:IsA("BasePart") and p.Parent and not p.Locked and not shownHere(p) and importSelected then
 		importSelected({ p })
 		p = selectedPart()
@@ -3967,6 +3972,15 @@ local function moversOf(x, out)
 end
 -- Import: the things come down to the ROBLEND scene, centred on its floor, and the view frames them. Parts,
 -- meshes, unions, models and folders (groups) all come as they are; Tab on a part turns it into a ROBLEND mesh
+-- the map's floor stays on the map: the Baseplate, or anything floor-sized (512 x 512 studs or more), is never brought in
+isFloor = function(x)
+	if x.Name == "Baseplate" then return true end
+	local ok, lo, hi = pcall(boxOf, { x })
+	if not ok or not lo or lo.X == math.huge then return false end
+	local sz = hi - lo
+	return sz.X >= 512 and sz.Z >= 512
+end
+api.isFloor = function(x) return isFloor(x) end
 importSelected = function(list)
 	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map), so things are edited where they are.") return end
 	if modal then return end
@@ -3983,6 +3997,13 @@ importSelected = function(list)
 		if probe and not shownHere(probe) then up[#up + 1] = x end
 	end
 	if #things == 0 then setStatus("Pick something to bring in: Import from Studio (top bar), or click it in the Explorer.") return end
+	local kept, floor = {}, nil
+	for _, x in ipairs(up) do if isFloor(x) then floor = floor or x.Name else kept[#kept + 1] = x end end
+	up = kept
+	if #up == 0 and floor then
+		setStatus(("%s stays on your map: ROBLEND doesn't bring in the Baseplate or anything floor-sized (512 x 512 studs or more)."):format(floor))
+		return
+	end
 	if #up == 0 then setStatus("That's already here.") return end
 	if editing then exitEdit() end
 	local lo, hi = boxOf(up)
@@ -4023,6 +4044,7 @@ api.mapItems = function(parent, query)
 	local function ok(c)
 		if not (c:IsA("BasePart") or c:IsA("Model") or c:IsA("Folder")) or c:IsA("Terrain") then return false end
 		if c.Name == "ROBLEND_QuickTest" or c.Name == "ROBLEND_SelfTest" then return false end
+		if c:IsA("BasePart") and isFloor(c) then return false end
 		local probe = probeOf(c)
 		return probe ~= nil and not shownHere(probe)
 	end
@@ -4064,7 +4086,7 @@ local function updateBringIn()
 	end
 	for _, x in ipairs(topLevel(roots)) do
 		local probe = probeOf(x)
-		if probe and not shownHere(probe) then up[#up + 1] = x end
+		if probe and not shownHere(probe) and not isFloor(x) then up[#up + 1] = x end
 	end
 	if #up == 0 then return hide() end
 	if not bringBtn then

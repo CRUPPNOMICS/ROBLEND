@@ -2271,6 +2271,34 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	for _, x in ipairs({ c, rock, m, crate }) do x.Parent = nil end
 	api.setWorkshop(false) beat()
 end)
+check("the Baseplate (or anything floor-sized) is never brought into the workshop (0.26.3)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	MOCK.api.setWorkshop(true) beat()
+	local bp = Instance.new("Part") bp.Name = "Baseplate" bp.Size = Vector3.new(2048, 16, 2048) bp.CFrame = CFrame.new(0, -8, 0) bp.Anchored = true bp.Parent = workspace
+	local fl = Instance.new("Part") fl.Name = "Floor" fl.Size = Vector3.new(600, 2, 600) fl.CFrame = CFrame.new(0, 1, 0) fl.Anchored = true fl.Parent = workspace
+	local box = Instance.new("Part") box.Name = "Crate" box.Size = Vector3.new(4, 4, 4) box.CFrame = CFrame.new(10, 2, 0) box.Anchored = true box.Parent = workspace
+	S.Selection:Set({ bp }) beat()
+	local bb = gui:FindFirstChild("RB_BringIn", true)
+	assert(not (bb and bb.Visible), "no Bring in button for the Baseplate")
+	MOCK.api.importSelected() beat()
+	assert(math.abs(bp.CFrame.Position.Y + 8) < 1e-3, "the Baseplate stayed on the map")
+	assert(MOCK.status:find("stays on your map", 1, true), "says why: " .. MOCK.status)
+	S.Selection:Set({ fl }) MOCK.api.importSelected() beat()
+	assert(fl.CFrame.Position.Y > 0, "a floor-sized part stays too")
+	for _, it in ipairs(MOCK.api.mapItems(workspace)) do assert(it.inst ~= bp and it.inst ~= fl, "not in the Import from Studio list") end
+	-- Tab on it: not turned into a mesh either
+	bp.Locked = false
+	S.Selection:Set({ bp }) beat()
+	press("Tab") beat()
+	eq(bp.Parent, workspace, "the Baseplate wasn't converted")
+	assert(not inEdit(), "not editing it")
+	-- picking it along with a crate: the crate comes, the floor stays
+	S.Selection:Set({ bp, box }) MOCK.api.importSelected() beat()
+	assert(box.CFrame.Position.Y < -9000, "the crate came down")
+	assert(math.abs(bp.CFrame.Position.Y + 8) < 1e-3, "the Baseplate didn't")
+	for _, x in ipairs({ bp, fl, box }) do x.Parent = nil end
+	MOCK.api.setWorkshop(false) beat()
+end)
 check("Studio's camera is never left down in the workshop: closing ROBLEND (any way) brings it back up (0.26.2)", function()
 	local cam = S.Workspace and S.Workspace.CurrentCamera or workspace.CurrentCamera
 	if gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end

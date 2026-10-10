@@ -1,4 +1,4 @@
-# ROBLEND 0.26.2
+# ROBLEND 0.26.3
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.3:** The Baseplate (or anything floor-sized, 512 x 512 studs or more) is never brought into the workshop or turned into a mesh: it isn't in the Import from Studio list, gets no Bring in button, and Tab / Edit in ROBLEND leave it on the map and say why.
 
 **0.26.2:** Studio's camera can't get stranded down in the workshop any more: where it was on the map is remembered (per place), and closing ROBLEND any way - the button, Back to Studio, Studio's own 3D view mode, closing Studio, or reopening the place after a crash - brings it back up.
 
