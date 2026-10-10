@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.3"
+local VERSION = "0.26.4"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -25,21 +25,12 @@ local View = require(script.View)
 local MT = require(script.MeshTools)
 local Icon = require(script.Icon)
 local ObjectTools = require(script.ObjectTools)
-local ModStack = require(script.ModStack)
 local Sculpt = require(script.Sculpt)
 local Paint = require(script.Paint)
-local TexPaint = require(script.TexPaint)
 local Font = require(script.Font)
 local Convert = require(script.Convert)
 local Boolean = require(script.Boolean)
-local UVTools = require(script.UVTools)
-local UVEditor = require(script.UVEditor)
 local Tutorial = require(script.Tutorial)
-local KeyCapture = require(script.KeyCapture)
-local SelfTest = require(script.SelfTest)
-local QuickTest = require(script.QuickTest)
-local Setup = require(script.Setup)
-local AutoTest = require(script.AutoTest)
 local Mods = require(script.Modifiers)
 
 local Selection = game:GetService("Selection")
@@ -95,7 +86,7 @@ local function shownHere(p)
 	return ok and y < WORKSHOP.Y / 2
 end
 local CURSOR = home() + Vector3.new(0, 2, 0) -- new shapes go here (Blender's 3D cursor)
-local importSelected, isFloor -- (Import: further down)
+local importSelected -- (Import: further down)
 local EDIT = { prop = false, propR = 4, mirrorX = false, snap = false, autoMerge = false, propFalloff = "Smooth", boxMode = "set", snapTarget = "Increment", pivot = "median" }
 -- proportional editing falloffs (Blender's PROP_SMOOTH, PROP_SPHERE, ...): t = 1 at the selection, 0 at the edge of the circle
 local FALLOFF = {
@@ -1167,8 +1158,8 @@ local function startObjTransform(kind)
 end
 -- plane lock (Shift X / Y / Z): the mouse slides the selection over the flat plane that leaves out that axis.
 -- Looking straight along the plane, the screen move is used with the locked part taken out.
-local PLANE_NAME = { X = "Y-Z", Y = "X-Z (ground)", Z = "X-Y" }
-local function planeMove(M, nW, num, snap)
+EDIT.planeName = { X = "Y-Z", Y = "X-Z (ground)", Z = "X-Y" }
+function EDIT.planeMove(M, nW, num, snap)
 	local dW
 	if num then
 		local r = camera().CFrame.RightVector
@@ -1207,7 +1198,7 @@ local function applyObjTransform()
 			end
 			dW = axisW * t
 		elseif planeW then
-			dW = planeMove(M, planeW, num, snap)
+			dW = EDIT.planeMove(M, planeW, num, snap)
 		else
 			local n = cam.CFrame.LookVector
 			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
@@ -1253,7 +1244,7 @@ local function applyObjTransform()
 		M.info = ("Rot %.1f"):format(math.deg(ang))
 	end
 	dirtyCage = true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. PLANE_NAME[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. EDIT.planeName[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 local function finishObjModal(M, cancel)
 	if cancel then for p, o in pairs(M.orig) do p.CFrame = o.cf p.Size = o.size end end
@@ -1327,7 +1318,7 @@ local function applyTransform()
 			end
 			dL = axisL * t
 		elseif planeW then
-			dL = origin:VectorToObjectSpace(planeMove(M, planeW, num, snap))
+			dL = origin:VectorToObjectSpace(EDIT.planeMove(M, planeW, num, snap))
 		else
 			local n = camera().CFrame.LookVector
 			local p1, p0 = planeHit(getRay(), M.cw, n), planeHit(M.ray0, M.cw, n)
@@ -1396,7 +1387,7 @@ local function applyTransform()
 	if dirtyFast == "col" then dirtyMesh = true end
 	dirtyFast = "pos"
 	dirtyCage = true
-	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. PLANE_NAME[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
+	setStatus((M.info or "") .. (M.axis and ("  along " .. M.axis .. (M.axisLocal and " (Local)" or "")) or "") .. (M.plane and ("  locking " .. M.plane .. " (flat on the " .. EDIT.planeName[M.plane] .. " plane)") or "") .. (M.num ~= "" and ("  [" .. M.num .. "]") or "") .. "   click / Enter = done, Esc = cancel")
 end
 
 local function finishModal(cancel)
@@ -2006,7 +1997,7 @@ local ctx = {
 	setStatus = setStatus, loadFrom = loadFrom, originOf = originOf, encode = encode, applyMesh = applyMesh, dataOf = dataOf, isRB = isRB,
 	record = record, selectedParts = selectedParts, commit = commit, scene = scene, flush = flush, clearSel = clearSel,
 	Convert = Convert, AssetService = AssetService, VERSION = VERSION, Boolean = Boolean, evaluated = evaluated,
-	modEnv = function(p) return modEnv(p, 0) end, UVTools = UVTools, writeData = writeData, home = home,
+	modEnv = function(p) return modEnv(p, 0) end, UVTools = require(script.UVTools), writeData = writeData, home = home,
 	toScreen = toScreen, getRay = getRay, mousePos = mousePos, W = W, planeHit = planeHit, rayTri = rayTri, shiftDown = shiftDown,
 }
 function ctx.get()
@@ -2030,17 +2021,17 @@ ctx.rayMesh, ctx.camera = rayMesh, camera
 function ctx.ctrlDown() return keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl) end
 local SCULPT = Sculpt.new(ctx)
 local PAINT = Paint.new(ctx)
-local TEX = TexPaint.new(ctx, PAINT)
+local TEX = require(script.TexPaint).new(ctx, PAINT)
 paintHooks.texImage = function(p) return TEX.imageFor(p) end
-local UVE = UVEditor.new(ctx)
+local UVE = require(script.UVEditor).new(ctx)
 ctx.plugin = plugin
 ctx.Sculpt, ctx.Paint, ctx.Font = Sculpt, Paint, Font
 function ctx.finishModal(cancel) finishModal(cancel) end
 function ctx.clock() return os.clock() end
 local TUT = Tutorial.new(ctx)
-local KC = KeyCapture.new(ctx)
-local QT = QuickTest.new(ctx)
-local SETUP = Setup.new(ctx)
+local KC = require(script.KeyCapture).new(ctx)
+local QT = require(script.QuickTest).new(ctx)
+local SETUP = require(script.Setup).new(ctx)
 SETUP.onMesh = function(ok)
 	local was = meshApiOK
 	meshApiOK = ok
@@ -3571,7 +3562,7 @@ local function toggleEdit()
 	local p = selectedPart()
 	-- a part up on the map: bring it down to the workshop first (Import)
 	-- the map's floor is never edited (it would become a huge mesh and leave the map without a floor)
-	if p and p:IsA("BasePart") and isFloor and not isRB(p) and isFloor(p) then
+	if p and p:IsA("BasePart") and EDIT.isFloor and not isRB(p) and EDIT.isFloor(p) then
 		setStatus(p.Name .. " stays as it is: ROBLEND doesn't edit the Baseplate or anything floor-sized (512 x 512 studs or more).")
 		return
 	end
@@ -3782,7 +3773,7 @@ local function modsChanged(p)
 end
 ctx.modTarget, ctx.modsChanged, ctx.modsOf, ctx.setMods, ctx.uvOf = modTarget, modsChanged, modsOf, setMods, uvOf
 function ctx.replaceEdited(m, val) bm = m lastWritten = val worldTris = nil end
-ModStack.install(api, ctx)
+require(script.ModStack).install(api, ctx)
 api.repeatLast = function() if editing and not modal then MOD.repeatLast() end end
 MOD.subdivSet = api.subdivSet
 api.similarList = function()
@@ -3813,7 +3804,7 @@ api.uvEditorState = function() return UVE end
 api.tutorial = function() TUT.toggle() end
 api.tutorialState = function() return TUT end
 api.quickTest = function() QT.toggle() end
-api.autoTest = function(only) task.spawn(function() local ok, err = pcall(AutoTest.run, ctx, api, only) if not ok then FAKE = nil AutoTest.running = false warn(NAME .. " auto-test stopped: " .. tostring(err)) end end) end
+api.autoTest = function(only) task.spawn(function() local AutoTest = require(script.AutoTest) local ok, err = pcall(AutoTest.run, ctx, api, only) if not ok then FAKE = nil AutoTest.running = false warn(NAME .. " auto-test stopped: " .. tostring(err)) end end) end
 -- the auto-test's hands: fake mouse / keys through the real handlers
 api.setFake = function(f) FAKE = f end
 api.inject = function(name, ...)
@@ -3862,7 +3853,7 @@ pluginAction("EditInRoblend", "Edit in ROBLEND", "Bring the parts / models selec
 pluginAction("PlaceInStudio", "Place in Studio", "Pick up the selected ROBLEND work and place it on your map.", function() api.exportSelected() end)
 api.keyCapture = function() return KC end
 -- Help > Run Self-Test: checks the features inside this real Studio and prints a report to Output
-api.selfTest = function() task.spawn(function() local ok, err = pcall(SelfTest.run, ctx, api) if not ok then SelfTest.running = false warn(NAME .. " self-test: " .. tostring(err)) end end) end
+api.selfTest = function() task.spawn(function() local SelfTest = require(script.SelfTest) local ok, err = pcall(SelfTest.run, ctx, api) if not ok then SelfTest.running = false warn(NAME .. " self-test: " .. tostring(err)) end end) end
 ctx.api = api
 -- Sculpt Mode (mode menu / Ctrl Tab)
 api.setPaintMode = function(m)
@@ -3973,6 +3964,7 @@ end
 -- Import: the things come down to the ROBLEND scene, centred on its floor, and the view frames them. Parts,
 -- meshes, unions, models and folders (groups) all come as they are; Tab on a part turns it into a ROBLEND mesh
 -- the map's floor stays on the map: the Baseplate, or anything floor-sized (512 x 512 studs or more), is never brought in
+local isFloor
 isFloor = function(x)
 	if x.Name == "Baseplate" then return true end
 	local ok, lo, hi = pcall(boxOf, { x })
@@ -3981,6 +3973,7 @@ isFloor = function(x)
 	return sz.X >= 512 and sz.Z >= 512
 end
 api.isFloor = function(x) return isFloor(x) end
+EDIT.isFloor = isFloor
 importSelected = function(list)
 	if not workshopOn then setStatus("The workshop is off (Edit > Workshop Under the Map), so things are edited where they are.") return end
 	if modal then return end
@@ -4456,25 +4449,25 @@ pcall(function() useStudio = plugin:GetSetting("RB_StudioView") == true end)
 -- the workshop is 10,000 studs down: Studio's camera must never be left there. Where it was up on the map is
 -- also kept in the plugin's settings (per place), so even closing Studio with ROBLEND open, a crash or
 -- Studio's own view mode can't strand it under the map - it's brought back the next time.
-local function camKey()
+function MOD.camKey()
 	local id = 0
 	pcall(function() id = game.PlaceId end)
 	return "RB_Cam_" .. tostring(id ~= 0 and id or "local")
 end
-local function underMap(cf) return cf and cf.Position.Y < WORKSHOP.Y / 2 end
-local function rememberCam(cf)
-	if not cf or underMap(cf) then return end
-	pcall(function() plugin:SetSetting(camKey(), { cf:GetComponents() }) end)
+function MOD.underMap(cf) return cf and cf.Position.Y < WORKSHOP.Y / 2 end
+function MOD.rememberCam(cf)
+	if not cf or MOD.underMap(cf) then return end
+	pcall(function() plugin:SetSetting(MOD.camKey(), { cf:GetComponents() }) end)
 end
 MOD.rescueCam = function()
 	local cam = workspace.CurrentCamera
-	if not (cam and underMap(cam.CFrame)) then return false end
+	if not (cam and MOD.underMap(cam.CFrame)) then return false end
 	local back
 	pcall(function()
-		local c = plugin:GetSetting(camKey())
+		local c = plugin:GetSetting(MOD.camKey())
 		if type(c) == "table" and #c == 12 then back = CFrame.new(table.unpack(c)) end
 	end)
-	if not back or underMap(back) then back = CFrame.lookAt(Vector3.new(0, 25, 40), Vector3.new(0, 0, 0)) end
+	if not back or MOD.underMap(back) then back = CFrame.lookAt(Vector3.new(0, 25, 40), Vector3.new(0, 0, 0)) end
 	pcall(function()
 		cam.CFrame = back
 		cam.Focus = back * CFrame.new(0, 0, -20)
@@ -4485,7 +4478,7 @@ local function saveStudioCam()
 	local cam = workspace.CurrentCamera
 	if cam then
 		MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus }
-		rememberCam(cam.CFrame)
+		MOD.rememberCam(cam.CFrame)
 	end
 end
 local function restoreStudioCam()
@@ -4541,7 +4534,7 @@ setUIOn = function(on)
 	ui:setOn(on)
 	pcall(function() btnMain:SetActive(on) end)
 	if on then
-		if not useStudio then saveStudioCam() else pcall(function() rememberCam(workspace.CurrentCamera.CFrame) end) end
+		if not useStudio then saveStudioCam() else pcall(function() MOD.rememberCam(workspace.CurrentCamera.CFrame) end) end
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1

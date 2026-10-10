@@ -41,8 +41,32 @@ for file, alias in MODULES:
 assert 'require(script.' not in main, 'a require the test bundle does not know: ' + main[main.index('require(script.'):][:60]
 editor = (rd('tests/mock.luau') + rd('tests/studio_mock.luau') + 'MOCK.t = 0\n' + ''.join(mod(alias, rd(f'src/{file}.lua')) for file, alias in MODULES)
           + ';(function()\n' + main + '\nend)()\n' + rd('tests/test_editor.luau'))  # own function: Main gets its own 200 locals
+# compile every source file the way Studio does (no optimisation, full debug info): that's where Luau's limit of
+# 200 locals in one function bites first. Main must also keep a few spare, so the next feature doesn't break it.
+def studio_compile():
+    lc = pathlib.Path(luau).with_name('luau-compile')
+    if not lc.exists():
+        print('--- studio compile: skipped (no luau-compile next to ' + luau + ')')
+        return 0
+    bad = 0
+    files = sorted((root / 'src').glob('*.lua'))
+    main_src = rd('src/Main.server.lua')
+    pad = ''.join(f'local __spare{i} = {i}\n' for i in range(5))
+    probe = root / 'tests/_spare_main.lua'
+    probe.write_text(main_src.replace('local NAME = "ROBLEND"\n', 'local NAME = "ROBLEND"\n' + pad, 1))
+    for f in files + [probe]:
+        r = subprocess.run([str(lc), '--null', '-O0', '-g2', str(f)], capture_output=True, text=True)
+        if 'Error' in r.stdout + r.stderr:
+            bad += 1
+            what = 'Main has fewer than 5 spare locals' if f == probe else f.name
+            print('STUDIO COMPILE FAIL ' + what + ': ' + (r.stdout + r.stderr).strip().splitlines()[0])
+    probe.unlink()
+    print(f'--- studio compile: {len(files)} files, {bad} failed')
+    return 1 if bad else 0
+
+
 if '--write-only' in sys.argv:
     (root / 'tests/_run_editor.luau').write_text(editor)
     sys.exit(0)
-rc = run('engine', engine) | run('editor', editor)
+rc = studio_compile() | run('engine', engine) | run('editor', editor)
 sys.exit(rc)
