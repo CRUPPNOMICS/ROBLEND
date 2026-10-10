@@ -1,4 +1,4 @@
-# ROBLEND 0.26.1
+# ROBLEND 0.26.2
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,8 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.26.2:** Studio's camera can't get stranded down in the workshop any more: where it was on the map is remembered (per place), and closing ROBLEND any way - the button, Back to Studio, Studio's own 3D view mode, closing Studio, or reopening the place after a crash - brings it back up.
 
 **0.26.1:** Plane lock, like Blender: while moving / scaling / rotating, Shift X / Y / Z locks that axis out so the selection slides flat on the other two (G Shift Y = across the ground at the same height, S Shift Y = wider and deeper, not taller). Works in Edit Mode and Object Mode.
 

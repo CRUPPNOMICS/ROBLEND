@@ -56,10 +56,13 @@ function CF.ToOrientation(t)
 	return x, y, z
 end
 local I = function() return cfNew(V3(), V3(1, 0, 0), V3(0, 1, 0), V3(0, 0, 1)) end
+function CF.GetComponents(c) return c.p.X, c.p.Y, c.p.Z, c.r.X, c.u.X, c.b.X, c.r.Y, c.u.Y, c.b.Y, c.r.Z, c.u.Z, c.b.Z end
 CFrame = {
 	identity = I(),
-	new = function(x, y, z)
+	new = function(x, y, z, ...)
 		if x == nil then return I() end
+		local m = { ... }
+		if #m == 9 then return cfNew(V3(x, y, z), V3(m[1], m[4], m[7]), V3(m[2], m[5], m[8]), V3(m[3], m[6], m[9])) end
 		local p = type(x) == "number" and V3(x, y, z) or x
 		local c = I()
 		c.p = p

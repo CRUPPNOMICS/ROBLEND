@@ -2271,6 +2271,22 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	for _, x in ipairs({ c, rock, m, crate }) do x.Parent = nil end
 	api.setWorkshop(false) beat()
 end)
+check("Studio's camera is never left down in the workshop: closing ROBLEND (any way) brings it back up (0.26.2)", function()
+	local cam = S.Workspace and S.Workspace.CurrentCamera or workspace.CurrentCamera
+	if gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+	local up = CFrame.lookAt(Vector3.new(30, 40, 50), Vector3.new(0, 0, 0))
+	cam.CFrame = up
+	MOCK.toolbarButton.Click:Fire() beat() beat()     -- open: remembers where it was
+	-- something drags Studio's camera into the workshop (Studio's own 3D view mode, F on a part down there...)
+	cam.CFrame = CFrame.new(0, -9990, 20)
+	MOCK.api.setStudioView(true) beat()
+	cam.CFrame = CFrame.new(0, -9990, 20)
+	MOCK.toolbarButton.Click:Fire() beat()              -- close
+	assert(cam.CFrame.Position.Y > 0, "back up on the map: " .. tostring(cam.CFrame.Position))
+	assert((cam.CFrame.Position - up.Position).Magnitude < 1e-3, "where it was before")
+	MOCK.api.setStudioView(false) beat()
+	if gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
+end)
 check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	gui = gui or S.CoreGui:FindFirstChild("ROBLEND_UI")
 	if not gui or gui.Enabled == false then MOCK.toolbarButton.Click:Fire() beat() beat() end

@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.26.1"
+local VERSION = "0.26.2"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -4431,9 +4431,40 @@ ui = UI.new(api, CoreGui)
 pcall(function() useStudio = plugin:GetSetting("RB_StudioView") == true end)
 
 -- Studio's own camera: saved when ROBLEND opens, held still while our 3D view covers it, put back on close
+-- the workshop is 10,000 studs down: Studio's camera must never be left there. Where it was up on the map is
+-- also kept in the plugin's settings (per place), so even closing Studio with ROBLEND open, a crash or
+-- Studio's own view mode can't strand it under the map - it's brought back the next time.
+local function camKey()
+	local id = 0
+	pcall(function() id = game.PlaceId end)
+	return "RB_Cam_" .. tostring(id ~= 0 and id or "local")
+end
+local function underMap(cf) return cf and cf.Position.Y < WORKSHOP.Y / 2 end
+local function rememberCam(cf)
+	if not cf or underMap(cf) then return end
+	pcall(function() plugin:SetSetting(camKey(), { cf:GetComponents() }) end)
+end
+MOD.rescueCam = function()
+	local cam = workspace.CurrentCamera
+	if not (cam and underMap(cam.CFrame)) then return false end
+	local back
+	pcall(function()
+		local c = plugin:GetSetting(camKey())
+		if type(c) == "table" and #c == 12 then back = CFrame.new(table.unpack(c)) end
+	end)
+	if not back or underMap(back) then back = CFrame.lookAt(Vector3.new(0, 25, 40), Vector3.new(0, 0, 0)) end
+	pcall(function()
+		cam.CFrame = back
+		cam.Focus = back * CFrame.new(0, 0, -20)
+	end)
+	return true
+end
 local function saveStudioCam()
 	local cam = workspace.CurrentCamera
-	if cam then MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus } end
+	if cam then
+		MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus }
+		rememberCam(cam.CFrame)
+	end
 end
 local function restoreStudioCam()
 	local cam, sc = workspace.CurrentCamera, MOD.savedCam
@@ -4488,7 +4519,7 @@ setUIOn = function(on)
 	ui:setOn(on)
 	pcall(function() btnMain:SetActive(on) end)
 	if on then
-		if not useStudio then saveStudioCam() end
+		if not useStudio then saveStudioCam() else pcall(function() rememberCam(workspace.CurrentCamera.CFrame) end) end
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1
@@ -4542,6 +4573,8 @@ setUIOn = function(on)
 		plugin:Deactivate()
 		restoreStudioCam()
 		MOD.savedCam = nil
+		-- (Studio's own 3D view mode drives Studio's camera down in the workshop: bring it back up)
+		MOD.rescueCam()
 		local n = 0
 		for q in pairs(scene) do if q.Parent and not isSaved(q) then n += 1 end end
 		if n > 0 then setStatus(("%d mesh%s not saved to Roblox yet - open ROBLEND and use File > Save All Meshes."):format(n, n == 1 and "" or "es")) end
@@ -4549,6 +4582,8 @@ setUIOn = function(on)
 	dirtyCage = true
 end
 btnMain.Click:Connect(function() setUIOn(not uiOn) end)
+-- Studio opened the place with its camera left down in the workshop (closed with ROBLEND open, a crash...): bring it up
+task.delay(1, function() if not uiOn then pcall(MOD.rescueCam) end end)
 -- Studio toolbar: Import (selected -> ROBLEND's workshop) and Export (back up to the map)
 pcall(function()
 	local bi = toolbar:CreateButton("RB_Import", "Edit the selected parts / models in ROBLEND", "", "Edit in ROBLEND")
@@ -4560,6 +4595,7 @@ pcall(function()
 end)
 plugin.Unloading:Connect(function()
 	pcall(function() if editing then exitEdit() end end)
+	pcall(function() if uiOn then restoreStudioCam() end MOD.rescueCam() end)
 	ui:destroy()
 	if view then view:destroy() end
 	cageFolder.Parent = nil
