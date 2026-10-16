@@ -5,7 +5,7 @@
 	Original: Copyright (C) Blender Authors. Luau conversion: Copyright (C) 2026 Cruppnomics (Giga_gad27).
 
 	ModStack.install(api, C): adds api.mods / modAdd / modSet / modToggle / modRemove / modMove / modApply /
-	subdivSet / setUV / setTexture. C = the shared context (Main.server.lua "ctx").
+	subdivSet / setUV / setTexture / lighten / lighterInfo / lighterApply / lighterRemove. C = the shared context (Main.server.lua "ctx").
 ]]
 local ModStack = {}
 
@@ -145,6 +145,71 @@ function ModStack.install(api, C)
 			local j = i + d
 			if list[i] and list[j] then list[i], list[j] = list[j], list[i] end
 		end)
+	end
+	-- MAKE LIGHTER (0.29.0, Dylan: "we need settings for this" - cut the triangle count fast). One Decimate
+	-- (Collapse) at the end of the stack, marked `lighter`, set so the mesh comes out at about `target` triangles.
+	-- It's a modifier, so it's a preview: Apply makes it real, Remove (or Ctrl Z) takes it away.
+	local function triCount(m)
+		local t = 0
+		for f in pairs(m.faces) do t += f.len - 2 end
+		return t
+	end
+	local function lighterIndex(list)
+		for i, m in ipairs(list) do if m.type == "decimate" and m.lighter then return i end end
+		return nil
+	end
+	api.lighterInfo = function()
+		local p = modTarget()
+		if not p then return nil end
+		local list = modsOf(p)
+		local i = lighterIndex(list)
+		if not i then return nil end
+		local m = list[i]
+		return { index = i, base = m.lightBase, target = m.lightTarget, ratio = m.ratio }
+	end
+	-- target: a triangle count (> 1) or a share of the current count (0..1)
+	api.lighten = function(target)
+		local p = modTarget()
+		if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
+		local list = modsOf(p)
+		local i = lighterIndex(list)
+		-- how many triangles there are BEFORE the lighter step (the mesh + every other modifier)
+		local others = {}
+		for k, m in ipairs(list) do if k ~= i then others[#others + 1] = m end end
+		local S = C.get()
+		local base = (S.editing and p == S.obj) and S.bm or loadFrom(p)
+		local ok, full = pcall(Mods.evaluate, base, others, C.modEnv and C.modEnv(p))
+		local n0 = triCount(ok and full or base)
+		if n0 <= 4 then setStatus("This mesh is already as light as it goes.") return end
+		local want = target
+		if want <= 1 then want = math.floor(n0 * want + 0.5) end
+		want = math.clamp(math.floor(want + 0.5), 4, n0)
+		local ratio = math.clamp(want / n0, 0.01, 1)
+		modEdit("make lighter", function(l2)
+			local idx = lighterIndex(l2)
+			if not idx then
+				local m = Mods.new("decimate")
+				m.name = "Make Lighter"
+				m.lighter = true
+				l2[#l2 + 1] = m
+				idx = #l2
+			end
+			local m = l2[idx]
+			m.mode, m.ratio, m.lightBase, m.lightTarget = "Collapse", ratio, n0, want
+			return ("Make lighter: %d -> about %d triangles (%d%%). It's a preview - Apply keeps it, Remove takes it off."):format(n0, want, math.floor(ratio * 100 + 0.5))
+		end)
+	end
+	api.lighterApply = function()
+		local p = modTarget()
+		if not p then return end
+		local i = lighterIndex(modsOf(p))
+		if i then api.modApply(i) end
+	end
+	api.lighterRemove = function()
+		local p = modTarget()
+		if not p then return end
+		local i = lighterIndex(modsOf(p))
+		if i then api.modRemove(i) setStatus("Back to the full mesh.") end
 	end
 	api.modApply = function(i)
 		local p = modTarget()

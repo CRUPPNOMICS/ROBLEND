@@ -363,10 +363,11 @@ function UI:buildTopBar()
 		table.insert(items, 1, { "About ROBLEND", "", function() self:openAbout() end })
 		table.insert(items, 2, { "Tutorial", "", function() api.tutorial() end })
 		table.insert(items, 3, { "Show Key Presses", "", function() api.toggleShowKeys() end })
-		table.insert(items, 4, { "Run Self-Test", "", function() api.selfTest() end })
-		table.insert(items, 5, { "Run Auto-Test (every feature, hands off)", "", function() api.autoTest() end })
-		table.insert(items, 6, { "Quick Test (check every feature)", "", function() api.quickTest() end })
-		table.insert(items, 7, "-")
+		table.insert(items, 4, { "Mouse Test (if the view won't move)", "", function() self:openMouseTest() end })
+		table.insert(items, 5, { "Run Self-Test", "", function() api.selfTest() end })
+		table.insert(items, 6, { "Run Auto-Test (every feature, hands off)", "", function() api.autoTest() end })
+		table.insert(items, 7, { "Quick Test (check every feature)", "", function() api.quickTest() end })
+		table.insert(items, 8, "-")
 		return items
 	end)
 	-- workspace tabs (Layout = Object Mode, Modeling = Edit Mode)
@@ -718,6 +719,14 @@ function UI:buildView()
 		if k[1] == "frame" then b.Activated:Connect(function() self:safe(function() api.frameAll() end) end)
 		else b.MouseButton1Down:Connect(function() self:startDrag(k[1] == "zoom" and "zoom" or "pan") end) end
 	end
+	-- Orbit Mode (0.28.1): left-drag turns the view while it's on (lit up blue)
+	local ob = make("TextButton", { Name = "RB_OrbitMode", LayoutOrder = 4, ZIndex = 3, Size = UDim2.fromOffset(28, 28), BackgroundColor3 = T.header, BackgroundTransparency = 0.3, BorderSizePixel = 0, AutoButtonColor = false, Text = "" }, nav)
+	corner(ob, 99)
+	icon(ob, "rotate").ZIndex = 3
+	ob:SetAttribute("rbTipRight", false)
+	self:tip(ob, "Orbit Mode", "Left-drag turns the view (Shift = slide, Ctrl = zoom). For a mouse or touchpad with no middle button. Click again or Esc to stop.", "")
+	ob.Activated:Connect(function() self:safe(function() api.setOrbitMode(not api.state().orbitMode) self:refresh(true) end) end)
+	self.orbitBtn = ob
 	-- N sidebar (Item), hidden by default like Blender
 	local sb = make("Frame", { Name = "Sidebar", ZIndex = 3, Visible = false, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -50, 0, 8), Size = UDim2.fromOffset(220, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = T.header, BackgroundTransparency = 0.05, BorderSizePixel = 0 }, ov)
 	corner(sb, 6)
@@ -831,6 +840,21 @@ function UI:buildProperties()
 end
 
 -- a number field like Blender's (label on the left, value box on the right). get(state) -> number or nil
+-- 0.29.0 triangle colours: green = light (under 2,000), amber = getting heavy (under 10,000), red = heavy
+-- (Roblox's limit is 20,000 triangles in one mesh)
+function UI.triColour(n)
+	n = tonumber(n)
+	if not n then return nil end
+	if n >= 10000 then return Color3.fromRGB(255, 110, 100) end
+	if n >= 2000 then return Color3.fromRGB(255, 196, 80) end
+	return Color3.fromRGB(120, 220, 140)
+end
+function UI.triLine(n)
+	local c = UI.triColour(n) or Color3.new(1, 1, 1)
+	local warn = (tonumber(n) or 0) >= 18000 and "  (near Roblox's 20,000 limit)" or ""
+	local hex = ("%02X%02X%02X"):format(math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+	return ('<font color="#%s">Triangles  %d%s</font>'):format(hex, n or 0, warn)
+end
 function UI:numField(parent, order, text, id, get, set, z)
 	local row = make("Frame", { LayoutOrder = order, ZIndex = z, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20) }, parent)
 	label(row, { ZIndex = z, Size = UDim2.new(0.38, -6, 1, 0), Text = text, TextXAlignment = Enum.TextXAlignment.Right })
@@ -1169,10 +1193,30 @@ function UI:buildPropContent()
 			for i, k in ipairs({ { "Vertices", st.v }, { "Edges", st.e }, { "Faces", st.f }, { "Triangles", st.t } }) do
 				local r = make("Frame", { LayoutOrder = i, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18) }, b)
 				label(r, { Size = UDim2.new(0.5, -6, 1, 0), Text = k[1], TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = T.textDim })
-				label(r, { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, 0, 1, 0), Text = tostring(k[2] or "-") })
+				-- (0.29.0: the triangle count in colour - green light, amber getting heavy, red near Roblox's limit)
+				local col = k[1] == "Triangles" and UI.triColour(k[2]) or nil
+				label(r, { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, 0, 1, 0), Text = tostring(k[2] or "-"), TextColor3 = col })
 			end
 			if s.mods and #s.mods > 0 and not s.editing then
 				label(b, { LayoutOrder = 9, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, TextColor3 = T.textDim, Text = "Counts include the modifiers." })
+			end
+			-- MAKE LIGHTER (0.29.0): aim for a triangle count; it's a Decimate (Collapse) preview until Apply
+			label(b, { LayoutOrder = 20, Size = UDim2.new(1, 0, 0, 18), Text = "  Make lighter", TextColor3 = T.text, TextXAlignment = Enum.TextXAlignment.Left })
+			local li = api.lighterInfo and api.lighterInfo() or nil
+			self:numField(b, 21, "Aim for", "p_lighter", function() return li and li.target or st.t end, function(v) api.lighten(v) end)
+			self:toggleRow(b, 22, "Quick", {
+				{ "1/2", false, function() api.lighten(0.5) end, "About half the triangles" },
+				{ "1/4", false, function() api.lighten(0.25) end, "About a quarter" },
+				{ "1/10", false, function() api.lighten(0.1) end, "About a tenth - for far-away or background parts" } })
+			if li then
+				label(b, { LayoutOrder = 23, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+					Text = ("Preview: %d -> about %d triangles. Apply keeps it; Remove goes back to the full mesh."):format(li.base or 0, li.target or 0) })
+				self:toggleRow(b, 24, "", {
+					{ "Apply", false, function() api.lighterApply() end, "Make it real (the mesh is changed)" },
+					{ "Remove", false, function() api.lighterRemove() end, "Back to the full mesh" } })
+			else
+				label(b, { LayoutOrder = 23, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+					Text = "Type how many triangles you want, or pick a quick size. Fewer triangles = less lag; the shape is kept as well as it can be. Roblox allows 20,000 per mesh." })
 			end
 			self:wideButton(b, 10, "Merge by Distance", function() api.tool("MergeDist") end)
 			self:wideButton(b, 11, "Flip Normals", function() api.tool("Flip") end)
@@ -1393,10 +1437,12 @@ function UI:viewMenu()
 	return {
 		{ "Toolbar", "T", function() self:toggleToolbar() end, check = self.toolbar },
 		{ "Sidebar", "N", function() self:toggleSidebar() end, check = self.sidebar },
+		{ "Transform Gizmo (arrows / rings on Move, Rotate, Scale)", "", function() if api.toggleGizmo then api.toggleGizmo() end end, check = api.gizmoOn and api.gizmoOn() == true },
 		"-",
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
 		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
 		{ "Frame All", "Home", function() api.frameAll() end },
+		{ "Orbit Mode (left-drag turns the view)", "", function() api.setOrbitMode(not api.state().orbitMode) end, check = api.state().orbitMode == true },
 		{ "Local View", "Numpad /", function() api.tool("LocalView") end },
 		{ "Perspective/Orthographic", "Numpad 5", function() api.toggleOrtho() end, check = api.state().viewName ~= nil and api.state().viewName:find("Ortho") ~= nil },
 		"-",
@@ -1496,6 +1542,15 @@ function UI:objectMenu()
 			for lv = 0, 4 do items[#items + 1] = { "Level " .. lv, "Ctrl " .. lv, function() api.subdivSet(lv) end } end
 			return items
 		end },
+		-- 0.29.0: fewer triangles, fast (a preview until Apply - Properties > Object Data > Mesh > Make lighter)
+		{ "Make Lighter", "", nil, sub = function() return {
+			{ "Half the Triangles", "", function() api.lighten(0.5) end },
+			{ "Quarter of the Triangles", "", function() api.lighten(0.25) end },
+			{ "A Tenth of the Triangles", "", function() api.lighten(0.1) end },
+			"-",
+			{ "Apply", "", function() api.lighterApply() end },
+			{ "Back to Full", "", function() api.lighterRemove() end },
+		} end },
 		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
@@ -2178,6 +2233,62 @@ function UI:openAbout()
 	self.catcher.Visible = true
 	return fr
 end
+-- Help > Mouse Test (0.28.1): a small panel, top left of the view, showing live what ROBLEND hears from the mouse.
+-- It doesn't block the view, so you can try turning / clicking while it's open. UI:refresh updates it.
+function UI:openMouseTest()
+	self:closeMenu()
+	if self.mouseTest and self.mouseTest.Parent then return self.mouseTest end
+	local fr = make("Frame", { Name = "RB_MouseTest", ZIndex = 40, Active = false, BackgroundColor3 = T.menuBack, BackgroundTransparency = 0.08, BorderSizePixel = 0,
+		Position = UDim2.fromOffset(60, 70), Size = UDim2.fromOffset(380, 0), AutomaticSize = Enum.AutomaticSize.Y }, self.gui)
+	corner(stroke(fr, T.menuOutline), 6)
+	vlist(fr, 4)
+	make("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, fr)
+	label(fr, { LayoutOrder = 1, ZIndex = 41, Size = UDim2.new(1, 0, 0, 18), Text = "Mouse Test", Font = FONT_B, TextSize = 14, TextColor3 = rgb(0xffd60a) })
+	self.mouseTestText = label(fr, { Name = "RB_MouseTestText", LayoutOrder = 2, ZIndex = 41, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true,
+		Text = "", TextSize = 12, TextColor3 = T.textMenu, TextXAlignment = Enum.TextXAlignment.Left })
+	label(fr, { LayoutOrder = 3, ZIndex = 41, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+		Text = "Hold the middle (or right) button over the view and move the mouse. If it won't turn, screenshot this panel and send it to us." })
+	local close = self:btn(fr, { LayoutOrder = 4, ZIndex = 41, Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = T.regular, Text = "Close" }, function() fr.Parent = nil self.mouseTest = nil end, "regular")
+	corner(close, 4)
+	self.mouseTest = fr
+	self:tickMouseTest()
+	return fr
+end
+-- a notice across the top of the 3D view (0.28.1: another plugin keeps taking the mouse). Clicks on it don't go
+-- through to the 3D view; each button closes it.
+function UI:showNotice(name, title, text, buttons)
+	self.notices = self.notices or {}
+	local was = self.notices[name]
+	if was and was.Parent then return was end
+	local fr = make("Frame", { Name = "RB_Notice_" .. name, ZIndex = 45, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 34),
+		Size = UDim2.fromOffset(480, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = rgb(0x4a3b0c), BorderSizePixel = 0 }, self.canvas)
+	corner(stroke(fr, rgb(0xffb020)), 6)
+	vlist(fr, 6)
+	make("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, fr)
+	label(fr, { LayoutOrder = 1, ZIndex = 46, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, Text = title, Font = FONT_B, TextSize = 14, TextColor3 = rgb(0xffd60a) })
+	label(fr, { LayoutOrder = 2, ZIndex = 46, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, Text = text, TextSize = 12, TextColor3 = rgb(0xf2e6c4) })
+	local row = make("Frame", { LayoutOrder = 3, ZIndex = 46, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24) }, fr)
+	hlist(row, 8)
+	local function close()
+		fr.Parent = nil
+		for i, f in ipairs(self.blockers) do if f == fr then table.remove(self.blockers, i) break end end
+	end
+	for i, b in ipairs(buttons or { { "Got it" } }) do
+		local bt = self:btn(row, { LayoutOrder = i, ZIndex = 47, Size = UDim2.fromOffset(#b[1] * 7 + 24, 24), BackgroundColor3 = i == 1 and rgb(0x7a5c10) or T.regular, Text = b[1] }, function()
+			close()
+			if b[2] then pcall(b[2]) end
+		end, "regular")
+		corner(bt, 4)
+	end
+	table.insert(self.blockers, fr)
+	self.notices[name] = fr
+	return fr
+end
+function UI:tickMouseTest()
+	if not (self.mouseTest and self.mouseTest.Parent and self.mouseTestText) then return end
+	local ok, txt = pcall(self.api.mouseInfo)
+	self.mouseTestText.Text = ok and tostring(txt) or ("(couldn't read the mouse: " .. tostring(txt) .. ")")
+end
 function UI:helpItems()
 	local items = {}
 	for _, k in ipairs({
@@ -2194,7 +2305,7 @@ function UI:helpItems()
 		{ "Lock an axis out (slide flat)", "Shift X  Shift Y  Shift Z" },
 		{ "Sculpt brushes", "X C I G S T P, Shift C" }, { "Vertex Paint: pick colour / fill", "S / Shift K" }, { "Brush size / strength", "F / Shift F, [ ]" }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
-		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
+		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Orbit Mode (no middle button)", "Orbit button / View menu, Esc" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },
 	}) do items[#items + 1] = { k[1], k[2], nil } end
 	return items
@@ -2264,6 +2375,7 @@ end
 
 function UI:refresh(force)
 	if not self.on and not force then return end
+	pcall(self.tickMouseTest, self)
 	local api = self.api
 	local s = api.state()
 	-- top bar tabs
@@ -2344,7 +2456,11 @@ function UI:refresh(force)
 		lines[#lines + 1] = ("Vertices  %d/%d"):format(st.vs, st.v)
 		lines[#lines + 1] = ("Edges  %d/%d"):format(st.es, st.e)
 		lines[#lines + 1] = ("Faces  %d/%d"):format(st.fs, st.f)
-		lines[#lines + 1] = ("Triangles  %d"):format(st.t)
+		lines[#lines + 1] = UI.triLine(st.t)
+	elseif s.meshInfo and s.meshInfo.t then
+		-- (0.29.0: the triangle count shows in Object Mode too - it's what Roblox will draw)
+		lines[#lines + 1] = ""
+		lines[#lines + 1] = UI.triLine(s.meshInfo.t)
 	end
 	self.info.Text = table.concat(lines, "\n")
 	self.info.Position = UDim2.fromOffset(self.toolbar and 56 or 12, 8)
@@ -2371,6 +2487,10 @@ function UI:refresh(force)
 	end
 	self.gizmo.Visible = not s.studioView
 	self.navFrame.Visible = not s.studioView
+	if self.orbitBtn then
+		self.orbitBtn.BackgroundColor3 = s.orbitMode and rgb(0x4772b3) or T.header
+		self.orbitBtn.BackgroundTransparency = s.orbitMode and 0 or 0.3
+	end
 	-- sidebar
 	self.sidebarFrame.Visible = self.sidebar
 	self.sbTitle.Text = s.editing and "Median:" or "Location:"

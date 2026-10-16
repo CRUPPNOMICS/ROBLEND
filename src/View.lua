@@ -51,8 +51,8 @@ function View.new(parent)
 		frame = vf, cam = cam, FieldOfView = 40, baseFov = 40, ortho = false,
 		focus = V3(0, 2, 0), dist = 30, yaw = math.rad(35), pitch = math.rad(26),
 		gridFolder = folder("Grid"), sceneFolder = folder("Scene"), cageFolder = folder("Cage"),
-		objects = {}, pools = {}, grid = { lines = {}, spacing = 0, cx = nil, cz = nil, thick = 0 },
-		CFrame = CFrame.new(),
+		objects = {}, pools = {}, pc = setmetatable({}, { __mode = "k" }), grid = { lines = {}, spacing = 0, cx = nil, cz = nil, thick = 0 },
+		CFrame = CFrame.new(), shift = V3(0, 0, 0),
 	}, View)
 	self:update()
 	return self
@@ -90,6 +90,11 @@ function View:contains(sp)
 	local size, off = self:size(), self:offset()
 	return sp.X >= off.X and sp.Y >= off.Y and sp.X <= off.X + size.X and sp.Y <= off.Y + size.Y
 end
+-- the same, seen from a given eye (the cage's: see View:beginCage)
+function View:pixelFrom(eye, wp)
+	local depth = math.max(0.05, (wp - eye):Dot(self.CFrame.LookVector))
+	return depth * 2 * math.tan(math.rad(self.FieldOfView) / 2) / self:size().Y
+end
 -- world size of one pixel at a point (keeps lines and dots the same size on screen)
 function View:pixel(wp)
 	local depth = math.max(0.05, -(self.CFrame:PointToObjectSpace(wp)).Z)
@@ -112,7 +117,18 @@ function View:update()
 		up = V3(-math.sin(self.yaw), 0, -math.cos(self.yaw)) * (self.pitch > 0 and 1 or -1)
 	end
 	self.CFrame = CFrame.lookAt(pos, self.focus, up)
-	self.cam.CFrame = self.CFrame
+	-- 0.28.1 (the shaky view): ROBLEND's workshop is 10,000 studs down, and numbers that far from 0 only keep about
+	-- 1/1000 of a stud of detail, so the camera (and the lines lifted a hair off the faces) jittered when zoomed in.
+	-- Everything inside the ViewportFrame is drawn moved by self.shift (the floor brought up to 0). Positions given
+	-- to and read from View (self.CFrame, setObject, line, dot, ray...) stay in the real world.
+	local want = V3(0, -(self.floorY or 0), 0)
+	if want ~= self.shift then
+		local d = want - self.shift
+		self.shift = want
+		for _, x in ipairs(self.frame:GetDescendants()) do if x:IsA("BasePart") then x.CFrame = x.CFrame + d end end
+	end
+	local fs = self.focus + self.shift
+	self.cam.CFrame = CFrame.lookAt(fs + dir * eye, fs, up)
 	self.cam.FieldOfView = self.FieldOfView
 	-- headlight from up and to the left of the eye, like Blender's studio light
 	local cf = self.CFrame
@@ -132,8 +148,32 @@ function View:pan(dx, dy)
 	self.focus = self.focus - cf.RightVector * (dx * u) + cf.UpVector * (dy * u)
 	self:update()
 end
+-- one wheel step zooms 15%; very far out it comes back in quicker (0.28.1)
+local function zoomFactor(dist, steps) return (steps > 0 and dist > 300) and 0.7 ^ steps or 0.85 ^ steps end
+-- the mouse wheel (0.28.1): zoom towards a point (what's under the mouse) - the camera and the pivot both move towards
+-- it, so it stays under the mouse and the view keeps its direction (Blender's Zoom to Mouse Position, Studio's wheel)
+function View:zoomAt(steps, target)
+	if not target then return self:zoom(steps) end
+	local f = zoomFactor(self.dist, steps)
+	if self.dist * f > 20000 then f = 20000 / self.dist end
+	if math.abs(f - 1) < 1e-9 then return end
+	local nd = self.dist * f
+	if nd >= 0.3 then
+		self.focus = target + (self.focus - target) * f
+		self.dist = nd
+	else
+		-- right up against the pivot: keep it just ahead of the camera and carry on towards the target
+		local pos = self.CFrame.Position
+		local back = pos - self.focus
+		if back.Magnitude < 1e-9 then return self:zoom(steps) end
+		local k = back.Magnitude / self.dist
+		self.dist = 0.3
+		self.focus = (target + (pos - target) * f) - back.Unit * (k * 0.3)
+	end
+	self:update()
+end
 function View:zoom(steps)
-	local nd = self.dist * (0.85 ^ steps)
+	local nd = self.dist * zoomFactor(self.dist, steps)
 	if steps > 0 and nd < 1 then
 		-- already right up close: carry on forward instead of creeping towards the pivot and stopping there
 		-- (zooming in would otherwise get "stuck" a stud away from the point you're turning round)
@@ -197,7 +237,7 @@ function View:updateGrid()
 			g.lines[i] = p
 		end
 		p.Size = alongX and V3(len, w, w) or V3(w, w, len)
-		p.CFrame = CFrame.new(pos)
+		p.CFrame = CFrame.new(pos + self.shift)
 		p.Color = col
 		p.Transparency = trans
 	end
@@ -232,7 +272,7 @@ function View:setObject(key, part, cf, look)
 	local old = self.objects[key]
 	if old and old ~= part then self:drop(old) end
 	part.Anchored = true
-	part.CFrame = cf
+	part.CFrame = cf + self.shift
 	if look then
 		part.Color = look.Color or part.Color
 		part.Material = look.Material or part.Material
@@ -242,7 +282,7 @@ function View:setObject(key, part, cf, look)
 	part.Parent = self.sceneFolder
 	self.objects[key] = part
 end
-function View:moveObject(key, cf) local p = self.objects[key] if p then p.CFrame = cf end end
+function View:moveObject(key, cf) local p = self.objects[key] if p then p.CFrame = cf + self.shift end end
 function View:styleObject(key, transparency) local p = self.objects[key] if p then p.Transparency = transparency end end
 function View:removeObject(key)
 	local p = self.objects[key]
@@ -270,7 +310,33 @@ local function get(self, kind)
 	if x.Parent ~= self.cageFolder then x.Parent = self.cageFolder end
 	return x
 end
-function View:beginCage() for _, p in pairs(self.pools) do p.n = 0 end end
+-- 0.28.1 (speed): the cage is drawn for the camera as it was when the drawing started (cageEye), not redrawn on
+-- every camera move - lines keep their width and their lift off the faces until the view has moved enough
+-- (View:cageStale) for it to show. Turning the view used to re-place every line, every frame.
+function View:beginCage()
+	for _, p in pairs(self.pools) do p.n = 0 end
+	self.cageEye, self.cageEyeDist, self.cageOrtho = self.CFrame.Position, (self.CFrame.Position - self.focus).Magnitude, self.ortho
+end
+-- has the view moved far enough since the cage was drawn to need a new one? (eye moved over ~12% of its
+-- distance from the pivot: about 7 degrees of turning, or a zoom / slide of that much)
+function View:cageStale()
+	local e0 = self.cageEye
+	if not e0 or self.cageOrtho ~= self.ortho then return true end
+	local eye = self.CFrame.Position
+	local d = (eye - self.focus).Magnitude
+	local d0 = self.cageEyeDist or d
+	if d0 <= 1e-6 or d / d0 > 1.25 or d / d0 < 0.8 then return true end
+	return (eye - e0).Magnitude > 0.12 * d
+end
+-- set a cage part's look only where it changed (each property write costs; most lines stay the same)
+local function setPart(self, x, size, cf, col)
+	local c = self.pc[x]
+	if not c then c = {} self.pc[x] = c end
+	if c.s ~= size then x.Size = size c.s = size end
+	if c.c ~= cf then x.CFrame = cf c.c = cf end
+	if c.k ~= col then x.Color = col c.k = col end
+	if not c.t then x.Transparency = 0 c.t = true end
+end
 function View:endCage()
 	for _, p in pairs(self.pools) do
 		for i = p.n + 1, #p.items do
@@ -284,29 +350,24 @@ function View:line(a, b, col, px)
 	local len = d.Magnitude
 	if len < 1e-5 then return end
 	local mid = (a + b) / 2
-	local eye = self.CFrame.Position
+	local eye = self.cageEye or self.CFrame.Position
 	local toEye = eye - mid
-	local pix = self:pixel(mid)
+	local pix = self:pixelFrom(eye, mid)
 	local lift = toEye.Magnitude > 1e-6 and toEye.Unit * (pix * 2.5) or V3()
 	local x = get(self, "line")
 	local w = pix * (px or 1.2)
 	local up = math.abs(d.Unit.Y) > 0.99 and V3(1, 0, 0) or V3(0, 1, 0)
-	x.Size = V3(w, w, len + w)
-	x.CFrame = CFrame.lookAt(mid + lift, mid + lift + d, up)
-	x.Color = col
-	x.Transparency = 0
+	local m = mid + self.shift + lift
+	setPart(self, x, V3(w, w, len + w), CFrame.lookAt(m, m + d, up), col)
 end
 function View:dot(p, col, px)
-	local eye = self.CFrame.Position
+	local eye = self.cageEye or self.CFrame.Position
 	local toEye = eye - p
-	local pix = self:pixel(p)
+	local pix = self:pixelFrom(eye, p)
 	local lift = toEye.Magnitude > 1e-6 and toEye.Unit * (pix * 3) or V3()
 	local x = get(self, "dot")
 	local s = pix * (px or 6)
-	x.Size = V3(s, s, s)
-	x.CFrame = CFrame.new(p + lift)
-	x.Color = col
-	x.Transparency = 0
+	setPart(self, x, V3(s, s, s), CFrame.new(p + self.shift + lift), col)
 end
 
 function View:destroy() self.frame.Parent = nil end

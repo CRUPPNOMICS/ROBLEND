@@ -41,6 +41,7 @@ Click the **ROBLEND** button in the Plugins tab. A Blender-style window opens ov
 | 3D view header | Mode dropdown; View, Select, Add and Object / Mesh / Vertex / Edge / Face menus; X-Ray; Wireframe and Solid. |
 | Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
 | Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
+| Transform gizmo | With Move, Rotate, Scale or Transform picked in the tool strip, coloured arrows, rings and boxes sit on the selection (Object and Edit Mode). Drag an arrow = move along that axis, a ring = turn round it, a box = stretch along it, a little square = flat on that plane, the white ring = free / round the view. Let go = done; type a number, Ctrl to snap, Esc to cancel. View > Transform Gizmo turns it off. |
 | Outliner | Every ROBLEND mesh in the place. Click a row to select it; the eye hides or shows it. |
 | Properties | Object tab: name, location, rotation, size, collision. Modifiers tab (wrench): the modifier stack. Data tab: mesh counts. Material tab: colour and material. Output tab: bake and export. |
 | Status bar | Mouse hints and the last message. |
@@ -319,6 +320,8 @@ The Help menu has three ways to test ROBLEND in your own Studio, each printing i
 - **Run Self-Test**: about 20 checks of the mesh engine (`ROBLEND TEST` lines).
 - **Run Auto-Test**: about 100 features, done by a pretend mouse and keyboard through the same controls you use, then checked (`ROBLEND AUTO` lines). Hands off for about 30 seconds; it finishes with a painted block. Nothing is uploaded and your own parts aren't touched.
 - **Quick Test**: a card for each feature that sets it up, says what to press and what should happen, with Works / Broken / Skip buttons (`ROBLEND CHECK` lines).
+
+**The view won't turn?** Open **Help > Mouse Test**: it shows live what ROBLEND hears from your mouse (buttons, movement, whether another plugin has taken the mouse, frame rate). Hold the middle button over the view and move; if it still won't turn, a screenshot of that panel tells us why. Other tool plugins can take the mouse away from ROBLEND (Studio gives it to one plugin at a time): since 0.28.1 the view still turns, and a notice across the top of the view (and Output) says so once; if clicks feel odd, turn those plugins off in Plugins > Manage Plugins while you use ROBLEND. You can also turn the view with Numpad 4 / 6 / 8 / 2, by dragging the axis ball (top right), or with **Orbit Mode** (the orbit button under the zoom / hand buttons, or View > Orbit Mode): while it's on, a left-drag turns the view, Shift + drag slides it, Ctrl + drag zooms; Esc turns it off.
 
 ## What's in it
 

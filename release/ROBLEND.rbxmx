@@ -1,4 +1,4 @@
-<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0025"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0026"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - a free, open-source mesh editor for Roblox Studio
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Mesh engine converted from Blender's BMesh
@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.28.0"
+local VERSION = "0.30.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -32,6 +32,7 @@ local Convert = require(script.Convert)
 local Boolean = require(script.Boolean)
 local Tutorial = require(script.Tutorial)
 local Mods = require(script.Modifiers)
+local Gizmo = require(script.Gizmo)   -- 0.30.0: the Move / Rotate / Scale gizmo
 
 local Selection = game:GetService("Selection")
 local UIS = game:GetService("UserInputService")
@@ -724,6 +725,75 @@ local function cageCost()
 	if mode == "vert" and bm.nv < 6000 then n += bm.nv elseif mode == "face" and bm.nf < 6000 then n += bm.nf end
 	return n
 end
+-- 0.28.1 (speed): which parts of the edit cage can be seen from the camera. Lines and dots on the back of the
+-- mesh (both faces turned away) and far off screen aren't drawn: the mesh hides the back ones anyway, and every one
+-- is a part to place. X-ray / wireframe (where you see through the mesh) and Studio's view still draw everything.
+-- Returns nil when everything should be drawn.
+function EDIT.cageSeen()
+	if not (ownView() and view and bm) or xray or shading == "wire" then return nil end
+	local eye = view.cageEye or view.CFrame.Position
+	local size, off = view:size(), view:offset()
+	local mx, my = size.X * 0.25, size.Y * 0.25
+	local wp, code, faceOK = {}, {}, {}
+	-- where each point is, and which side of the screen (off by more than a quarter screen) it's on
+	for v in pairs(bm.verts) do
+		local w = W(v.co)
+		wp[v] = w
+		local sp = view:WorldToViewportPoint(w)
+		local c = 0
+		if sp.Z <= 0 then c = 16
+		else
+			if sp.X < off.X - mx then c += 1 elseif sp.X > off.X + size.X + mx then c += 2 end
+			if sp.Y < off.Y - my then c += 4 elseif sp.Y > off.Y + size.Y + my then c += 8 end
+		end
+		code[v] = c
+	end
+	-- faces turned towards the camera (a little past side-on counts, so turning a bit doesn't open gaps)
+	local rot = origin.Rotation
+	for f in pairs(bm.faces) do
+		local n, c, k = V3(), V3(), 0
+		local ls = BMesh.faceLoops(f)
+		for i, l in ipairs(ls) do
+			local a, b = l.v.co, ls[i % #ls + 1].v.co
+			n += V3((a.Y - b.Y) * (a.Z + b.Z), (a.Z - b.Z) * (a.X + b.X), (a.X - b.X) * (a.Y + b.Y))
+			c += wp[l.v]
+			k += 1
+		end
+		local nw = rot * n
+		if nw.Magnitude < 1e-12 or k == 0 then faceOK[f] = true
+		else
+			local toEye = eye - c / k
+			faceOK[f] = nw:Dot(toEye) > -0.15 * nw.Magnitude * toEye.Magnitude
+		end
+	end
+	local function onScreen2(a, b) return bit32.band(code[a], code[b]) == 0 end
+	local seen = { wp = wp }
+	function seen.edge(e)
+		if not onScreen2(e.v1, e.v2) then return false end
+		local fs = BMesh.edgeFaces(e)
+		if #fs == 0 then return true end
+		for _, f in ipairs(fs) do if faceOK[f] then return true end end
+		return false
+	end
+	function seen.vert(v)
+		if code[v] ~= 0 then return false end
+		-- any face round the point turned to the camera (or a loose point / edge)
+		local es = BMesh.vertEdges(v)
+		if #es == 0 then return true end
+		for _, e in ipairs(es) do
+			local fs = BMesh.edgeFaces(e)
+			if #fs == 0 then return true end
+			for _, f in ipairs(fs) do if faceOK[f] then return true end end
+		end
+		return false
+	end
+	function seen.face(f)
+		if not faceOK[f] then return false end
+		for _, l in ipairs(BMesh.faceLoops(f)) do if code[l.v] == 0 then return true end end
+		return false
+	end
+	return seen
+end
 local lastCageDraw = 0
 local function drawCage()
 	lastCageDraw = os.clock()
@@ -735,21 +805,24 @@ local function drawCage()
 		and cageCost() > CAGE_BIG
 	if editing and bm and not paintMode and not light then
 		local many = bm.ne > 6000
+		local seen = EDIT.cageSeen()
+		local wp = seen and seen.wp
+		local function Wv(v) return wp and wp[v] or W(v.co) end
 		for e in pairs(bm.edges) do
 			local on = e.sel
-			if (on or not many) and not e.hide then
+			if (on or not many) and not e.hide and (not seen or seen.edge(e)) then
 				-- Blender's theme: seam red, sharp cyan, crease magenta
 				local col = (hover == e) and ACT_COL or (on and SEL_COL or (e.seam and SEAM_COL or e.sharp and SHARP_COL or e.crease and CREASE_COL or WIRE_COL))
-				line(W(e.v1.co), W(e.v2.co), col, (mode == "edge" and (on or hover == e)) and 2.2 or 1)
+				line(Wv(e.v1), Wv(e.v2), col, (mode == "edge" and (on or hover == e)) and 2.2 or 1)
 			end
 		end
 		if mode == "vert" and bm.nv < 6000 then
 			for v in pairs(bm.verts) do
-				if not v.hide then dot(W(v.co), (hover == v) and ACT_COL or (v.sel and SEL_COL or WIRE_COL), (v.sel or hover == v) and 1.2 or 0.8) end
+				if not v.hide and (not seen or seen.vert(v)) then dot(Wv(v), (hover == v) and ACT_COL or (v.sel and SEL_COL or WIRE_COL), (v.sel or hover == v) and 1.2 or 0.8) end
 			end
 		elseif mode == "face" and bm.nf < 6000 then
 			for f in pairs(bm.faces) do
-				if not f.hide then dot(W(BMesh.faceCenter(f)), (hover == f) and ACT_COL or (f.sel and SEL_COL or WIRE_COL), 0.7) end
+				if not f.hide and (not seen or seen.face(f)) then dot(W(BMesh.faceCenter(f)), (hover == f) and ACT_COL or (f.sel and SEL_COL or WIRE_COL), 0.7) end
 			end
 		end
 		-- loop cut preview
@@ -1265,8 +1338,10 @@ local function applyObjTransform()
 		local a0 = math.atan2(M.m0.Y - M.cs.Y, M.m0.X - M.cs.X)
 		local a1 = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
 		local ang = num and math.rad(num) or -(a1 - a0)
-		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
 		local ax = axisW or planeW or -cam.CFrame.LookVector
+		-- 0.30.0: an axis pointing away from you turns the other way on screen - flip so it follows the mouse (Blender)
+		if not num and ax:Dot(cam.CFrame.LookVector) > 0 then ang = -ang end
+		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
 		local rot = CFrame.fromAxisAngle(ax, ang)
 		for p, o in pairs(M.orig) do p.CFrame = CFrame.new(M.cw) * rot * CFrame.new(-M.cw) * o.cf end
 		M.info = ("Rot %.1f"):format(math.deg(ang))
@@ -1398,6 +1473,8 @@ local function applyTransform()
 		local a0 = math.atan2(M.m0.Y - M.cs.Y, M.m0.X - M.cs.X)
 		local a1 = math.atan2(mp.Y - M.cs.Y, mp.X - M.cs.X)
 		local ang = num and math.rad(num) or -(a1 - a0)
+		-- 0.30.0: follow the mouse round the ring whichever way the axis points (Blender)
+		if not num and (axisW or planeW) and (axisW or planeW):Dot(camera().CFrame.LookVector) > 0 then ang = -ang end
 		if snap and not num then ang = math.rad(math.floor(math.deg(ang) / 15 + 0.5) * 15) end
 		local axL = axisL or planeL or origin:VectorToObjectSpace(-camera().CFrame.LookVector).Unit
 		local rot = CFrame.fromAxisAngle(axL, ang)
@@ -2529,6 +2606,37 @@ local function modelingTools()
 		local n = camera().CFrame.LookVector
 		return planeHit(ray, CURSOR, n) or CURSOR, false
 	end
+	-- 0.28.1: what the mouse wheel zooms towards - the ROBLEND mesh under the mouse, else the floor, else nil (zoom on
+	-- the pivot as before). Zooming used to always head for the pivot; when the pivot ended up just in front of the
+	-- camera (in empty space) every scroll only crept half a stud forward - "I can't zoom back in".
+	function MOD.zoomTarget(mp)
+		if not view then return nil end
+		local ray = view:ray(mp)
+		local best
+		if editing and bm then best = rayMesh(ray.Origin, ray.Direction) end
+		for p, r in pairs(scene) do
+			if r.shown and r.bm and not (editing and p == obj) then
+				local o = originOf(p)
+				for _, tr in ipairs(Display.triangles(r.bm)) do
+					local hit = rayTri(ray.Origin, ray.Direction, o * tr[1], o * tr[2], o * tr[3])
+					if hit and hit > 0 and (not best or hit < best) then best = hit end
+				end
+			end
+		end
+		if best then return ray.Origin + ray.Direction * best end
+		-- the floor (the workshop's floor is far under the map: view.floorY)
+		local fy = view.floorY or 0
+		if ray.Direction.Y < -1e-3 then
+			local d = (fy - ray.Origin.Y) / ray.Direction.Y
+			if d > 0 then
+				-- far off towards the horizon: zoom at the pivot's depth instead (a far point would throw the view
+				-- sideways), unless the pivot is right in front of the camera - then the floor is the way out
+				if d > view.dist * 4 and view.dist >= 1 then return ray.Origin + ray.Direction * view.dist end
+				return ray.Origin + ray.Direction * d
+			end
+		end
+		return nil
+	end
 	function MOD.placeCursor(mp)
 		CURSOR = surfacePoint(mp)
 		dirtyCage = true
@@ -2769,6 +2877,8 @@ local function modelingTools()
 	function MOD.press(mp, shift, ctrl)
 		local t = MOD.effectiveTool()
 		if t == "select" then return false end
+		-- 0.30.0: a press on the transform gizmo (Move / Rotate / Scale / Transform tools)
+		if MOD.gizmoPress and MOD.gizmoPress(mp) then return true end
 		if t == "cursor" then MOD.pendingCursor = true return true end
 		if t == "measure" then
 			local p = snapPoint(mp)
@@ -3577,6 +3687,72 @@ local function modelingTools()
 end
 local MOD = modelingTools()
 
+-- ===== 0.30.0 TRANSFORM GIZMO (a Discord user: "how do I use gizmos in ROBLEND - stuff like this [Blender's arrows]") =====
+-- With the Move, Rotate, Scale or Transform tool picked (the tool strip, left), coloured arrows / rings / boxes sit
+-- on the selection in ROBLEND's view. Drag one = G / R / S locked to that axis (a square = flat on that plane, the
+-- white ring = free / round the view), confirmed when you let go. Typing a number, Ctrl to snap, Esc all still work.
+-- View > Transform Gizmo turns it off.
+MOD.gizmoOn = true
+local GIZ_KIND = { move = "move", rotate = "rotate", scale = "scale", transform = "transform" }
+function MOD.gizmoCenter()
+	if editing then
+		if not bm then return nil end
+		local vs = selectedVertsList()
+		if #vs == 0 then return nil end
+		if EDIT.pivot == "cursor" then return CURSOR end
+		return W(centerOf(vs))
+	end
+	local c, n, seen = V3(), 0, {}
+	for _, x in ipairs(Selection:Get()) do
+		local list = x:IsA("BasePart") and { x } or ((x:IsA("Model") or x:IsA("Folder")) and x:GetDescendants() or {})
+		for _, p in ipairs(list) do
+			if p:IsA("BasePart") and not seen[p] then seen[p] = true c += p.CFrame.Position n += 1 end
+		end
+	end
+	return n > 0 and c / n or nil
+end
+function MOD.gizmoTick()
+	local g = MOD.giz
+	if not g then return end
+	local kind = MOD.gizmoOn and ownView() and not modal and not paintMode and GIZ_KIND[MOD.effectiveTool()] or nil
+	if kind and (MOD.gizDirty or not MOD.gizC) then MOD.gizDirty = false MOD.gizC = MOD.gizmoCenter() end
+	local c = kind and MOD.gizC
+	if not c then
+		MOD.gizHs, MOD.gizKey, MOD.gizHover, MOD.gizHoverSig = nil, nil, nil, nil
+		g:hide()
+		return
+	end
+	local key = kind .. "|" .. tostring(c) .. "|" .. tostring(view.CFrame) .. "|" .. tostring(view:size()) .. "|" .. tostring(MOD.gizHoverSig)
+	if key == MOD.gizKey then return end
+	MOD.gizKey = key
+	MOD.gizHs = Gizmo.layout(kind, c, view.CFrame, function(wp) local sp, vis = toScreen(wp) return sp, vis end, function(wp) return view:pixel(wp) end)
+	g:draw(MOD.gizHs, MOD.gizHover)
+end
+function MOD.gizmoHover(mp)
+	local hs = MOD.gizHs
+	local h = hs and not modal and not (uiOn and ui:overUI(mp)) and Gizmo.hit(hs, mp) or nil
+	local sig = h and (h.op .. (h.axis or "") .. (h.plane or "") .. h.shape) or nil
+	if sig ~= MOD.gizHoverSig then MOD.gizHover, MOD.gizHoverSig = h, sig end
+	return h ~= nil
+end
+-- a press on a handle: the tool starts, locked like the handle says; letting go confirms it
+function MOD.gizmoPress(mp)
+	local hs = MOD.gizHs
+	if not hs or modal then return false end
+	local h = Gizmo.hit(hs, mp)
+	if not h then return false end
+	if editing then
+		startTransform(h.op, { axis = h.axis, releaseConfirm = true })
+		if modal and h.plane then modal.plane = h.plane end
+	else
+		startObjTransform(h.op)
+		if modal then modal.axis, modal.plane, modal.releaseConfirm = h.axis, h.plane, true end
+	end
+	MOD.gizHover, MOD.gizHoverSig = nil, nil
+	return modal ~= nil
+end
+pcall(function() local v = plugin:GetSetting("RB_Gizmo") if v == false then MOD.gizmoOn = false end end)
+
 local function toggleXray() xray = not xray worldTris = nil dirtyCage = true setStatus("X-ray " .. (xray and "on" or "off")) end
 local function toggleEdit()
 	if editing then exitEdit() return end
@@ -3704,9 +3880,17 @@ for name, fn in pairs(MOD.ops) do
 end
 
 local api = { version = VERSION, logoImage = logoImage }
+-- 0.30.0: View > Transform Gizmo
+api.gizmoOn = function() return MOD.gizmoOn end
+api.gizmoHandles = function() return MOD.gizHs end   -- (for the tests)
+api.toggleGizmo = function()
+	MOD.gizmoOn = not MOD.gizmoOn
+	pcall(function() plugin:SetSetting("RB_Gizmo", MOD.gizmoOn) end)
+	setStatus(MOD.gizmoOn and "Transform gizmo on: pick Move / Rotate / Scale (tool strip, left) and drag an arrow, ring or box." or "Transform gizmo off.")
+end
 local setUIOn, setStudioView
 function api.state()
-	local st = { editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
+	local st = { orbitMode = MOD.orbitMode == true, editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -4358,7 +4542,7 @@ api.navDrag = function(kind, dx, dy)
 	if kind == "orbit" then view:orbit(dx, dy) view.viewName = nil
 	elseif kind == "pan" then view:pan(dx, dy)
 	else view:zoom(-dy / 30) end
-	dirtyCage = true
+	-- (0.28.1: no forced cage redraw - the Heartbeat redraws it once the view has moved enough: View:cageStale)
 end
 api.viewAxis = function(name)
 	if not view then return end
@@ -4540,6 +4724,35 @@ setStudioView = function(b)
 	dirtyCage = true
 	setStatus(b and "Using Studio's 3D view (Edit > Use Studio's 3D View to switch back)." or "Using the ROBLEND 3D view.")
 end
+function MOD.resetView()
+	if not view then return end
+	view.ortho, view.autoOrtho, view.viewName = false, false, nil
+	view.yaw, view.pitch = math.rad(35), math.rad(26)
+	local any = false
+	for _, r in pairs(scene) do if r.shown then any = true break end end
+	if any then frameAll() else view.focus, view.dist = home(), 30 view:update() end
+	dirtyCage = true
+end
+-- Orbit mode (0.28.1, Dylan): a left-drag turns the view (Shift = slide, Ctrl = zoom), for a mouse or touchpad with
+-- no middle button or anyone new to Blender's controls. The button under the zoom / hand buttons, View > Orbit Mode,
+-- or Esc to stop. Remembered between sessions.
+pcall(function() MOD.orbitMode = plugin:GetSetting("RB_OrbitMode") == true end)
+api.setOrbitMode = function(b)
+	MOD.orbitMode = b == true
+	pcall(function() plugin:SetSetting("RB_OrbitMode", MOD.orbitMode) end)
+	if navDrag and navDrag.lmb then navDrag = nil end
+	setStatus(MOD.orbitMode and "ORBIT MODE: left-drag turns the view, Shift + drag slides it, Ctrl + drag zooms. Esc or the orbit button = off." or "Orbit mode off: left-click selects again.")
+end
+-- start a left-drag view move in orbit mode (from the plugin mouse or UserInputService, whichever comes first)
+function MOD.orbitStart(mp)
+	if not (MOD.orbitMode and uiOn and ownView() and not modal and not paintMode) then return false end
+	if not ui:inCanvas(mp) then return false end
+	if navDrag and navDrag.lmb then return true end
+	local shift = shiftDown()
+	local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
+	navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0, lmb = true, t0 = os.clock() }
+	return true
+end
 setUIOn = function(on)
 	if on and placing then finishPlacing("place") end
 	-- Studio's own tool (Select / Move / Scale / Rotate): remembered on open, put back on close, so Studio's
@@ -4560,6 +4773,7 @@ setUIOn = function(on)
 		if modal then pcall(finishModal, true) end
 		if editing then exitEdit() end
 	end
+	local reopened = on and not uiOn and view ~= nil
 	uiOn = on
 	ui:setOn(on)
 	pcall(function() btnMain:SetActive(on) end)
@@ -4568,6 +4782,7 @@ setUIOn = function(on)
 		if not view then
 			view = View.new(ui.canvas)
 			view.frame.ZIndex = 1
+			MOD.giz = Gizmo.new(ui.canvas)   -- 0.30.0
 			view.floorY = home().Y
 			view.focus = CURSOR
 			view:update()
@@ -4578,6 +4793,9 @@ setUIOn = function(on)
 			if had then syncScene() frameAll() end
 		end
 		sceneScan()
+		-- 0.28.1 (Dylan): every time ROBLEND opens, the view starts from the normal starting angle, framing what's in
+		-- the workshop (the middle of the workshop when it's empty) - not wherever it was left
+		if reopened then pcall(MOD.resetView) end
 		for q in pairs(scene) do if not (editing and q == obj) then fixUnsaved(q) end end
 		view.frame.Visible = not useStudio
 		if ownView() then plugin:Activate(true) end
@@ -4771,6 +4989,7 @@ end
 
 hook("Button1Down", mouse.Button1Down, function()
 	if placing then finishPlacing("place") return end
+	if MOD.orbitMode and not ui:overUI(mousePos()) and MOD.orbitStart(mousePos()) then return end
 	-- a left click always ends a view drag whose button-up went missing
 	if navDrag then navDrag = nil end
 	local mp = mousePos()
@@ -4805,6 +5024,7 @@ hook("Button1Down", mouse.Button1Down, function()
 	down = mp
 end)
 hook("Button1Up", mouse.Button1Up, function()
+	if navDrag and navDrag.lmb then navDrag = nil if uiOn then ui:mouseUp() end return end
 	-- a row dragged out of Import from Studio and let go over the view
 	if uiOn and ui.importDrop and ui.importDrop() then return end
 	if uiOn then ui:mouseUp() end
@@ -4912,14 +5132,16 @@ local lastWheel = { t = -1, dir = 0, src = "" }
 function MOD.wheelFrom(src, dir)
 	local now = os.clock()
 	if lastWheel.src ~= src and lastWheel.dir == dir and now - lastWheel.t < 0.06 then lastWheel.t = -1 return false end
+	if MOD.mt then MOD.mt.wheelSrc = src end
 	lastWheel.t, lastWheel.dir, lastWheel.src = now, dir, src
 	return true
 end
 local function wheel(steps)
+	if MOD.mt then MOD.mt.wheelT = os.clock() end
 	if (editing or modal) and MOD.wheel(steps) then return end
 	if not ownView() or ui.menuOpen or not ui:inCanvas(mousePos()) then return end
-	view:zoom(steps)
-	dirtyCage = true
+	local ok, target = pcall(MOD.zoomTarget, mousePos())
+	view:zoomAt(steps, ok and target or nil)
 end
 pcall(function()
 	hook("WheelForward", mouse.WheelForward, function() if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
@@ -4931,7 +5153,7 @@ end)
 function MOD.navAlive()
 	local nd = navDrag
 	if not nd then return false end
-	local btn = nd.rmb and Enum.UserInputType.MouseButton2 or Enum.UserInputType.MouseButton3
+	local btn = nd.lmb and Enum.UserInputType.MouseButton1 or (nd.rmb and Enum.UserInputType.MouseButton2 or Enum.UserInputType.MouseButton3)
 	local ok, down = pcall(function() return UIS:IsMouseButtonPressed(btn) end)
 	if ok and type(down) == "boolean" then
 		if down then
@@ -4943,7 +5165,68 @@ function MOD.navAlive()
 	end
 	return true
 end
+-- 0.28.1: a view drag takes its movement from Studio's plugin mouse OR from UserInputService. Studio only sends the
+-- plugin mouse's moves to the plugin that has control of the mouse, and another tool plugin can take that control
+-- away: then the drag started but the view never turned ("it triggers but won't move"). Whichever source is moving
+-- drives the drag; the other one is ignored for a moment, so no movement counts twice.
+MOD.mt = { moveT = -1, uisT = -1, wheelT = -1, wheelSrc = "", steals = 0, winT = 0, winN = 0, fps = 0 }
+function MOD.navMove(src, dx, dy)
+	local nd = navDrag
+	if not nd then return false end
+	local now = os.clock()
+	if nd.src and nd.src ~= src and now - (nd.srcT or 0) < 0.2 then return false end
+	nd.src, nd.srcT = src, now
+	nd.moved += math.abs(dx) + math.abs(dy)
+	if dx ~= 0 or dy ~= 0 then api.navDrag(nd.kind, dx, dy) end
+	return true
+end
+-- another plugin keeps taking control of the mouse (Studio gives it to one plugin at a time; ROBLEND takes it back
+-- every frame while its view is open): say so once, so nobody is left guessing why clicks feel odd
+function MOD.stolen(now)
+	local m = MOD.mt
+	m.steals += 1
+	if now - m.winT > 3 then m.winT, m.winN = now, 0 end
+	m.winN += 1
+	if m.winN >= 20 and not m.warned then
+		m.warned = true
+		warn(NAME .. ": another plugin keeps taking control of the mouse (Studio only lets one plugin have it at a time). ROBLEND's view still turns, but if clicks or tools feel odd, turn off other tool plugins in Plugins > Manage Plugins while you use ROBLEND. Help > Mouse Test shows what's happening.")
+		-- and where people actually look: a notice across the top of the view (Studio doesn't tell a plugin WHICH
+		-- other plugin has the mouse, so it can't be named)
+		pcall(function()
+			if uiOn then
+				ui:showNotice("mouse", "Another plugin is messing with ROBLEND's mouse",
+					"Studio only lets one plugin control the mouse at a time, and another plugin you have installed keeps taking it. ROBLEND's view still turns, but clicks and tools may act up.\n\nFix: Plugins tab > Manage Plugins, and turn off your other tool plugins (ones that place, paint, move or select things) while you use ROBLEND. Then restart Studio.",
+					{ { "Got it" }, { "Open Mouse Test", function() ui:openMouseTest() end } })
+			end
+		end)
+	end
+end
+-- Help > Mouse Test: what ROBLEND hears from the mouse, live (a screenshot of it tells us why a view won't move)
+api.mouseInfo = function()
+	local m, now = MOD.mt, os.clock()
+	local function ago(t) return t < 0 and "never" or (now - t < 0.3 and "yes" or ("no (%.1fs ago)"):format(now - t)) end
+	local held = {}
+	for _, b in ipairs({ { "Left", Enum.UserInputType.MouseButton1 }, { "Middle", Enum.UserInputType.MouseButton3 }, { "Right", Enum.UserInputType.MouseButton2 } }) do
+		local ok, down = pcall(function() return UIS:IsMouseButtonPressed(b[2]) end)
+		if ok and down then held[#held + 1] = b[1] end
+	end
+	local act = false
+	pcall(function() act = plugin:IsActivated() end)
+	local mp = mousePos()
+	local nd = navDrag
+	return table.concat({
+		NAME .. " " .. VERSION .. "   |   " .. ("%d fps"):format(math.floor(m.fps + 0.5)),
+		"ROBLEND has the mouse: " .. (act and "yes" or "NO") .. (m.steals > 0 and ("   (taken by another plugin %d times)"):format(m.steals) or ""),
+		"Plugin mouse moving: " .. ago(m.moveT) .. ("   at %d, %d"):format(mp.X, mp.Y),
+		"Roblox mouse moving: " .. ago(m.uisT),
+		"Buttons held: " .. (#held > 0 and table.concat(held, " + ") or "none"),
+		"Over the 3D view: " .. ((ownView() and ui:inCanvas(mp)) and "yes" or "no"),
+		"View drag: " .. (nd and (nd.kind .. (nd.src and (" (moving from the " .. (nd.src == "uis" and "Roblox" or "plugin") .. " mouse)") or " (no movement yet)")) or "none"),
+		"Mouse wheel: " .. (m.wheelT < 0 and "never" or ("%.1fs ago (%s)"):format(now - m.wheelT, m.wheelSrc == "uis" and "Roblox" or "plugin")),
+	}, "\n")
+end
 hook("Move", mouse.Move, function()
+	MOD.mt.moveT = os.clock()
 	if placing then placeUpdate() return end
 	local mp = mousePos()
 	if uiOn and ownView() and ui:inCanvas(mp) then KC.grab() end
@@ -4956,10 +5239,11 @@ hook("Move", mouse.Move, function()
 		return
 	end
 	if navDrag and MOD.navAlive() then
-		local dx, dy = mp.X - navDrag.last.X, mp.Y - navDrag.last.Y
-		navDrag.last = mp
-		navDrag.moved += math.abs(dx) + math.abs(dy)
-		if dx ~= 0 or dy ~= 0 then api.navDrag(navDrag.kind, dx, dy) end
+		local nd, now = navDrag, os.clock()
+		-- (after a gap - the other source was driving, or Studio sent nothing - start again from here, no jump)
+		local last, fresh = nd.last, now - (nd.lastT or now) < 0.25
+		nd.last, nd.lastT = mp, now
+		if last and fresh then MOD.navMove("mouse", mp.X - last.X, mp.Y - last.Y) end
 		return
 	end
 	if paintMode and editing and ownView() and not modal then
@@ -4975,6 +5259,14 @@ hook("Move", mouse.Move, function()
 		local ok, err = pcall(modal.update)
 		if not ok then warn(NAME .. ": " .. tostring(err)) end
 		return
+	end
+	-- 0.30.0: over a gizmo handle it lights up (and the mesh under it doesn't)
+	if MOD.gizmoHover and not modal and not down then
+		local ok, onG = pcall(MOD.gizmoHover, mp)
+		if ok and onG then
+			if hover then hover = nil dirtyCage = true end
+			return
+		end
 	end
 	do
 		local ok, used = pcall(MOD.move, mp)
@@ -5133,6 +5425,10 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if input.UserInputType == Enum.UserInputType.Keyboard then KC.noteKey() end
 	local ctrl = keyDown(Enum.KeyCode.LeftControl) or keyDown(Enum.KeyCode.RightControl)
 	local shift = shiftDown()
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		if MOD.orbitMode and not ui:overUI(mousePos()) then MOD.orbitStart(mousePos()) end
+		return
+	end
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
 		local mp = mousePos()
 		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0, t0 = os.clock() } end
@@ -5141,6 +5437,7 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
 	if k == Enum.KeyCode.Escape and navDrag then navDrag = nil return end
+	if k == Enum.KeyCode.Escape and MOD.orbitMode and not modal and not ui.menuOpen then api.setOrbitMode(false) return end
 	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
 	if focusBox and ctrl and not alt then
@@ -5225,6 +5522,7 @@ pcall(function()
 		if input.UserInputType == Enum.UserInputType.MouseButton3 then
 			if navDrag and not navDrag.rmb then navDrag = nil end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if navDrag and navDrag.lmb then navDrag = nil end
 			if uiOn then ui:mouseUp() end
 		end
 	end)
@@ -5232,6 +5530,17 @@ pcall(function()
 		if input.UserInputType == Enum.UserInputType.MouseWheel then
 			local dir = input.Position.Z > 0 and 1 or -1
 			if MOD.wheelFrom("uis", dir) then wheel(dir) end
+		elseif input.UserInputType == Enum.UserInputType.MouseMovement then
+			-- (see MOD.navMove) the cursor's own movement; Delta only if the cursor itself is held still
+			MOD.mt.uisT = os.clock()
+			local nd = navDrag
+			if not (nd and MOD.navAlive()) then return end
+			local p, d = input.Position, input.Delta
+			local dx, dy = 0, 0
+			if p and nd.uisLast then dx, dy = p.X - nd.uisLast.X, p.Y - nd.uisLast.Y end
+			if dx == 0 and dy == 0 and d then dx, dy = d.X, d.Y end
+			if p then nd.uisLast = p end
+			MOD.navMove("uis", dx, dy)
 		end
 	end)
 end)
@@ -5279,6 +5588,8 @@ local function catchRibbonTool()
 end
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
+	MOD.mt.fps = MOD.mt.lastF and (MOD.mt.fps * 0.9 + 0.1 / math.max(now - MOD.mt.lastF, 1e-3)) or 0
+	MOD.mt.lastF = now
 	if navDrag then MOD.navAlive() end
 	if placing then pcall(placeUpdate) end
 	if uiOn and ownView() then catchRibbonTool() end
@@ -5288,7 +5599,7 @@ RunService.Heartbeat:Connect(function()
 		if not ok then warn(NAME .. " UI: " .. tostring(err)) end
 	end
 	if ownView() then
-		pcall(function() if not plugin:IsActivated() then plugin:Activate(true) end end)
+		pcall(function() if not plugin:IsActivated() then MOD.stolen(now) plugin:Activate(true) end end)
 		MOD.holdStudioCam()
 		if now - lastSync > 0.2 then
 			lastSync = now
@@ -5347,13 +5658,21 @@ RunService.Heartbeat:Connect(function()
 	end
 	if editing or ownView() then
 		local cf = camera().CFrame
+		-- (0.28.1) in ROBLEND's view the cage only needs redrawing once the view has moved enough to show
+		local camMoved
+		if ownView() then camMoved = view:cageStale() else camMoved = cf ~= lastCam end
 		-- orbiting round a big mesh: redraw its outline about 8 times a second, not every frame
-		local throttle = not dirtyCage and cf ~= lastCam and editing and cageCost() > CAGE_BIG and now - lastCageDraw < 0.12
-		if (dirtyCage or cf ~= lastCam) and not throttle then
+		local throttle = not dirtyCage and camMoved and editing and cageCost() > CAGE_BIG and now - lastCageDraw < 0.12
+		if (dirtyCage or camMoved) and not throttle then
 			lastCam = cf
 			dirtyCage = false
 			drawCage()
+			MOD.gizDirty = true   -- 0.30.0: the selection / mesh may have moved - the gizmo finds its middle again
 		end
+	end
+	if MOD.giz then
+		local ok, err = pcall(MOD.gizmoTick)
+		if not ok then warn(NAME .. " gizmo: " .. tostring(err)) MOD.giz:hide() end
 	end
 end)
 
@@ -8397,7 +8716,268 @@ function Font.build(bm, text, opts)
 end
 
 return Font
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0007"><Properties><string name="Name">Icon</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0007"><Properties><string name="Name">Gizmo</string><ProtectedString name="Source"><![CDATA[--[[
+	ROBLEND - the transform gizmo (Blender's Viewport Gizmos for the Move / Rotate / Scale / Transform tools):
+	coloured arrows, rings and boxes drawn over the 3D view at the selection's middle. Drag one = that tool, locked to
+	that axis (or plane); it's the same move / rotate / scale as G R S with X Y Z, so typing a number, Ctrl to snap and
+	Esc to cancel all still work. Drawn flat on top of the view (2D frames), so it's never hidden behind the mesh.
+	SPDX-License-Identifier: GPL-2.0-or-later
+	Copyright (C) 2026 Cruppnomics (Giga_gad27). Layout and colours follow Blender's transform gizmos
+	(axis colours from the default theme, GPL-2.0-or-later, Blender Authors).
+]]
+
+local Gizmo = {}
+Gizmo.__index = Gizmo
+
+local V2, V3 = Vector2.new, Vector3.new
+local AX = { X = V3(1, 0, 0), Y = V3(0, 1, 0), Z = V3(0, 0, 1) }
+local COL = {
+	X = Color3.fromRGB(0xff, 0x33, 0x52),
+	Y = Color3.fromRGB(0x8b, 0xdc, 0x00),
+	Z = Color3.fromRGB(0x28, 0x90, 0xff),
+	W = Color3.fromRGB(235, 235, 235),
+}
+-- sizes in screen pixels
+Gizmo.ARROW = 80      -- move / scale axis length
+Gizmo.RING = 70       -- rotate rings
+Gizmo.VIEW = 92       -- the white outer ring (rotate / scale around the view)
+Gizmo.PLANE = 26      -- plane squares sit this far along both axes
+Gizmo.HIT = 8         -- how close the mouse has to be
+
+local function lerpC(a, b, t) return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t) end
+local function others(a) if a == "X" then return "Y", "Z" elseif a == "Y" then return "X", "Z" end return "X", "Y" end
+
+-- ===== layout (pure: no instances) =====
+-- kind = "move" | "rotate" | "scale" | "transform"; c = the middle (world); look = the camera's CFrame;
+-- project(wp) -> Vector2, inFront; pixel(wp) -> studs per pixel there. Returns the handles, nearest-first order
+-- doesn't matter (Gizmo.hit picks the closest).
+function Gizmo.layout(kind, c, look, project, pixel)
+	local hs = {}
+	local cs, ok = project(c)
+	if not ok then return hs, nil end
+	local px = pixel(c)
+	local eyeDir = (look.Position - c)
+	eyeDir = eyeDir.Magnitude > 1e-9 and eyeDir.Unit or -look.LookVector
+	local move = kind == "move" or kind == "transform"
+	local scale = kind == "scale"
+	local rot = kind == "rotate" or kind == "transform"
+	-- axis lines (move = arrow tips, scale = box tips)
+	if move or scale then
+		for _, a in ipairs({ "X", "Y", "Z" }) do
+			local tip, tok = project(c + AX[a] * (Gizmo.ARROW * px))
+			local d = tip - cs
+			-- pointing (nearly) straight at the camera: too short to grab, left out (like Blender)
+			if tok and d.Magnitude > Gizmo.ARROW * 0.22 then
+				local u = d.Unit
+				hs[#hs + 1] = { id = (scale and "s" or "g") .. a, op = scale and "S" or "G", axis = a, col = COL[a], shape = "line",
+					a = cs + u * 14, b = tip, tip = scale and "box" or "arrow" }
+			end
+		end
+		-- plane squares (drag = move / scale flat on that plane; coloured by the axis it leaves out, like Blender)
+		for _, a in ipairs({ "X", "Y", "Z" }) do
+			if math.abs(AX[a]:Dot(eyeDir)) > 0.2 then
+				local p, q = others(a)
+				local sp, sok = project(c + (AX[p] + AX[q]) * (Gizmo.PLANE * px))
+				if sok then
+					hs[#hs + 1] = { id = (scale and "sp" or "gp") .. a, op = scale and "S" or "G", plane = a, col = COL[a], shape = "square", c = sp, r = 6 }
+				end
+			end
+		end
+	end
+	if move and kind == "move" then
+		-- the little white ring in the middle: free move (on the screen)
+		hs[#hs + 1] = { id = "g", op = "G", col = COL.W, shape = "circle", c = cs, r = 9 }
+	end
+	if rot then
+		-- rings round each axis; only the half facing you (the back half would be grabbed through the front)
+		local R = Gizmo.RING * px * (kind == "transform" and 0.82 or 1)
+		local N = 48
+		for _, a in ipairs({ "X", "Y", "Z" }) do
+			local p, q = others(a)
+			local u, v = AX[p], AX[q]
+			local pts, runs = {}, {}
+			local cur
+			for i = 0, N do
+				local t = i / N * math.pi * 2
+				local wp = c + (u * math.cos(t) + v * math.sin(t)) * R
+				local front = (wp - c):Dot(eyeDir) >= -R * 0.04
+				local sp, sok = project(wp)
+				if front and sok then
+					if not cur then cur = {} runs[#runs + 1] = cur end
+					cur[#cur + 1] = sp
+				else
+					cur = nil
+				end
+			end
+			for _, run in ipairs(runs) do
+				if #run >= 2 then
+					hs[#hs + 1] = { id = "r" .. a .. #pts, op = "R", axis = a, col = COL[a], shape = "poly", pts = run }
+					pts[#pts + 1] = run
+				end
+			end
+		end
+	end
+	if kind == "rotate" then
+		hs[#hs + 1] = { id = "r", op = "R", col = COL.W, shape = "circle", c = cs, r = Gizmo.VIEW }
+	elseif scale then
+		hs[#hs + 1] = { id = "s", op = "S", col = COL.W, shape = "circle", c = cs, r = Gizmo.VIEW }
+	end
+	return hs, cs
+end
+
+-- ===== hit test (screen pixels) =====
+local function segDist(p, a, b)
+	local ab = b - a
+	local l2 = ab.X * ab.X + ab.Y * ab.Y
+	local t = l2 > 1e-9 and math.clamp(((p - a).X * ab.X + (p - a).Y * ab.Y) / l2, 0, 1) or 0
+	return (p - (a + ab * t)).Magnitude
+end
+Gizmo.segDist = segDist
+function Gizmo.distTo(h, mp)
+	if h.shape == "line" then
+		local d = segDist(mp, h.a, h.b)
+		return math.min(d, (mp - h.b).Magnitude - 3)   -- (the tip is a bit easier to grab)
+	elseif h.shape == "square" then
+		local d = mp - h.c
+		return math.max(math.abs(d.X), math.abs(d.Y)) - h.r
+	elseif h.shape == "circle" then
+		return math.abs((mp - h.c).Magnitude - h.r)
+	elseif h.shape == "poly" then
+		local best = math.huge
+		for i = 1, #h.pts - 1 do best = math.min(best, segDist(mp, h.pts[i], h.pts[i + 1])) end
+		return best
+	end
+	return math.huge
+end
+-- the handle under the mouse (or nil). Squares and arrow tips win over a ring that happens to pass under them.
+function Gizmo.hit(hs, mp)
+	local best, bd = nil, Gizmo.HIT
+	for _, h in ipairs(hs or {}) do
+		local d = Gizmo.distTo(h, mp)
+		if h.shape == "square" then d -= 2 end
+		if d < bd then best, bd = h, d end
+	end
+	return best
+end
+-- two handles are "the same" for hover (rings are split into runs: any run of that ring lights it)
+function Gizmo.same(h1, h2)
+	if not h1 or not h2 then return false end
+	return h1.op == h2.op and h1.axis == h2.axis and h1.plane == h2.plane and h1.shape == h2.shape
+end
+
+-- ===== drawing (2D frames on top of the 3D view) =====
+function Gizmo.new(parent)
+	local f = Instance.new("Frame")
+	f.Name = "RB_Gizmo"
+	f.BackgroundTransparency = 1
+	f.Size = UDim2.fromScale(1, 1)
+	f.ZIndex = 2
+	f.Active = false
+	f.Visible = false
+	f.Parent = parent
+	return setmetatable({ frame = f, pools = {}, cache = setmetatable({}, { __mode = "k" }) }, Gizmo)
+end
+local function pool(self, kind)
+	local p = self.pools[kind]
+	if not p then p = { items = {}, n = 0 } self.pools[kind] = p end
+	return p
+end
+local function get(self, kind)
+	local p = pool(self, kind)
+	p.n += 1
+	local x = p.items[p.n]
+	if not x then
+		x = Instance.new("Frame")
+		x.Name = "G_" .. kind
+		x.BorderSizePixel = 0
+		x.ZIndex = 2
+		x.AnchorPoint = V2(0.5, 0.5)
+		x.Active = false
+		if kind == "ring" then
+			x.BackgroundTransparency = 1
+			local c = Instance.new("UICorner") c.CornerRadius = UDim.new(0.5, 0) c.Parent = x
+			local s = Instance.new("UIStroke") s.Name = "S" s.Thickness = 2 s.Parent = x
+		end
+		x.Parent = self.frame
+		p.items[p.n] = x
+	end
+	x.Visible = true
+	return x
+end
+-- only write what changed (each property write costs)
+local function set(self, x, pos, size, rotn, col, thick)
+	local c = self.cache[x]
+	if not c then c = {} self.cache[x] = c end
+	if c.p ~= pos then x.Position = pos c.p = pos end
+	if c.s ~= size then x.Size = size c.s = size end
+	if c.r ~= rotn then x.Rotation = rotn c.r = rotn end
+	if c.c ~= col then
+		c.c = col
+		local st = x:FindFirstChild("S")
+		if st then st.Color = col else x.BackgroundColor3 = col end
+	end
+	if thick and c.t ~= thick then
+		c.t = thick
+		local st = x:FindFirstChild("S")
+		if st then st.Thickness = thick end
+	end
+end
+function Gizmo:seg(a, b, col, w)
+	local d = b - a
+	local len = d.Magnitude
+	if len < 0.5 then return end
+	local mid = (a + b) / 2 - self.origin
+	local x = get(self, "line")
+	set(self, x, UDim2.fromOffset(math.floor(mid.X * 2 + 0.5) / 2, math.floor(mid.Y * 2 + 0.5) / 2), UDim2.fromOffset(len + 1, w),
+		math.floor(math.deg(math.atan2(d.Y, d.X)) * 10 + 0.5) / 10, col)
+end
+function Gizmo:box(p, r, col, rotn)
+	local x = get(self, "box")
+	local q = p - self.origin
+	set(self, x, UDim2.fromOffset(q.X, q.Y), UDim2.fromOffset(r * 2, r * 2), rotn or 0, col)
+end
+function Gizmo:ring(p, r, col, w)
+	local x = get(self, "ring")
+	local q = p - self.origin
+	set(self, x, UDim2.fromOffset(q.X, q.Y), UDim2.fromOffset(r * 2, r * 2), 0, col, w)
+end
+function Gizmo:draw(hs, hover)
+	for _, p in pairs(self.pools) do p.n = 0 end
+	self.origin = self.frame.AbsolutePosition or V2(0, 0)
+	for _, h in ipairs(hs or {}) do
+		local hot = Gizmo.same(h, hover)
+		local col = hot and lerpC(h.col, Color3.new(1, 1, 1), 0.45) or h.col
+		local w = hot and 3.5 or 2
+		if h.shape == "line" then
+			self:seg(h.a, h.b, col, w)
+			local d = h.b - h.a
+			local u = d.Magnitude > 1e-6 and d.Unit or V2(1, 0)
+			if h.tip == "arrow" then
+				local n = V2(-u.Y, u.X)
+				self:seg(h.b, h.b - u * 11 + n * 6, col, w)
+				self:seg(h.b, h.b - u * 11 - n * 6, col, w)
+			else
+				self:box(h.b, hot and 6 or 5, col, math.deg(math.atan2(u.Y, u.X)))
+			end
+		elseif h.shape == "square" then
+			self:box(h.c, hot and h.r + 1 or h.r, col, 0)
+		elseif h.shape == "circle" then
+			self:ring(h.c, h.r, col, hot and 3 or (h.r > 20 and 1.5 or 2))
+		elseif h.shape == "poly" then
+			for i = 1, #h.pts - 1 do self:seg(h.pts[i], h.pts[i + 1], col, w) end
+		end
+	end
+	for _, p in pairs(self.pools) do
+		for i = p.n + 1, #p.items do if p.items[i].Visible then p.items[i].Visible = false end end
+	end
+	self.frame.Visible = true
+end
+function Gizmo:hide()
+	if self.frame.Visible then self.frame.Visible = false end
+end
+
+return Gizmo
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0008"><Properties><string name="Name">Icon</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the plugin's picture (64 x 64 RGBA), so the window can show it without an upload.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). The ROBLEND logo is Cruppnomics' own artwork.
@@ -8616,7 +9196,7 @@ function Icon.image(AssetService)
 	return img
 end
 return Icon
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0008"><Properties><string name="Name">KeyCapture</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0009"><Properties><string name="Name">KeyCapture</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - keeps Studio's own shortcuts (1 2 3 4 build tools, Ctrl D, Delete...) from firing while you work
 	in the ROBLEND window: an invisible text box holds the keyboard, so Studio sees typing instead of shortcuts,
 	and ROBLEND still reads every key.
@@ -8719,7 +9299,7 @@ function KeyCapture.new(C)
 end
 
 return KeyCapture
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0009"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Edit Mode mesh tools (the Modeling tab)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -10501,14 +11081,14 @@ function MT.mirror(bm, verts, center, axis)
 end
 
 return MT
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the modifier stack and UV / texture commands behind Properties > Modifiers, Material > Texture,
 	the U menu and Ctrl 0-4 (Blender's object.modifier_add / modifier_apply / subdivision_set, uv projections).
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Original: Copyright (C) Blender Authors. Luau conversion: Copyright (C) 2026 Cruppnomics (Giga_gad27).
 
 	ModStack.install(api, C): adds api.mods / modAdd / modSet / modToggle / modRemove / modMove / modApply /
-	subdivSet / setUV / setTexture. C = the shared context (Main.server.lua "ctx").
+	subdivSet / setUV / setTexture / lighten / lighterInfo / lighterApply / lighterRemove. C = the shared context (Main.server.lua "ctx").
 ]]
 local ModStack = {}
 
@@ -10649,6 +11229,71 @@ function ModStack.install(api, C)
 			if list[i] and list[j] then list[i], list[j] = list[j], list[i] end
 		end)
 	end
+	-- MAKE LIGHTER (0.29.0, Dylan: "we need settings for this" - cut the triangle count fast). One Decimate
+	-- (Collapse) at the end of the stack, marked `lighter`, set so the mesh comes out at about `target` triangles.
+	-- It's a modifier, so it's a preview: Apply makes it real, Remove (or Ctrl Z) takes it away.
+	local function triCount(m)
+		local t = 0
+		for f in pairs(m.faces) do t += f.len - 2 end
+		return t
+	end
+	local function lighterIndex(list)
+		for i, m in ipairs(list) do if m.type == "decimate" and m.lighter then return i end end
+		return nil
+	end
+	api.lighterInfo = function()
+		local p = modTarget()
+		if not p then return nil end
+		local list = modsOf(p)
+		local i = lighterIndex(list)
+		if not i then return nil end
+		local m = list[i]
+		return { index = i, base = m.lightBase, target = m.lightTarget, ratio = m.ratio }
+	end
+	-- target: a triangle count (> 1) or a share of the current count (0..1)
+	api.lighten = function(target)
+		local p = modTarget()
+		if not p then setStatus("Pick a " .. NAME .. " mesh first.") return end
+		local list = modsOf(p)
+		local i = lighterIndex(list)
+		-- how many triangles there are BEFORE the lighter step (the mesh + every other modifier)
+		local others = {}
+		for k, m in ipairs(list) do if k ~= i then others[#others + 1] = m end end
+		local S = C.get()
+		local base = (S.editing and p == S.obj) and S.bm or loadFrom(p)
+		local ok, full = pcall(Mods.evaluate, base, others, C.modEnv and C.modEnv(p))
+		local n0 = triCount(ok and full or base)
+		if n0 <= 4 then setStatus("This mesh is already as light as it goes.") return end
+		local want = target
+		if want <= 1 then want = math.floor(n0 * want + 0.5) end
+		want = math.clamp(math.floor(want + 0.5), 4, n0)
+		local ratio = math.clamp(want / n0, 0.01, 1)
+		modEdit("make lighter", function(l2)
+			local idx = lighterIndex(l2)
+			if not idx then
+				local m = Mods.new("decimate")
+				m.name = "Make Lighter"
+				m.lighter = true
+				l2[#l2 + 1] = m
+				idx = #l2
+			end
+			local m = l2[idx]
+			m.mode, m.ratio, m.lightBase, m.lightTarget = "Collapse", ratio, n0, want
+			return ("Make lighter: %d -> about %d triangles (%d%%). It's a preview - Apply keeps it, Remove takes it off."):format(n0, want, math.floor(ratio * 100 + 0.5))
+		end)
+	end
+	api.lighterApply = function()
+		local p = modTarget()
+		if not p then return end
+		local i = lighterIndex(modsOf(p))
+		if i then api.modApply(i) end
+	end
+	api.lighterRemove = function()
+		local p = modTarget()
+		if not p then return end
+		local i = lighterIndex(modsOf(p))
+		if i then api.modRemove(i) setStatus("Back to the full mesh.") end
+	end
 	api.modApply = function(i)
 		local p = modTarget()
 		if not p then return end
@@ -10676,7 +11321,7 @@ function ModStack.install(api, C)
 end
 
 return ModStack
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - modifiers: a non-destructive stack on each mesh (Blender's Properties > Modifiers)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -11771,7 +12416,7 @@ function Mods.mergeDoubles(bm, dist)
 end
 
 return Mods
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Object Mode tools: Join, Set Origin, Apply Rotation, Shade Smooth / Flat / Auto, Hide / Reveal,
 	Clear Location / Rotation, Local View, Convert to ROBLEND Mesh. Converted from Blender's object operators
 	(source/blender/editors/object/object_transform.cc, object_relations.cc, view3d localview).
@@ -12090,7 +12735,7 @@ function ObjectTools.new(C)
 end
 
 return ObjectTools
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - mesh operators
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -12720,7 +13365,7 @@ function Ops.fill(bm, vertSet)
 end
 
 return Ops
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Vertex Paint: paint colours onto the mesh's points (the colour blends across each face).
 	Converted to Luau (and cut down) from Blender's vertex paint:
 	  source/blender/editors/sculpt_paint/paint_vertex.cc (draw / blur / fill / sample, brush falloff, front faces only)
@@ -13010,7 +13655,7 @@ function Paint.new(C)
 end
 
 return Paint
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">QuickTest</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">QuickTest</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Quick Test: a card that walks through every feature. For each one it sets the scene up
 	itself (adds the right shape, picks the mode, selects the faces), says what to press and what you should
 	see, and has Works / Broken / Skip buttons. "Show me" does the action for you where it can.
@@ -13643,7 +14288,7 @@ function QuickTest.new(C)
 end
 
 return QuickTest
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Sculpt Mode: brushes that push the surface around like clay.
 	Converted to Luau (and cut down) from Blender's sculpt brushes:
 	  source/blender/editors/sculpt_paint/brushes/draw.cc, clay_strips.cc, inflate.cc, grab.cc, smooth.cc,
@@ -13953,7 +14598,7 @@ function Sculpt.new(C)
 end
 
 return Sculpt
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">SelfTest</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">SelfTest</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Run Self-Test: checks ROBLEND's features inside the real Studio (real EditableMesh,
 	AssetService, collision, Boolean, UVs, modifiers, Edit Mode tools) without any clicking, and prints a
 	report to the Output window ("ROBLEND TEST ..." lines). Everything it makes goes in a folder that is taken
@@ -14275,7 +14920,7 @@ function SelfTest.run(C, api)
 end
 
 return SelfTest
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - "Before you start": ROBLEND needs two things switched on, and this screen checks them itself.
 	  1. Mesh / Image APIs for this game (Game Settings > Security) - without it Roblox won't let any plugin make meshes.
 	  2. Studio's "CreateAssetAsync Lua API" beta (File > Beta Features) - saving meshes to Roblox needs it.
@@ -14416,7 +15061,7 @@ function Setup.new(C)
 end
 
 return Setup
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Tutorial: step cards that wait for you to actually do each thing.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -14559,7 +15204,7 @@ function Tutorial.new(C)
 end
 
 return Tutorial
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
 	Outliner, Properties editor and status bar.
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -14924,10 +15569,11 @@ function UI:buildTopBar()
 		table.insert(items, 1, { "About ROBLEND", "", function() self:openAbout() end })
 		table.insert(items, 2, { "Tutorial", "", function() api.tutorial() end })
 		table.insert(items, 3, { "Show Key Presses", "", function() api.toggleShowKeys() end })
-		table.insert(items, 4, { "Run Self-Test", "", function() api.selfTest() end })
-		table.insert(items, 5, { "Run Auto-Test (every feature, hands off)", "", function() api.autoTest() end })
-		table.insert(items, 6, { "Quick Test (check every feature)", "", function() api.quickTest() end })
-		table.insert(items, 7, "-")
+		table.insert(items, 4, { "Mouse Test (if the view won't move)", "", function() self:openMouseTest() end })
+		table.insert(items, 5, { "Run Self-Test", "", function() api.selfTest() end })
+		table.insert(items, 6, { "Run Auto-Test (every feature, hands off)", "", function() api.autoTest() end })
+		table.insert(items, 7, { "Quick Test (check every feature)", "", function() api.quickTest() end })
+		table.insert(items, 8, "-")
 		return items
 	end)
 	-- workspace tabs (Layout = Object Mode, Modeling = Edit Mode)
@@ -15279,6 +15925,14 @@ function UI:buildView()
 		if k[1] == "frame" then b.Activated:Connect(function() self:safe(function() api.frameAll() end) end)
 		else b.MouseButton1Down:Connect(function() self:startDrag(k[1] == "zoom" and "zoom" or "pan") end) end
 	end
+	-- Orbit Mode (0.28.1): left-drag turns the view while it's on (lit up blue)
+	local ob = make("TextButton", { Name = "RB_OrbitMode", LayoutOrder = 4, ZIndex = 3, Size = UDim2.fromOffset(28, 28), BackgroundColor3 = T.header, BackgroundTransparency = 0.3, BorderSizePixel = 0, AutoButtonColor = false, Text = "" }, nav)
+	corner(ob, 99)
+	icon(ob, "rotate").ZIndex = 3
+	ob:SetAttribute("rbTipRight", false)
+	self:tip(ob, "Orbit Mode", "Left-drag turns the view (Shift = slide, Ctrl = zoom). For a mouse or touchpad with no middle button. Click again or Esc to stop.", "")
+	ob.Activated:Connect(function() self:safe(function() api.setOrbitMode(not api.state().orbitMode) self:refresh(true) end) end)
+	self.orbitBtn = ob
 	-- N sidebar (Item), hidden by default like Blender
 	local sb = make("Frame", { Name = "Sidebar", ZIndex = 3, Visible = false, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -50, 0, 8), Size = UDim2.fromOffset(220, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = T.header, BackgroundTransparency = 0.05, BorderSizePixel = 0 }, ov)
 	corner(sb, 6)
@@ -15392,6 +16046,21 @@ function UI:buildProperties()
 end
 
 -- a number field like Blender's (label on the left, value box on the right). get(state) -> number or nil
+-- 0.29.0 triangle colours: green = light (under 2,000), amber = getting heavy (under 10,000), red = heavy
+-- (Roblox's limit is 20,000 triangles in one mesh)
+function UI.triColour(n)
+	n = tonumber(n)
+	if not n then return nil end
+	if n >= 10000 then return Color3.fromRGB(255, 110, 100) end
+	if n >= 2000 then return Color3.fromRGB(255, 196, 80) end
+	return Color3.fromRGB(120, 220, 140)
+end
+function UI.triLine(n)
+	local c = UI.triColour(n) or Color3.new(1, 1, 1)
+	local warn = (tonumber(n) or 0) >= 18000 and "  (near Roblox's 20,000 limit)" or ""
+	local hex = ("%02X%02X%02X"):format(math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+	return ('<font color="#%s">Triangles  %d%s</font>'):format(hex, n or 0, warn)
+end
 function UI:numField(parent, order, text, id, get, set, z)
 	local row = make("Frame", { LayoutOrder = order, ZIndex = z, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 20) }, parent)
 	label(row, { ZIndex = z, Size = UDim2.new(0.38, -6, 1, 0), Text = text, TextXAlignment = Enum.TextXAlignment.Right })
@@ -15730,10 +16399,30 @@ function UI:buildPropContent()
 			for i, k in ipairs({ { "Vertices", st.v }, { "Edges", st.e }, { "Faces", st.f }, { "Triangles", st.t } }) do
 				local r = make("Frame", { LayoutOrder = i, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 18) }, b)
 				label(r, { Size = UDim2.new(0.5, -6, 1, 0), Text = k[1], TextXAlignment = Enum.TextXAlignment.Right, TextColor3 = T.textDim })
-				label(r, { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, 0, 1, 0), Text = tostring(k[2] or "-") })
+				-- (0.29.0: the triangle count in colour - green light, amber getting heavy, red near Roblox's limit)
+				local col = k[1] == "Triangles" and UI.triColour(k[2]) or nil
+				label(r, { Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, 0, 1, 0), Text = tostring(k[2] or "-"), TextColor3 = col })
 			end
 			if s.mods and #s.mods > 0 and not s.editing then
 				label(b, { LayoutOrder = 9, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, TextColor3 = T.textDim, Text = "Counts include the modifiers." })
+			end
+			-- MAKE LIGHTER (0.29.0): aim for a triangle count; it's a Decimate (Collapse) preview until Apply
+			label(b, { LayoutOrder = 20, Size = UDim2.new(1, 0, 0, 18), Text = "  Make lighter", TextColor3 = T.text, TextXAlignment = Enum.TextXAlignment.Left })
+			local li = api.lighterInfo and api.lighterInfo() or nil
+			self:numField(b, 21, "Aim for", "p_lighter", function() return li and li.target or st.t end, function(v) api.lighten(v) end)
+			self:toggleRow(b, 22, "Quick", {
+				{ "1/2", false, function() api.lighten(0.5) end, "About half the triangles" },
+				{ "1/4", false, function() api.lighten(0.25) end, "About a quarter" },
+				{ "1/10", false, function() api.lighten(0.1) end, "About a tenth - for far-away or background parts" } })
+			if li then
+				label(b, { LayoutOrder = 23, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+					Text = ("Preview: %d -> about %d triangles. Apply keeps it; Remove goes back to the full mesh."):format(li.base or 0, li.target or 0) })
+				self:toggleRow(b, 24, "", {
+					{ "Apply", false, function() api.lighterApply() end, "Make it real (the mesh is changed)" },
+					{ "Remove", false, function() api.lighterRemove() end, "Back to the full mesh" } })
+			else
+				label(b, { LayoutOrder = 23, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+					Text = "Type how many triangles you want, or pick a quick size. Fewer triangles = less lag; the shape is kept as well as it can be. Roblox allows 20,000 per mesh." })
 			end
 			self:wideButton(b, 10, "Merge by Distance", function() api.tool("MergeDist") end)
 			self:wideButton(b, 11, "Flip Normals", function() api.tool("Flip") end)
@@ -15954,10 +16643,12 @@ function UI:viewMenu()
 	return {
 		{ "Toolbar", "T", function() self:toggleToolbar() end, check = self.toolbar },
 		{ "Sidebar", "N", function() self:toggleSidebar() end, check = self.sidebar },
+		{ "Transform Gizmo (arrows / rings on Move, Rotate, Scale)", "", function() if api.toggleGizmo then api.toggleGizmo() end end, check = api.gizmoOn and api.gizmoOn() == true },
 		"-",
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
 		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
 		{ "Frame All", "Home", function() api.frameAll() end },
+		{ "Orbit Mode (left-drag turns the view)", "", function() api.setOrbitMode(not api.state().orbitMode) end, check = api.state().orbitMode == true },
 		{ "Local View", "Numpad /", function() api.tool("LocalView") end },
 		{ "Perspective/Orthographic", "Numpad 5", function() api.toggleOrtho() end, check = api.state().viewName ~= nil and api.state().viewName:find("Ortho") ~= nil },
 		"-",
@@ -16057,6 +16748,15 @@ function UI:objectMenu()
 			for lv = 0, 4 do items[#items + 1] = { "Level " .. lv, "Ctrl " .. lv, function() api.subdivSet(lv) end } end
 			return items
 		end },
+		-- 0.29.0: fewer triangles, fast (a preview until Apply - Properties > Object Data > Mesh > Make lighter)
+		{ "Make Lighter", "", nil, sub = function() return {
+			{ "Half the Triangles", "", function() api.lighten(0.5) end },
+			{ "Quarter of the Triangles", "", function() api.lighten(0.25) end },
+			{ "A Tenth of the Triangles", "", function() api.lighten(0.1) end },
+			"-",
+			{ "Apply", "", function() api.lighterApply() end },
+			{ "Back to Full", "", function() api.lighterRemove() end },
+		} end },
 		"-",
 		{ "Bake to Parts", "", function() api.tool("Bake") end },
 		{ "Export .obj", "", function() api.tool("Export") end },
@@ -16739,6 +17439,62 @@ function UI:openAbout()
 	self.catcher.Visible = true
 	return fr
 end
+-- Help > Mouse Test (0.28.1): a small panel, top left of the view, showing live what ROBLEND hears from the mouse.
+-- It doesn't block the view, so you can try turning / clicking while it's open. UI:refresh updates it.
+function UI:openMouseTest()
+	self:closeMenu()
+	if self.mouseTest and self.mouseTest.Parent then return self.mouseTest end
+	local fr = make("Frame", { Name = "RB_MouseTest", ZIndex = 40, Active = false, BackgroundColor3 = T.menuBack, BackgroundTransparency = 0.08, BorderSizePixel = 0,
+		Position = UDim2.fromOffset(60, 70), Size = UDim2.fromOffset(380, 0), AutomaticSize = Enum.AutomaticSize.Y }, self.gui)
+	corner(stroke(fr, T.menuOutline), 6)
+	vlist(fr, 4)
+	make("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8), PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10) }, fr)
+	label(fr, { LayoutOrder = 1, ZIndex = 41, Size = UDim2.new(1, 0, 0, 18), Text = "Mouse Test", Font = FONT_B, TextSize = 14, TextColor3 = rgb(0xffd60a) })
+	self.mouseTestText = label(fr, { Name = "RB_MouseTestText", LayoutOrder = 2, ZIndex = 41, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true,
+		Text = "", TextSize = 12, TextColor3 = T.textMenu, TextXAlignment = Enum.TextXAlignment.Left })
+	label(fr, { LayoutOrder = 3, ZIndex = 41, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+		Text = "Hold the middle (or right) button over the view and move the mouse. If it won't turn, screenshot this panel and send it to us." })
+	local close = self:btn(fr, { LayoutOrder = 4, ZIndex = 41, Size = UDim2.new(1, 0, 0, 22), BackgroundColor3 = T.regular, Text = "Close" }, function() fr.Parent = nil self.mouseTest = nil end, "regular")
+	corner(close, 4)
+	self.mouseTest = fr
+	self:tickMouseTest()
+	return fr
+end
+-- a notice across the top of the 3D view (0.28.1: another plugin keeps taking the mouse). Clicks on it don't go
+-- through to the 3D view; each button closes it.
+function UI:showNotice(name, title, text, buttons)
+	self.notices = self.notices or {}
+	local was = self.notices[name]
+	if was and was.Parent then return was end
+	local fr = make("Frame", { Name = "RB_Notice_" .. name, ZIndex = 45, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 34),
+		Size = UDim2.fromOffset(480, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = rgb(0x4a3b0c), BorderSizePixel = 0 }, self.canvas)
+	corner(stroke(fr, rgb(0xffb020)), 6)
+	vlist(fr, 6)
+	make("UIPadding", { PaddingTop = UDim.new(0, 10), PaddingBottom = UDim.new(0, 10), PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 12) }, fr)
+	label(fr, { LayoutOrder = 1, ZIndex = 46, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, Text = title, Font = FONT_B, TextSize = 14, TextColor3 = rgb(0xffd60a) })
+	label(fr, { LayoutOrder = 2, ZIndex = 46, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, Text = text, TextSize = 12, TextColor3 = rgb(0xf2e6c4) })
+	local row = make("Frame", { LayoutOrder = 3, ZIndex = 46, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24) }, fr)
+	hlist(row, 8)
+	local function close()
+		fr.Parent = nil
+		for i, f in ipairs(self.blockers) do if f == fr then table.remove(self.blockers, i) break end end
+	end
+	for i, b in ipairs(buttons or { { "Got it" } }) do
+		local bt = self:btn(row, { LayoutOrder = i, ZIndex = 47, Size = UDim2.fromOffset(#b[1] * 7 + 24, 24), BackgroundColor3 = i == 1 and rgb(0x7a5c10) or T.regular, Text = b[1] }, function()
+			close()
+			if b[2] then pcall(b[2]) end
+		end, "regular")
+		corner(bt, 4)
+	end
+	table.insert(self.blockers, fr)
+	self.notices[name] = fr
+	return fr
+end
+function UI:tickMouseTest()
+	if not (self.mouseTest and self.mouseTest.Parent and self.mouseTestText) then return end
+	local ok, txt = pcall(self.api.mouseInfo)
+	self.mouseTestText.Text = ok and tostring(txt) or ("(couldn't read the mouse: " .. tostring(txt) .. ")")
+end
 function UI:helpItems()
 	local items = {}
 	for _, k in ipairs({
@@ -16755,7 +17511,7 @@ function UI:helpItems()
 		{ "Lock an axis out (slide flat)", "Shift X  Shift Y  Shift Z" },
 		{ "Sculpt brushes", "X C I G S T P, Shift C" }, { "Vertex Paint: pick colour / fill", "S / Shift K" }, { "Brush size / strength", "F / Shift F, [ ]" }, { "Local axis (G / R / S)", "X X, Y Y, Z Z" }, { "Offset Edge Loops", "Shift Ctrl R" },
 		{ "Delete / Merge / Fill", "X  M  F" }, { "Add", "Shift A" }, { "Duplicate", "Shift D" },
-		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Views", "Numpad 1 3 7, Home, ." },
+		{ "Orbit / Pan / Zoom", "MMB / RMB, Shift, Wheel" }, { "Orbit Mode (no middle button)", "Orbit button / View menu, Esc" }, { "Views", "Numpad 1 3 7, Home, ." },
 		{ "Toolbar / Sidebar", "T  N" }, { "X-Ray", "Alt Z" }, { "Undo", "Ctrl Z" },
 	}) do items[#items + 1] = { k[1], k[2], nil } end
 	return items
@@ -16825,6 +17581,7 @@ end
 
 function UI:refresh(force)
 	if not self.on and not force then return end
+	pcall(self.tickMouseTest, self)
 	local api = self.api
 	local s = api.state()
 	-- top bar tabs
@@ -16905,7 +17662,11 @@ function UI:refresh(force)
 		lines[#lines + 1] = ("Vertices  %d/%d"):format(st.vs, st.v)
 		lines[#lines + 1] = ("Edges  %d/%d"):format(st.es, st.e)
 		lines[#lines + 1] = ("Faces  %d/%d"):format(st.fs, st.f)
-		lines[#lines + 1] = ("Triangles  %d"):format(st.t)
+		lines[#lines + 1] = UI.triLine(st.t)
+	elseif s.meshInfo and s.meshInfo.t then
+		-- (0.29.0: the triangle count shows in Object Mode too - it's what Roblox will draw)
+		lines[#lines + 1] = ""
+		lines[#lines + 1] = UI.triLine(s.meshInfo.t)
 	end
 	self.info.Text = table.concat(lines, "\n")
 	self.info.Position = UDim2.fromOffset(self.toolbar and 56 or 12, 8)
@@ -16932,6 +17693,10 @@ function UI:refresh(force)
 	end
 	self.gizmo.Visible = not s.studioView
 	self.navFrame.Visible = not s.studioView
+	if self.orbitBtn then
+		self.orbitBtn.BackgroundColor3 = s.orbitMode and rgb(0x4772b3) or T.header
+		self.orbitBtn.BackgroundTransparency = s.orbitMode and 0 or 0.3
+	end
 	-- sidebar
 	self.sidebarFrame.Visible = self.sidebar
 	self.sbTitle.Text = s.editing and "Median:" or "Location:"
@@ -16967,7 +17732,7 @@ end
 function UI:destroy() self.gui.Parent = nil end
 
 return UI
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the UV Editor: a 2D window showing the UVs of the faces being edited over the texture,
 	where UV points are selected and moved (Blender's UV Editor, cut down).
 	Converted to Luau from Blender's UV editor behaviour:
@@ -17470,7 +18235,7 @@ function UVEditor.new(C)
 end
 
 return UVEditor
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0023"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - UV unwrapping: Unwrap (angle-preserving, cut at seams), Smart UV Project and Pack Islands.
 	Converted to Luau (and cut down) from Blender's UV tools:
 	  source/blender/editors/uvedit/uvedit_unwrap_ops.cc (unwrap / smart project operators)
@@ -17869,7 +18634,7 @@ function UV.facesWithUV(BMesh, bm)
 end
 
 return UV
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0023"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0024"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
 	axis lines and a headlight, plus the edit cage (lines + dots drawn as depth-tested parts).
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -17922,8 +18687,8 @@ function View.new(parent)
 		frame = vf, cam = cam, FieldOfView = 40, baseFov = 40, ortho = false,
 		focus = V3(0, 2, 0), dist = 30, yaw = math.rad(35), pitch = math.rad(26),
 		gridFolder = folder("Grid"), sceneFolder = folder("Scene"), cageFolder = folder("Cage"),
-		objects = {}, pools = {}, grid = { lines = {}, spacing = 0, cx = nil, cz = nil, thick = 0 },
-		CFrame = CFrame.new(),
+		objects = {}, pools = {}, pc = setmetatable({}, { __mode = "k" }), grid = { lines = {}, spacing = 0, cx = nil, cz = nil, thick = 0 },
+		CFrame = CFrame.new(), shift = V3(0, 0, 0),
 	}, View)
 	self:update()
 	return self
@@ -17961,6 +18726,11 @@ function View:contains(sp)
 	local size, off = self:size(), self:offset()
 	return sp.X >= off.X and sp.Y >= off.Y and sp.X <= off.X + size.X and sp.Y <= off.Y + size.Y
 end
+-- the same, seen from a given eye (the cage's: see View:beginCage)
+function View:pixelFrom(eye, wp)
+	local depth = math.max(0.05, (wp - eye):Dot(self.CFrame.LookVector))
+	return depth * 2 * math.tan(math.rad(self.FieldOfView) / 2) / self:size().Y
+end
 -- world size of one pixel at a point (keeps lines and dots the same size on screen)
 function View:pixel(wp)
 	local depth = math.max(0.05, -(self.CFrame:PointToObjectSpace(wp)).Z)
@@ -17983,7 +18753,18 @@ function View:update()
 		up = V3(-math.sin(self.yaw), 0, -math.cos(self.yaw)) * (self.pitch > 0 and 1 or -1)
 	end
 	self.CFrame = CFrame.lookAt(pos, self.focus, up)
-	self.cam.CFrame = self.CFrame
+	-- 0.28.1 (the shaky view): ROBLEND's workshop is 10,000 studs down, and numbers that far from 0 only keep about
+	-- 1/1000 of a stud of detail, so the camera (and the lines lifted a hair off the faces) jittered when zoomed in.
+	-- Everything inside the ViewportFrame is drawn moved by self.shift (the floor brought up to 0). Positions given
+	-- to and read from View (self.CFrame, setObject, line, dot, ray...) stay in the real world.
+	local want = V3(0, -(self.floorY or 0), 0)
+	if want ~= self.shift then
+		local d = want - self.shift
+		self.shift = want
+		for _, x in ipairs(self.frame:GetDescendants()) do if x:IsA("BasePart") then x.CFrame = x.CFrame + d end end
+	end
+	local fs = self.focus + self.shift
+	self.cam.CFrame = CFrame.lookAt(fs + dir * eye, fs, up)
 	self.cam.FieldOfView = self.FieldOfView
 	-- headlight from up and to the left of the eye, like Blender's studio light
 	local cf = self.CFrame
@@ -18003,8 +18784,32 @@ function View:pan(dx, dy)
 	self.focus = self.focus - cf.RightVector * (dx * u) + cf.UpVector * (dy * u)
 	self:update()
 end
+-- one wheel step zooms 15%; very far out it comes back in quicker (0.28.1)
+local function zoomFactor(dist, steps) return (steps > 0 and dist > 300) and 0.7 ^ steps or 0.85 ^ steps end
+-- the mouse wheel (0.28.1): zoom towards a point (what's under the mouse) - the camera and the pivot both move towards
+-- it, so it stays under the mouse and the view keeps its direction (Blender's Zoom to Mouse Position, Studio's wheel)
+function View:zoomAt(steps, target)
+	if not target then return self:zoom(steps) end
+	local f = zoomFactor(self.dist, steps)
+	if self.dist * f > 20000 then f = 20000 / self.dist end
+	if math.abs(f - 1) < 1e-9 then return end
+	local nd = self.dist * f
+	if nd >= 0.3 then
+		self.focus = target + (self.focus - target) * f
+		self.dist = nd
+	else
+		-- right up against the pivot: keep it just ahead of the camera and carry on towards the target
+		local pos = self.CFrame.Position
+		local back = pos - self.focus
+		if back.Magnitude < 1e-9 then return self:zoom(steps) end
+		local k = back.Magnitude / self.dist
+		self.dist = 0.3
+		self.focus = (target + (pos - target) * f) - back.Unit * (k * 0.3)
+	end
+	self:update()
+end
 function View:zoom(steps)
-	local nd = self.dist * (0.85 ^ steps)
+	local nd = self.dist * zoomFactor(self.dist, steps)
 	if steps > 0 and nd < 1 then
 		-- already right up close: carry on forward instead of creeping towards the pivot and stopping there
 		-- (zooming in would otherwise get "stuck" a stud away from the point you're turning round)
@@ -18068,7 +18873,7 @@ function View:updateGrid()
 			g.lines[i] = p
 		end
 		p.Size = alongX and V3(len, w, w) or V3(w, w, len)
-		p.CFrame = CFrame.new(pos)
+		p.CFrame = CFrame.new(pos + self.shift)
 		p.Color = col
 		p.Transparency = trans
 	end
@@ -18103,7 +18908,7 @@ function View:setObject(key, part, cf, look)
 	local old = self.objects[key]
 	if old and old ~= part then self:drop(old) end
 	part.Anchored = true
-	part.CFrame = cf
+	part.CFrame = cf + self.shift
 	if look then
 		part.Color = look.Color or part.Color
 		part.Material = look.Material or part.Material
@@ -18113,7 +18918,7 @@ function View:setObject(key, part, cf, look)
 	part.Parent = self.sceneFolder
 	self.objects[key] = part
 end
-function View:moveObject(key, cf) local p = self.objects[key] if p then p.CFrame = cf end end
+function View:moveObject(key, cf) local p = self.objects[key] if p then p.CFrame = cf + self.shift end end
 function View:styleObject(key, transparency) local p = self.objects[key] if p then p.Transparency = transparency end end
 function View:removeObject(key)
 	local p = self.objects[key]
@@ -18141,7 +18946,33 @@ local function get(self, kind)
 	if x.Parent ~= self.cageFolder then x.Parent = self.cageFolder end
 	return x
 end
-function View:beginCage() for _, p in pairs(self.pools) do p.n = 0 end end
+-- 0.28.1 (speed): the cage is drawn for the camera as it was when the drawing started (cageEye), not redrawn on
+-- every camera move - lines keep their width and their lift off the faces until the view has moved enough
+-- (View:cageStale) for it to show. Turning the view used to re-place every line, every frame.
+function View:beginCage()
+	for _, p in pairs(self.pools) do p.n = 0 end
+	self.cageEye, self.cageEyeDist, self.cageOrtho = self.CFrame.Position, (self.CFrame.Position - self.focus).Magnitude, self.ortho
+end
+-- has the view moved far enough since the cage was drawn to need a new one? (eye moved over ~12% of its
+-- distance from the pivot: about 7 degrees of turning, or a zoom / slide of that much)
+function View:cageStale()
+	local e0 = self.cageEye
+	if not e0 or self.cageOrtho ~= self.ortho then return true end
+	local eye = self.CFrame.Position
+	local d = (eye - self.focus).Magnitude
+	local d0 = self.cageEyeDist or d
+	if d0 <= 1e-6 or d / d0 > 1.25 or d / d0 < 0.8 then return true end
+	return (eye - e0).Magnitude > 0.12 * d
+end
+-- set a cage part's look only where it changed (each property write costs; most lines stay the same)
+local function setPart(self, x, size, cf, col)
+	local c = self.pc[x]
+	if not c then c = {} self.pc[x] = c end
+	if c.s ~= size then x.Size = size c.s = size end
+	if c.c ~= cf then x.CFrame = cf c.c = cf end
+	if c.k ~= col then x.Color = col c.k = col end
+	if not c.t then x.Transparency = 0 c.t = true end
+end
 function View:endCage()
 	for _, p in pairs(self.pools) do
 		for i = p.n + 1, #p.items do
@@ -18155,35 +18986,30 @@ function View:line(a, b, col, px)
 	local len = d.Magnitude
 	if len < 1e-5 then return end
 	local mid = (a + b) / 2
-	local eye = self.CFrame.Position
+	local eye = self.cageEye or self.CFrame.Position
 	local toEye = eye - mid
-	local pix = self:pixel(mid)
+	local pix = self:pixelFrom(eye, mid)
 	local lift = toEye.Magnitude > 1e-6 and toEye.Unit * (pix * 2.5) or V3()
 	local x = get(self, "line")
 	local w = pix * (px or 1.2)
 	local up = math.abs(d.Unit.Y) > 0.99 and V3(1, 0, 0) or V3(0, 1, 0)
-	x.Size = V3(w, w, len + w)
-	x.CFrame = CFrame.lookAt(mid + lift, mid + lift + d, up)
-	x.Color = col
-	x.Transparency = 0
+	local m = mid + self.shift + lift
+	setPart(self, x, V3(w, w, len + w), CFrame.lookAt(m, m + d, up), col)
 end
 function View:dot(p, col, px)
-	local eye = self.CFrame.Position
+	local eye = self.cageEye or self.CFrame.Position
 	local toEye = eye - p
-	local pix = self:pixel(p)
+	local pix = self:pixelFrom(eye, p)
 	local lift = toEye.Magnitude > 1e-6 and toEye.Unit * (pix * 3) or V3()
 	local x = get(self, "dot")
 	local s = pix * (px or 6)
-	x.Size = V3(s, s, s)
-	x.CFrame = CFrame.new(p + lift)
-	x.Color = col
-	x.Transparency = 0
+	setPart(self, x, V3(s, s, s), CFrame.new(p + self.shift + lift), col)
 end
 
 function View:destroy() self.frame.Parent = nil end
 
 return View
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0024"><Properties><string name="Name">LICENSE</string><ProtectedString name="Source"><![CDATA[--[==[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0025"><Properties><string name="Name">LICENSE</string><ProtectedString name="Source"><![CDATA[--[==[
 ROBLEND - Licensing & Attribution
 
 ROBLEND is an independent, free and open-source Roblox Studio modelling plugin

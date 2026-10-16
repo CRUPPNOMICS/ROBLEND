@@ -2314,6 +2314,7 @@ check("the view never gets stuck: a lost button-up ends the drag, the wheel work
 	eq(view.yaw, yaw3, "a left click ends it too")
 	-- the wheel: one turn arriving both ways zooms once; the second source alone still works
 	mouseXY(600, 400) beat()
+	view.dist = 40 view:update()   -- (under 300 studs: one step is 15%)
 	local d0 = view.dist
 	MOCK.t += 1
 	mouse.WheelForward:Fire()
@@ -2329,6 +2330,196 @@ check("the view never gets stuck: a lost button-up ends the drag, the wheel work
 	beat()
 	assert(view.dist >= 0.3 and (view.focus - f0).Magnitude > 3, "kept going forward: " .. (view.focus - f0).Magnitude)
 	press("Home") beat()
+end)
+check("another plugin has the mouse: the view still turns from Roblox's own mouse movement, never twice; Mouse Test; a warning (0.28.1)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	local UIS = S.UserInputService
+	MOCK.api.setWorkshop(true) beat()
+	local MM = Enum.UserInputType.MouseMovement
+	local function uisMove(x, y, dx, dy) UIS.InputChanged:Fire({ UserInputType = MM, Position = Vector3.new(x, y, 0), Delta = Vector3.new(dx, dy, 0) }, false) end
+	local function mmbDown() MOCK.btnDown = { MouseButton3 = true } UIS.InputBegan:Fire({ UserInputType = Enum.UserInputType.MouseButton3, KeyCode = Enum.KeyCode.Unknown }, false) beat() end
+	local function mmbUp() MOCK.btnDown = { MouseButton3 = false } beat() beat() MOCK.btnDown = nil end
+	-- only UserInputService sends movement (the plugin mouse belongs to another plugin): it still turns
+	mouseXY(500, 400) beat()
+	mmbDown()
+	local yaw0 = view.yaw
+	uisMove(500, 400, 0, 0) uisMove(540, 400, 40, 0) beat()
+	local turned = yaw0 - view.yaw
+	assert(math.abs(turned) > 1e-6, "turned from Roblox's own mouse")
+	-- the cursor held still (locked by Studio): the movement (Delta) still turns it
+	local y1 = view.yaw
+	uisMove(540, 400, 40, 0) beat()
+	assert(view.yaw ~= y1, "Delta turns it when the cursor is held still")
+	mmbUp()
+	-- both sources sending the same move: it turns once, not twice
+	mouseXY(500, 400) beat()
+	mmbDown()
+	local y2 = view.yaw
+	mouseXY(540, 400)
+	uisMove(540, 400, 40, 0) beat()
+	assert(near(y2 - view.yaw, turned, 1e-4), "counted once: " .. (y2 - view.yaw) .. " vs " .. turned)
+	mmbUp()
+	-- the shaky view: the workshop is 10,000 studs down, but the view is drawn near 0 (same picture, full detail)
+	assert(view.floorY < -5000, "workshop floor: " .. tostring(view.floorY))
+	assert(math.abs(view.cam.CFrame.Position.Y) < 2000, "camera drawn near 0: " .. tostring(view.cam.CFrame.Position))
+	assert((view.cam.CFrame.Position - view.shift - view.CFrame.Position).Magnitude < 0.01, "same view as the real camera")
+	assert((view.cam.CFrame.LookVector - view.CFrame.LookVector).Magnitude < 1e-4, "same direction")
+	for _, g in ipairs(view.gridFolder:GetChildren()) do
+		if g.Transparency < 1 then assert(math.abs(g.CFrame.Position.Y) < 2000, "grid drawn near 0") break end
+	end
+	-- Help > Mouse Test shows what ROBLEND hears
+	headerBtn("Help") menuItem("Mouse Test (if the view won't move)") beat()
+	local txt = find("TextLabel", function(d) return d.Name == "RB_MouseTestText" end)
+	assert(txt and txt.Text:find("Plugin mouse moving", 1, true) and txt.Text:find("Roblox mouse moving", 1, true) and txt.Text:find("ROBLEND has the mouse", 1, true), "mouse test text: " .. tostring(txt and txt.Text))
+	local panel = txt.Parent
+	local closeB
+	for _, c in ipairs(panel:GetChildren()) do if c.ClassName == "TextButton" and c.Text == "Close" then closeB = c end end
+	assert(closeB, "close button")
+	closeB.Activated:Fire() beat()
+	assert(panel.Parent == nil, "closed")
+	-- another plugin keeps grabbing the mouse: one warning in Output, only once
+	MOCK.warns = {}
+	for _ = 1, 30 do plugin:Deactivate() beat() end
+	local n = 0
+	for _, w in ipairs(MOCK.warns) do if w:find("another plugin keeps taking control", 1, true) then n += 1 end end
+	eq(n, 1, "warned once: " .. table.concat(MOCK.warns, " | "))
+	-- ...and a notice across the top of the view, where people look; Open Mouse Test opens the panel
+	local notice = find("Frame", function(d) return d.Name == "RB_Notice_mouse" and d.Parent ~= nil end)
+	assert(notice, "notice shown")
+	local openB
+	for _, d in ipairs(notice:GetDescendants()) do if d.ClassName == "TextButton" and d.Text == "Open Mouse Test" then openB = d end end
+	assert(openB, "Open Mouse Test button")
+	openB.Activated:Fire() beat()
+	assert(notice.Parent == nil, "notice closed")
+	local mt = find("TextLabel", function(d) return d.Name == "RB_MouseTestText" and d.Parent and d.Parent.Parent ~= nil end)
+	assert(mt, "the Mouse Test opened")
+	for _, c in ipairs(mt.Parent:GetChildren()) do if c.ClassName == "TextButton" and c.Text == "Close" then c.Activated:Fire() end end
+	beat()
+	for _ = 1, 30 do plugin:Deactivate() beat() end
+	n = 0
+	for _, w in ipairs(MOCK.warns) do if w:find("another plugin keeps taking control", 1, true) then n += 1 end end
+	eq(n, 1, "still only once")
+	assert(plugin:IsActivated(), "ROBLEND took the mouse back")
+	MOCK.warns = {}
+end)
+check("the wheel zooms towards what's under the mouse, and gets out of a pivot stuck in front of the camera (0.28.1)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	MOCK.api.setWorkshop(true) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local c = S.Selection:Get()[1]
+	beat() beat()
+	local cp = c.CFrame.Position
+	-- look at it from the side, pivot off to one side of it
+	view.yaw, view.pitch = math.rad(30), math.rad(25)
+	view.focus = cp + Vector3.new(8, 0, -6) view.dist = 40 view:update() beat()
+	local sp = view:WorldToViewportPoint(cp)
+	mouseXY(sp.X, sp.Y) beat()
+	local d0 = (view.CFrame.Position - cp).Magnitude
+	for _ = 1, 8 do MOCK.t += 1 mouse.WheelForward:Fire() end
+	beat()
+	local d1 = (view.CFrame.Position - cp).Magnitude
+	assert(d1 < d0 * 0.5, "headed for the cube: " .. d0 .. " -> " .. d1)
+	local sp2 = view:WorldToViewportPoint(cp)
+	assert((Vector2.new(sp2.X, sp2.Y) - Vector2.new(sp.X, sp.Y)).Magnitude < 25, "the cube stays under the mouse: " .. tostring(sp) .. " / " .. tostring(sp2))
+	-- the pivot ends up just in front of the camera, far from the cube: a few scrolls still get there
+	view.dist = 0.5 view.focus = cp + Vector3.new(0, 6, 30) view:update() beat()
+	local sp3 = view:WorldToViewportPoint(cp)
+	mouseXY(sp3.X, sp3.Y) beat()
+	local e0 = (view.CFrame.Position - cp).Magnitude
+	for _ = 1, 10 do MOCK.t += 1 mouse.WheelForward:Fire() end
+	beat()
+	local e1 = (view.CFrame.Position - cp).Magnitude
+	assert(e1 < e0 * 0.5, "not stuck crawling: " .. e0 .. " -> " .. e1)
+	-- zooming back out works, and back in again
+	for _ = 1, 10 do MOCK.t += 1 mouse.WheelBackward:Fire() end
+	beat()
+	local e2 = (view.CFrame.Position - cp).Magnitude
+	assert(e2 > e1 * 2, "zoomed out: " .. e2)
+	local sp4 = view:WorldToViewportPoint(cp)
+	mouseXY(sp4.X, sp4.Y) beat()
+	for _ = 1, 10 do MOCK.t += 1 mouse.WheelForward:Fire() end
+	beat()
+	assert((view.CFrame.Position - cp).Magnitude < e2 * 0.5, "and back in")
+	-- very far out: back in a handful of scrolls
+	view.focus = cp view.dist = 15000 view:update() beat()
+	local sp5 = view:WorldToViewportPoint(cp)
+	mouseXY(sp5.X, sp5.Y) beat()
+	for _ = 1, 16 do MOCK.t += 1 mouse.WheelForward:Fire() end
+	beat()
+	assert(view.dist < 300, "16 scrolls from 15,000 studs out: " .. view.dist)
+	press("Home") beat()
+	c.Parent = nil
+end)
+check("the edit cage: lines / points on the back aren't drawn (X-ray shows them all); turning the view a little doesn't redraw it (0.28.1)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	MOCK.api.setWorkshop(true) beat()
+	local c = editCube()
+	press("One") beat() beat()
+	local function cageCount() local n = 0 for _, d in ipairs(view.cageFolder:GetChildren()) do if d:IsA("BasePart") then n += 1 end end return n end
+	local shown = cageCount()
+	press("Z", { "LeftAlt" }) beat() beat()
+	local all = cageCount()
+	assert(shown < all and shown >= 12, "back of the cube not drawn: " .. shown .. " of " .. all)
+	press("Z", { "LeftAlt" }) beat() beat()
+	eq(cageCount(), shown, "X-ray off again")
+	-- a small turn: the cage stays as it is; a big one: redrawn for the new side
+	MOCK.api.navDrag("orbit", 3, 0) beat()
+	assert(not view:cageStale(), "a little turn needs no redraw")
+	MOCK.api.navDrag("orbit", 200, 0)
+	assert(view:cageStale(), "a big turn does")
+	beat()
+	assert(not view:cageStale(), "redrawn")
+	assert(cageCount() < all, "still only the front")
+	-- clicking still works the same (the hidden points are only not drawn)
+	press("A") beat()
+	press("Tab") beat()
+	c.Parent = nil
+end)
+check("Orbit Mode: left-drag turns the view (Shift slides), Esc stops it; reopening ROBLEND starts from the normal view (0.28.1)", function()
+	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() beat() end
+	if inEdit() then press("Tab") beat() end
+	MOCK.api.setWorkshop(true) beat()
+	local UIS = S.UserInputService
+	local ob = find("TextButton", function(d) return d.Name == "RB_OrbitMode" end)
+	assert(ob, "orbit button in the view")
+	ob.Activated:Fire() beat()
+	assert(MOCK.api.state().orbitMode, "on")
+	-- left-drag turns the view and doesn't select anything
+	mouseXY(500, 400) beat()
+	S.Selection:Set({}) beat()
+	MOCK.btnDown = { MouseButton1 = true }
+	mouse.Button1Down:Fire() beat()
+	local yaw0 = view.yaw
+	mouseXY(560, 400) beat()
+	assert(view.yaw ~= yaw0, "left-drag turned the view")
+	MOCK.btnDown = { MouseButton1 = false }
+	mouse.Button1Up:Fire() beat()
+	local yaw1 = view.yaw
+	mouseXY(620, 400) beat()
+	eq(view.yaw, yaw1, "stops when the button comes up")
+	eq(#S.Selection:Get(), 0, "nothing selected by the drag")
+	-- Shift + left-drag slides
+	MOCK.held.LeftShift = true
+	MOCK.btnDown = { MouseButton1 = true }
+	mouse.Button1Down:Fire() beat()
+	local f0 = view.focus
+	mouseXY(660, 430) beat()
+	MOCK.held.LeftShift = nil
+	assert((view.focus - f0).Magnitude > 1e-4, "Shift + drag slides the view")
+	MOCK.btnDown = { MouseButton1 = false }
+	mouse.Button1Up:Fire() beat()
+	MOCK.btnDown = nil
+	-- Esc turns it off; left-click selects again
+	press("Escape") beat()
+	assert(not MOCK.api.state().orbitMode, "Esc: off")
+	-- reopening ROBLEND: the view starts from the normal angle, framing what's there
+	view.yaw, view.pitch, view.dist = 2, -0.5, 4000 view:update()
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	MOCK.toolbarButton.Click:Fire() beat() beat()
+	assert(math.abs(view.yaw - math.rad(35)) < 1e-6 and math.abs(view.pitch - math.rad(26)) < 1e-6, "normal angle again: " .. view.yaw .. ", " .. view.pitch)
+	assert(view.dist < 1000, "not left far out: " .. view.dist)
 end)
 check("a Creator Store copy: Roblox refuses uploads, ROBLEND says why once and stops trying in the background (0.27.2)", function()
 	if not gui.Enabled then MOCK.toolbarButton.Click:Fire() beat() end
@@ -2447,6 +2638,135 @@ check("Help > Run Auto-Test passes in the fake Studio and tidies up", function()
 	end
 	MOCK.api.setWorkshop(false) beat()
 	MOCK.warns = {}
+end)
+check("Make Lighter: aim for a triangle count, preview, Apply / Back to Full (0.29.0)", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("UV Sphere")
+	local ball = S.Selection:Get()[1]
+	beat()
+	local full = tris(ball)
+	assert(full > 200, "a dense sphere: " .. full)
+	-- the quick quarter, from the Object menu
+	headerBtn("Object") menuItem("Make Lighter") menuItem("Quarter of the Triangles") beat() beat()
+	local ms = modsOf(ball)
+	eq(#ms, 1, "one modifier")
+	assert(ms[1].type == "decimate" and ms[1].lighter and ms[1].mode == "Collapse", "a lighter Decimate (Collapse)")
+	local q = tris(ball)
+	assert(q < full * 0.4 and q > full * 0.1, ("about a quarter: %d of %d"):format(q, full))
+	assert(MOCK.status:find("Make lighter", 1, true), MOCK.status)
+	-- a typed target in Properties > Data > Mesh, on the same modifier (not a second one)
+	propTab(3)
+	assert(hasText("Make lighter"), "the Make lighter section")
+	assert(hasText("Preview:"), "it says it's a preview")
+	field("Aim for", "100")
+	ms = modsOf(ball)
+	eq(#ms, 1, "still one modifier")
+	eq(ms[1].lightTarget, 100, "aims for 100")
+	local t100 = tris(ball)
+	assert(t100 <= 130 and t100 >= 60, "about 100 triangles: " .. t100)
+	-- the count in the view's corner shows in Object Mode, in colour
+	assert(find("TextLabel", function(d) return (d.Text or ""):find("Triangles", 1, true) and (d.Text or ""):find("<font", 1, true) end), "coloured count in the view")
+	-- back to the full mesh, then Apply for real
+	MOCK.api.lighterRemove() beat() beat()
+	eq(#modsOf(ball), 0, "removed")
+	eq(tris(ball), full, "full mesh again")
+	MOCK.api.lighten(0.5) beat() beat()
+	MOCK.api.lighterApply() beat() beat()
+	eq(#modsOf(ball), 0, "applied = gone from the stack")
+	local half = tris(ball)
+	assert(half < full * 0.65, ("the mesh itself is lighter now: %d of %d"):format(half, full))
+	propTab(1)
+end)
+check("Transform gizmo: Move arrows / planes, Rotate rings, Scale boxes - drag = locked to that axis; Esc cancels; View menu turns it off (0.30.0)", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat() beat()
+	view.ortho = false
+	view.yaw, view.pitch = math.rad(35), math.rad(30) view.focus = p.CFrame.Position view.dist = 16 view:update() beat()
+	local function handle(op, axis, plane, shape)
+		for _, h in ipairs(MOCK.api.gizmoHandles() or {}) do
+			if h.op == op and h.axis == axis and h.plane == plane and (not shape or h.shape == shape) then return h end
+		end
+		error("no gizmo handle " .. op .. tostring(axis) .. tostring(plane))
+	end
+	local function at(h) if h.shape == "line" then return h.b elseif h.shape == "poly" then return h.pts[math.max(1, math.floor(#h.pts / 2))] end return h.c end
+	local function drag(from, to, cancel)
+		mouseXY(from.X, from.Y) beat()
+		MOCK.t += 0.5
+		mouse.Button1Down:Fire()
+		mouseXY((from.X + to.X) / 2, (from.Y + to.Y) / 2)
+		mouseXY(to.X, to.Y)
+		if cancel then press("Escape") end
+		mouse.Button1Up:Fire() beat() beat()
+	end
+	-- Select tool: no gizmo
+	MOCK.api.setTool("select") beat() beat()
+	local g = find("Frame", function(d) return d.Name == "RB_Gizmo" end)
+	assert(not (g and g.Visible), "no gizmo with Select")
+	-- MOVE: the X arrow moves along X only (even with the mouse off the line)
+	MOCK.api.setTool("move") beat() beat()
+	g = find("Frame", function(d) return d.Name == "RB_Gizmo" end)
+	assert(g and g.Visible, "gizmo shows with Move")
+	local c0 = p.CFrame.Position
+	local hx = handle("G", "X", nil, "line")
+	local s0 = view:WorldToViewportPoint(c0)
+	local s3 = view:WorldToViewportPoint(c0 + V3(3, 0, 0))
+	local tip = at(hx)
+	drag(tip, tip + Vector2.new(s3.X - s0.X, s3.Y - s0.Y + 12))
+	local d = p.CFrame.Position - c0
+	assert(near(d.Y, 0) and near(d.Z, 0), "only along X: " .. tostring(d))
+	assert(d.X > 2 and d.X < 4, "about 3 studs along X: " .. d.X)
+	-- the Y plane square: flat on the ground (Y doesn't change)
+	c0 = p.CFrame.Position
+	local sq = handle("G", nil, "Y", "square")
+	drag(sq.c, sq.c + Vector2.new(40, 25))
+	d = p.CFrame.Position - c0
+	assert(near(d.Y, 0) and d.Magnitude > 0.5, "moved flat on the ground: " .. tostring(d))
+	-- Esc during the drag puts it back
+	c0 = p.CFrame.Position
+	drag(at(handle("G", "Z", nil, "line")), at(handle("G", "Z", nil, "line")) + Vector2.new(30, 30), true)
+	assert((p.CFrame.Position - c0).Magnitude < 1e-3, "Esc = back where it was")
+	-- ROTATE: drag along the Y ring = turned round Y only (up stays up)
+	MOCK.api.setTool("rotate") beat() beat()
+	local ry = handle("R", "Y", nil, "poly")
+	local a1 = ry.pts[math.max(1, math.floor(#ry.pts / 3))]
+	local a2 = ry.pts[math.max(1, math.floor(#ry.pts * 2 / 3))]
+	drag(a1, a2)
+	local up = p.CFrame.UpVector
+	assert(near(up.Y, 1, 1e-3), "up stays up: " .. tostring(up))
+	assert(math.abs(p.CFrame.LookVector:Dot(V3(0, 0, -1))) < 0.999, "turned round Y")
+	-- SCALE: the X box pulled out = wider along X only
+	p.CFrame = CFrame.new(p.CFrame.Position) beat() beat()   -- (square to the world again: world X = its own X)
+	MOCK.api.setTool("scale") beat() beat()
+	local sz0 = p.Size
+	local sx = handle("S", "X", nil, "line")
+	local cs = view:WorldToViewportPoint(p.CFrame.Position)
+	local out = at(sx) + (at(sx) - Vector2.new(cs.X, cs.Y)) * 0.6
+	drag(at(sx), out)
+	assert(p.Size.X > sz0.X * 1.2 and near(p.Size.Y, sz0.Y) and near(p.Size.Z, sz0.Z), "wider in X only: " .. tostring(p.Size))
+	-- Edit Mode: the Z arrow moves the selected points along Z only
+	press("Tab") beat() beat()
+	press("A") beat()
+	MOCK.api.setTool("move") beat() beat()
+	local vs0 = worldVerts(p)
+	local lo0 = bounds(vs0)
+	local hz = handle("G", "Z", nil, "line")
+	local e0 = view:WorldToViewportPoint(lo0)
+	local e2 = view:WorldToViewportPoint(lo0 + V3(0, 0, 2))
+	drag(at(hz), at(hz) + Vector2.new(e2.X - e0.X, e2.Y - e0.Y))
+	beat() beat()
+	local lo1 = bounds(worldVerts(p))
+	assert(near(lo1.X, lo0.X, 1e-2) and near(lo1.Y, lo0.Y, 1e-2) and lo1.Z - lo0.Z > 1, "edit mode: along Z only " .. tostring(lo1 - lo0))
+	press("Tab") beat() beat()
+	-- View > Transform Gizmo: off and on again
+	MOCK.api.toggleGizmo() beat()
+	assert(not g.Visible, "turned off")
+	MOCK.api.toggleGizmo() beat()
+	assert(g.Visible, "back on")
+	MOCK.api.setTool("select") beat()
 end)
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
