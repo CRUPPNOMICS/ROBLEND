@@ -81,7 +81,7 @@ function MT.toSpec(bm)
 			idx[i] = spec.vi[l.v]
 			if uvk and l.uv then uvk[idx[i]] = l.uv else uvk = nil end
 		end
-		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, src = f, uvk = uvk }
+		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, col = f.col, src = f, uvk = uvk }
 	end
 	for e in pairs(bm.edges) do
 		local a, b = spec.vi[e.v1], spec.vi[e.v2]
@@ -109,7 +109,7 @@ function MT.fromSpec(spec)
 			local uniq, ok = {}, #list >= 3
 			for _, k in ipairs(list) do if uniq[k] then ok = false end uniq[k] = true end
 			if ok then
-				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth, uvk = f.uvk }
+				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth, col = f.col, uvk = f.uvk }
 				for _, k in ipairs(list) do used[k] = true end
 			end
 		end
@@ -131,7 +131,7 @@ function MT.fromSpec(spec)
 		for j, k in ipairs(f.v) do list[j] = vs[k] end
 		local nf = nb:faceCreate(list)
 		if nf then
-			nf.sel = f.sel == true nf.smooth = f.smooth fl[i] = nf
+			nf.sel = f.sel == true nf.smooth = f.smooth nf.col = f.col fl[i] = nf
 			-- UVs come along when every corner still has one
 			if f.uvk then
 				local all = true
@@ -304,12 +304,12 @@ function MT.bevel(bm, offset, vertexOnly, segments)
 		local function near(pts, side) return side == "first" and pts[1] or pts[#pts] end
 		local pB1, pA1, pA2, pB2 = near(B1, "first"), near(A1, "last"), near(A2, "first"), near(B2, "last")
 		if segments <= 1 then
-			spec.faces[#spec.faces + 1] = { v = { pB1, pA1, pA2, pB2 }, sel = true }
+			spec.faces[#spec.faces + 1] = { v = { pB1, pA1, pA2, pB2 }, sel = true, col = f1.col or f2.col }
 			newFaces[#newFaces + 1] = spec.faces[#spec.faces]
 		else
 			local ra, rb = run(pA1, pA2, a.co), run(pB1, pB2, b.co)
 			for k = 1, segments do
-				spec.faces[#spec.faces + 1] = { v = { rb[k], ra[k], ra[k + 1], rb[k + 1] }, sel = true }
+				spec.faces[#spec.faces + 1] = { v = { rb[k], ra[k], ra[k + 1], rb[k + 1] }, sel = true, col = f1.col or f2.col }
 				newFaces[#newFaces + 1] = spec.faces[#spec.faces]
 			end
 		end
@@ -339,7 +339,7 @@ function MT.bevel(bm, offset, vertexOnly, segments)
 					for i = #pts, 1, -1 do r[#r + 1] = pts[i] end
 					pts = r
 				end
-				spec.faces[#spec.faces + 1] = { v = pts, sel = true }
+				spec.faces[#spec.faces + 1] = { v = pts, sel = true, col = ring[1] and ring[1].f.col }
 			end
 		end
 	end
@@ -699,7 +699,7 @@ function MT.duplicate(bm)
 		if f.sel and not f.hide then
 			local list = {}
 			for i, v in ipairs(fverts(f)) do list[i] = dup(v) end
-			spec.faces[#spec.faces + 1] = { v = list, sel = true, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = list, sel = true, smooth = f.smooth, col = f.col }
 			nf += 1
 		end
 	end
@@ -1413,7 +1413,7 @@ function MT.symmetrize(bm, axis, positiveToNegative)
 		local f = spec.faces[i]
 		local r = {}
 		for j = #f.v, 1, -1 do r[#r + 1] = mirror[f.v[j]] end
-		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 	end
 	return MT.fromSpec(spec)
 end

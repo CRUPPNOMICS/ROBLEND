@@ -983,5 +983,32 @@ check2("Unwrap a flat grid: squares stay square; UVs survive save / load and mes
 	allUV(spec)
 	for f in pairs(spec.faces) do uvSquare(f) end
 end)
+-- 0.33.0 Palette: face colours ride along through bevel, extrude, save / load
+check2("face colours survive bevel, extrude and saving", function()
+	local RED, BLUE = Color3.new(1, 0, 0), Color3.new(0, 0, 1)
+	local bm = cube()
+	for f in pairs(bm.faces) do f.col = f.no.Y > 0.9 and RED or BLUE end
+	for e in pairs(bm.edges) do e.sel = true end
+	local nb = MT.bevel(bm, 0.2)
+	for f in pairs(nb.faces) do assert(f.col, "every face still coloured after bevel") end
+	local top = topFace(nb)
+	eq(top.col, RED, "top stays red")
+	local d = nb:toData()
+	assert(d.fc and #d.fc == nb.nf, "saved per face")
+	local back = BMesh.fromData(d)
+	local function redCount(m) local k = 0 for f in pairs(m.faces) do assert(f.col, "coloured") if f.col.R > 0.9 then k += 1 end end return k end
+	assert(redCount(nb) >= 1, "some red")
+	eq(redCount(back), redCount(nb), "same colours after load")
+	-- extrude the top: the new walls take the top's colour
+	local b2 = cube()
+	local t2 = topFace(b2)
+	t2.col = RED
+	local _, nf = Ops.extrudeFaceRegion(b2, { [t2] = true })
+	local n = 0
+	for f in pairs(b2.faces) do if f.col == RED then n += 1 end end
+	eq(n, 5, "top + 4 new walls are red")
+	-- no colours = nothing saved
+	eq(cube():toData().fc, nil, "plain mesh saves no colours")
+end)
 print(("%d tool tests passed, %d failed"):format(pass2, fail2))
 if fail2 > 0 then error("tool tests failed") end

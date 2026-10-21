@@ -183,6 +183,30 @@ function View:zoom(steps)
 	self.dist = math.clamp(nd, 0.3, 20000)
 	self:update()
 end
+-- 0.31.0 ROBLOX CAMERA (Dylan: "roblend needs a roblox-like movement setting"): right-drag turns the view where it
+-- stands, like Studio (the eye stays put, the pivot swings round it); WASD / Q E fly it. Same yaw / pitch as orbit.
+function View:look(dx, dy) self:turn(-dx * 0.005, dy * 0.005) end
+-- turn in place by an angle (radians): yaw round the up axis, pitch up / down
+function View:turn(dyaw, dpitch)
+	if self.ortho then self.ortho, self.autoOrtho = false, false self:update() end
+	local eye = self.CFrame.Position
+	self.yaw += dyaw
+	self.pitch = math.clamp(self.pitch + dpitch, math.rad(-89), math.rad(89))
+	local cp = math.cos(self.pitch)
+	self.focus = eye - V3(cp * math.sin(self.yaw), math.sin(self.pitch), cp * math.cos(self.yaw)) * self.dist
+	self:update()
+end
+-- move = (right, up, forward), each -1..1; up / down are straight up and down (Studio's Q / E)
+function View:fly(move, dt, slow)
+	if move.Magnitude < 1e-6 or dt <= 0 then return end
+	if self.ortho then self.ortho, self.autoOrtho = false, false end
+	local cf = self.CFrame
+	local d = cf.RightVector * move.X + V3(0, 1, 0) * move.Y + cf.LookVector * move.Z
+	if d.Magnitude < 1e-6 then return end
+	local speed = math.clamp(self.dist * 1.2, 10, 800) * (slow and 0.25 or 1)
+	self.focus += d.Unit * (speed * math.min(dt, 0.1))
+	self:update()
+end
 local VIEWS = {
 	front = { math.pi, 0 }, back = { 0, 0 }, right = { math.pi / 2, 0 }, left = { -math.pi / 2, 0 },
 	top = { 0, math.rad(89.95) }, bottom = { 0, math.rad(-89.95) },

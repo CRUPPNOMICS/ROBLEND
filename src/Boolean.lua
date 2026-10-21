@@ -206,7 +206,7 @@ function Boolean.fromMesh(bm, keep, side, opts)
 		if not keep or keep(f) then
 			local vs = {}
 			for i, v in ipairs(BMesh.faceVerts(f)) do vs[i] = v.co end
-			local tag = { face = f, side = side, smooth = f.smooth }
+			local tag = { face = f, side = side, smooth = f.smooth, col = f.col }
 			local p = newPoly(vs, tag)
 			if p then
 				-- a face that isn't flat (bent quad, or rounding in Roblox's 32-bit positions) is cut into triangles
@@ -438,6 +438,7 @@ function Boolean.toMesh(polys, opts)
 			for j, i in ipairs(f.v) do vs[j] = vOf(i) end
 			local nf = bm:faceCreate(vs)
 			if nf and f.tag and f.tag.smooth then nf.smooth = true end
+			if nf and f.tag and f.tag.col then nf.col = f.tag.col end
 		end
 	end
 	bm:normalsUpdate()

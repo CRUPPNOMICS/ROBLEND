@@ -39,6 +39,14 @@ Tutorial.STEPS = {
 		check = function(st) return st.mods ~= nil and #st.mods > 0 end },
 	{ title = "Save it to Roblox", text = "File > Save Mesh uploads it as a real mesh so it stays in the place (it needs the CreateAssetAsync beta). Skip this if you haven't set that up.",
 		check = function(st) return st.saved == true end },
+	-- 0.32.0 (Dylan: "include these at the end of the tutorial - just show them and say it"): no action needed, the
+	-- button is lit up yellow; Next moves on
+	{ title = "The Roblox camera", point = "RB_RobloxCam", uiKey = "robloxNavBtn", show = true,
+		text = "This camera button (top right of the 3D view, lit yellow) moves the view like Roblox Studio: hold right mouse + drag to look, WASD to fly (Q / E = down / up, Shift = slower), F = focus. Click it again for Blender's controls.",
+		check = function() return false end },
+	{ title = "The Modes button", point = "RB_ModeMenuBtn", uiKey = "modeMenuBtn", show = true,
+		text = "Modes (lit yellow) is the same menu as Q: Object Mode, Edit Mode, Sculpt Mode and Vertex Paint. With the Roblox camera on, Q flies down, so use this button for the menu.",
+		check = function() return false end },
 	{ title = "You're done!", text = "F3 searches every command, right click opens the menu for what's selected, and Help > Tutorial runs this again. Have fun!",
 		check = function() return false end, last = true },
 }
@@ -96,7 +104,23 @@ function Tutorial.new(C)
 		body.Text = s.text
 		card.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
 		back.Visible = T.step > 1
-		skip.Text = s.last and "Restart" or "Skip"
+		skip.Text = s.last and "Restart" or (s.show and "Next" or "Skip")
+		-- (0.32.0) a "show" card lights up the button it's about
+		if T.hl then pcall(function() T.hl.Parent = nil end) T.hl = nil end
+		if s.point then
+			local st = C.get()
+			local gui = st.ui and st.ui.gui
+			local target = st.ui and st.ui[s.uiKey]
+			if not target and gui then pcall(function() target = gui:FindFirstChild(s.point, true) end) end
+			if target then
+				local hl = Instance.new("UIStroke")
+				hl.Name = "RB_TutorialHighlight"
+				hl.Color = Color3.fromRGB(255, 205, 40)
+				hl.Thickness = 3
+				hl.Parent = target
+				T.hl = hl
+			end
+		end
 	end
 	function T.go(i)
 		if i > #Tutorial.STEPS then i = 1 end
@@ -113,6 +137,7 @@ function Tutorial.new(C)
 	end
 	function T.close()
 		T.open = false
+		if T.hl then pcall(function() T.hl.Parent = nil end) T.hl = nil end
 		if card then card.Visible = false end
 	end
 	function T.toggle() if T.open then T.close() else T.openTutorial() end end

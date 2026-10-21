@@ -1798,7 +1798,18 @@ check("Help > Tutorial: each card waits for the real action, then moves on", fun
 	press("One", { "LeftControl" }) beat()
 	waitFor("Save it to Roblox")
 	MOCK.api.tool("Save") beat()
+	-- 0.32.0: two "show" cards light up the camera and Modes buttons; Next moves on
+	waitFor("The Roblox camera")
+	local function lit(name) local b = find("TextButton", function(d) return d.Name == name end) return b and b:FindFirstChild("RB_TutorialHighlight") ~= nil end
+	assert(lit("RB_RobloxCam"), "the camera button is lit")
+	beat() beat()
+	eq(title.Text, "The Roblox camera", "waits for Next")
+	textBtn("Next")
+	waitFor("The Modes button")
+	assert(lit("RB_ModeMenuBtn") and not lit("RB_RobloxCam"), "the Modes button is lit (and only it)")
+	textBtn("Next")
 	waitFor("You're done!")
+	assert(not lit("RB_ModeMenuBtn"), "light off again")
 	textBtn("Close")
 	assert(not T.open, "closed")
 end)
@@ -2114,8 +2125,32 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	assert((rock.CFrame.Position - Vector3.new(50, 5, 0)).Magnitude < 1e-3, "Enter: back where it was: " .. tostring(rock.CFrame.Position))
 	assert(rock:GetAttribute("RB_Home") == nil, "home cleared")
 	MOCK.toolbarButton.Click:Fire() beat() beat()
+	-- 0.31.7: reopened after placing, the view is home in the workshop - not zoomed out to frame the map as well
+	assert(view.dist < 500 and view.focus.Y < -9000, ("home in the workshop after placing: dist %.0f, focus Y %.0f"):format(view.dist, view.focus.Y))
 	for _ = 1, 6 do MOCK.t += 0.05 beat() end
 	for _, row in ipairs(api.outliner()) do assert(row.key ~= rock, "gone from the workshop list") end
+	-- 0.31.9: a new cube starts at home (same spot every time) and the view comes to it, even after flying off
+	do
+		press("Escape") beat()
+		view.focus = view.focus + Vector3.new(600, 0, 400) view:update() beat()
+		S.Selection:Set({}) beat()
+		press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+		local nc = S.Selection:Get()[1]
+		beat()
+		assert(nc and math.abs(nc.CFrame.Position.X) < 3 and math.abs(nc.CFrame.Position.Z) < 3 and nc.CFrame.Position.Y < -9000, "added at home under the map: " .. tostring(nc and nc.CFrame.Position))
+		assert((view.focus - nc.CFrame.Position).Magnitude < 10, "and the view came to it")
+		nc.Parent = nil beat()
+	end
+	-- 0.31.8: nothing selected = Place in Studio takes everything in the workshop (Esc sends it back down)
+	S.Selection:Set({}) beat()
+	pb.Activated:Fire() beat()
+	assert(api.placing(), "nothing selected still places")
+	local holding = false
+	for _, x in ipairs(api.placing().things) do if x == c then holding = true end end
+	assert(holding, "the cube in the workshop is in your hand")
+	press("Escape") beat()
+	assert(not api.placing() and c.CFrame.Position.Y < -5000, "Esc: back down in the workshop")
+	MOCK.toolbarButton.Click:Fire() beat() beat()
 	-- something new: it follows the mouse, R turns it, a click drops it on the map
 	S.Selection:Set({ c })
 	api.exportSelected() beat()
@@ -2135,7 +2170,9 @@ check("the workshop: work happens 10,000 studs down; Import / Export / Back to S
 	local m = Instance.new("Model") m.Name = "Hut" m.Parent = workspace
 	for i = 1, 2 do local pp = Instance.new("Part") pp.Name = "Wall" .. i pp.Size = Vector3.new(2, 2, 2) pp.CFrame = CFrame.new(100 + i * 3, 1, 0) pp.Anchored = true pp.Parent = m end
 	S.Selection:Set({ m.Wall2 })
+	view.yaw, view.pitch = math.rad(170), math.rad(-80) view:update()   -- (0.31.6: turned any old way before the import)
 	api.importSelected() beat()
+	assert(math.abs(math.deg(view.yaw) - 35) < 0.01 and math.abs(math.deg(view.pitch) - 26) < 0.01, "the view starts from the home angle after an import")
 	assert(m:FindFirstChild("Wall1").CFrame.Position.Y < -9000, "picking one wall brought the whole model down")
 	assert(m.Wall1.Parent == m and m.Parent == workspace, "still a model")
 	assert(math.abs((m.Wall2.CFrame.Position - m.Wall1.CFrame.Position).X - 3) < 1e-3, "layout kept")
@@ -2530,8 +2567,15 @@ check("a Creator Store copy: Roblox refuses uploads, ROBLEND says why once and s
 	MOCK.storePlugin = true
 	local up0 = #MOCK.uploads
 	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()
-	assert(MOCK.status:find("Creator Store plugins", 1, true), "explains: " .. MOCK.status)
+	-- 0.34.0: a store copy KEEPS the mesh in the place instead (MeshKeeper) + adds the scripts that build it in the game
+	assert(MOCK.status:find("Kept", 1, true), "kept in the place: " .. MOCK.status)
 	eq(#MOCK.uploads, up0, "nothing uploaded")
+	assert(p:FindFirstChild("MeshKeeperData") and p:GetAttribute("RB_KeptHash"), "the mesh data is on the part")
+	assert(game:GetService("ReplicatedStorage"):FindFirstChild("MeshKeeper"), "the MeshKeeper module is in the game")
+	assert(game:GetService("ServerScriptService"):FindFirstChild("MeshKeeperServer"), "the server script is in the game")
+	local sps = game:GetService("StarterPlayer"):FindFirstChildOfClass("StarterPlayerScripts")
+	assert(sps and sps:FindFirstChild("MeshKeeperClient"), "the client script is in the game")
+	assert(MOCK.api.state and true, "")
 	-- edits that would auto save: no more tries (each one would only fail again)
 	press("Tab") beat() press("A") press("G") press("Z") type_("1") press("Return") beat() press("Tab") beat() beat()
 	assert(not MOCK.storeTries or MOCK.storeTries <= 1, "no background retries: " .. tostring(MOCK.storeTries))
@@ -2572,7 +2616,7 @@ check("Place in Studio saves any unsaved mesh first, so it works in the publishe
 	assert(MOCK.api.placing(), "holding it again")
 	press("Return") beat() beat()
 	eq(#MOCK.uploads, up1, "already saved: no second upload")
-	-- a Creator Store copy can't save: Output says so (ROBLEND is closed while placing)
+	-- a Creator Store copy can't upload: 0.34.0 keeps the mesh in the place instead (MeshKeeper), no warning
 	bringBack()
 	p:SetAttribute("RB_SavedHash", nil)
 	MOCK.storePlugin = true
@@ -2581,8 +2625,8 @@ check("Place in Studio saves any unsaved mesh first, so it works in the publishe
 	S.Selection:Set({ p }) MOCK.api.exportSelected() beat()
 	assert(MOCK.api.placing(), "holding it a third time")
 	press("Return") beat() beat()
-	assert(#MOCK.warns >= 1 and MOCK.warns[1]:find("checkered cube", 1, true), "Output explains: " .. table.concat(MOCK.warns, " | "))
-	MOCK.warns = {}   -- (expected here)
+	assert(p:FindFirstChild("MeshKeeperData") and p:GetAttribute("RB_KeptHash"), "store copy: kept in the place when placed")
+	eq(#MOCK.warns, 0, "no warnings: " .. table.concat(MOCK.warns, " | "))
 	MOCK.storePlugin = nil
 	S.Selection:Set({ p }) MOCK.api.tool("Save") beat() beat()   -- (unblock again for the tests after this)
 	MOCK.api.setAutoSave(auto0)
@@ -2678,6 +2722,130 @@ check("Make Lighter: aim for a triangle count, preview, Apply / Back to Full (0.
 	assert(half < full * 0.65, ("the mesh itself is lighter now: %d of %d"):format(half, full))
 	propTab(1)
 end)
+check("Roblox camera button: RMB drag looks (eye stays), RMB + WASD flies, RMB never opens a menu, F = focus, off = Blender orbit (0.31.0)", function()
+	if inEdit() then press("Tab") beat() end
+	S.Selection:Set({}) beat()
+	press("A", { "LeftShift" }) menuItem("Mesh") menuItem("Cube")
+	local p = S.Selection:Get()[1]
+	beat() beat()
+	local camBtn = find("TextButton", function(d) return d.Name == "RB_RobloxCam" end)
+	assert(camBtn, "the camera button is in the 3D view's header")
+	camBtn.Activated:Fire() beat()
+	assert(MOCK.api.state().robloxNav, "Roblox camera on")
+	-- 0.32.0: the Modes button opens the Q menu
+	local modesBtn = find("TextButton", function(d) return d.Name == "RB_ModeMenuBtn" end)
+	assert(modesBtn, "Modes button next to the camera button")
+	modesBtn.Activated:Fire() beat()
+	assert(hasText("Sculpt Mode") and hasText("Vertex Paint"), "the mode menu")
+	press("Escape") beat()
+	assert(hasText("RMB + WASD"), "the status bar shows the Roblox controls")
+	view.ortho = false
+	view.yaw, view.pitch, view.focus, view.dist = math.rad(35), math.rad(20), p.CFrame.Position, 20 view:update() beat()
+	local cx, cy = 600, 420
+	mouseXY(cx, cy) beat()
+	-- LOOK: the eye stays where it is, the direction turns
+	local eye0, look0 = view.CFrame.Position, view.CFrame.LookVector
+	mouse.Button2Down:Fire() mouseXY(cx + 60, cy) mouseXY(cx + 80, cy + 10) mouse.Button2Up:Fire() beat()
+	assert((view.CFrame.Position - eye0).Magnitude < 1e-3, "the eye stayed put: moved " .. (view.CFrame.Position - eye0).Magnitude)
+	assert(view.CFrame.LookVector:Dot(look0) < 0.999, "looked round")
+	assert(not hasText("Duplicate Objects"), "no menu after a look drag")
+	local function release(k) S.UserInputService.InputEnded:Fire({ UserInputType = Enum.UserInputType.Keyboard, KeyCode = Enum.KeyCode[k] }, false) end
+	-- FLY: W held with right mouse = forwards along the view; the W key isn't a Blender key then
+	mouseXY(cx, cy) beat()
+	eye0, look0 = view.CFrame.Position, view.CFrame.LookVector
+	mouse.Button2Down:Fire()
+	press("W")
+	beat() beat() beat()
+	release("W")
+	press("E") beat() beat() release("E")
+	mouse.Button2Up:Fire() beat()
+	local mv = view.CFrame.Position - eye0
+	assert(mv:Dot(look0) > 1, "flew forwards: " .. tostring(mv))
+	assert(view.CFrame.Position.Y > eye0.Y, "E = up")
+	assert(not hasText("Duplicate Objects"), "no menu after flying")
+	assert(not MOCK.api.state().editing, "W / E did nothing else")
+	-- 0.31.1: like Studio, WASD flies in Object Mode without right mouse; letting go stops it
+	eye0 = view.CFrame.Position
+	press("S") beat() beat() release("S")
+	local e1 = view.CFrame.Position
+	assert((e1 - eye0).Magnitude > 0.5, "S flew back without right mouse")
+	beat() beat()
+	assert((view.CFrame.Position - e1).Magnitude < 1e-6, "stopped when S came up")
+	-- 0.31.4: in Edit Mode too, W A S D Q E fly instead of being Blender keys
+	press("Tab") beat() beat()
+	assert(MOCK.api.state().editing, "in Edit Mode")
+	local _, nf0 = counts(p)
+	eye0 = view.CFrame.Position
+	press("E") beat() beat() release("E")
+	press("S") beat() release("S")
+	local _, nf1 = counts(p)
+	eq(nf1, nf0, "E didn't extrude")
+	assert(not (MOCK.status or ""):find("Resize"), "S didn't scale")
+	assert((view.CFrame.Position - eye0).Magnitude > 0.5, "flew in Edit Mode")
+	press("Tab") beat() beat()
+	-- 0.31.5: a key-up that never arrives (Studio had the keyboard) doesn't keep flying - E stuck = up into the sky
+	MOCK.held.E = true press("E") beat() beat()
+	MOCK.held.E = nil   -- let go, but no key-up event
+	beat()
+	local y1 = view.CFrame.Position.Y
+	beat() beat() beat()
+	assert(math.abs(view.CFrame.Position.Y - y1) < 1e-6, "stopped flying up once E was really up")
+	-- the trackpad: a two-finger swipe turns the view, Shift + swipe pans, a pinch zooms
+	local yaw0 = view.yaw
+	S.UserInputService.PointerAction:Fire(0, Vector2.new(40, 0), 0, false) beat()
+	assert(view.yaw ~= yaw0, "swipe turned the view")
+	local f0 = view.focus
+	MOCK.held.LeftShift = true S.UserInputService.PointerAction:Fire(0, Vector2.new(0, 40), 0, false) MOCK.held.LeftShift = nil beat()
+	assert((view.focus - f0).Magnitude > 1e-3, "Shift + swipe panned")
+	local d0 = view.dist
+	S.UserInputService.PointerAction:Fire(0, Vector2.new(0, 0), 0.2, false) beat()
+	assert(view.dist ~= d0, "pinch zoomed")
+	-- 0.31.3: Studio's own camera grabs right mouse (no mouse moves reach ROBLEND): ROBLEND follows Studio's camera
+	-- turning, and puts it back afterwards. (A stand-in for Studio's camera: in the fake Studio the view shares one.)
+	do
+		local realCam = workspace.CurrentCamera
+		local stub = { CFrame = realCam.CFrame, Focus = realCam.CFrame }
+		workspace.CurrentCamera = stub
+		beat()   -- (ROBLEND holds Studio's camera where it was: the stand-in is put there)
+		local scf0 = stub.CFrame
+		local look1 = view.CFrame.LookVector
+		local e1 = view.CFrame.Position
+		local function aim(yawDeg, downDeg)
+			local L = scf0.LookVector
+			local a = math.rad(yawDeg)
+			local x, z = L.X * math.cos(a) + L.Z * math.sin(a), -L.X * math.sin(a) + L.Z * math.cos(a)
+			local d = Vector3.new(x, L.Y - math.rad(downDeg), z).Unit
+			stub.CFrame = CFrame.lookAt(scf0.Position, scf0.Position + d)
+		end
+		mouse.Button2Down:Fire() beat()
+		aim(-20, 0) beat()   -- Studio turned its camera 20 degrees this frame
+		aim(0, 10) beat()   -- and down the next
+		local l2 = view.CFrame.LookVector
+		workspace.CurrentCamera = realCam
+		assert(math.abs(math.deg(math.acos(math.clamp(l2:Dot(look1), -1, 1)))) > 15, "ROBLEND's view turned with Studio's camera")
+		assert((view.CFrame.Position - e1).Magnitude < 1e-3, "in place")
+		assert(l2.Y < look1.Y, "down follows down")
+		workspace.CurrentCamera = stub
+		mouse.Button2Up:Fire() beat()
+		workspace.CurrentCamera = realCam
+		assert(stub.CFrame.LookVector:Dot(scf0.LookVector) > 0.9999, "Studio's camera put back")
+		assert(not hasText("Duplicate Objects"), "no menu")
+	end
+	-- 0.31.2: right mouse is only for the camera - even a quick right-click opens no menu
+	mouse.Button2Down:Fire() mouse.Button2Up:Fire() beat()
+	assert(not hasText("Duplicate Objects"), "no menu on a quick right-click")
+	-- F = focus the selection
+	view.focus = view.focus + V3(200, 0, 0) view:update() beat()
+	press("F") beat()
+	assert((view.focus - p.CFrame.Position).Magnitude < 1, "F framed the cube")
+	-- off: right-drag orbits round the pivot again (the eye moves)
+	camBtn.Activated:Fire() beat()
+	assert(not MOCK.api.state().robloxNav, "off")
+	eye0 = view.CFrame.Position
+	mouse.Button2Down:Fire() mouseXY(cx + 60, cy) mouse.Button2Up:Fire() beat()
+	assert((view.CFrame.Position - eye0).Magnitude > 0.5, "Blender orbit again")
+	p.Parent = nil beat()
+end)
 check("Transform gizmo: Move arrows / planes, Rotate rings, Scale boxes - drag = locked to that axis; Esc cancels; View menu turns it off (0.30.0)", function()
 	if inEdit() then press("Tab") beat() end
 	S.Selection:Set({}) beat()
@@ -2768,6 +2936,73 @@ check("Transform gizmo: Move arrows / planes, Rotate rings, Scale boxes - drag =
 	assert(g.Visible, "back on")
 	MOCK.api.setTool("select") beat()
 end)
+-- ===== Palette (0.33.0): colour whole faces, shades, apply to selected / part / build =====
+check("Palette: colour the selected face, darker, whole part from the panel, clear", function()
+	press("Escape") beat()
+	mouseXY(600, 420) beat()
+	local p = editCube()
+	press("Three")
+	mouseTo(topFaceCenter(p)) click()
+	local RED = 0xd63a3a
+	MOCK.api.paletteApply(RED, "sel") beat()
+	local function cols() local d = data(p) local out = {} for _, h in ipairs(d.fc or {}) do if h >= 0 then out[#out + 1] = h end end return out, d end
+	local c, d = cols()
+	eq(#c, 1, "only the picked face is coloured")
+	eq(c[1], RED, "red")
+	eq(#d.f, 6, "still one cube, 6 faces")
+	-- (0.33.1) the picked face shows its true colour (no orange tint) - just the outline
+	MOCK.api.setColourView(true) beat() beat()
+	assert(Display.colourView, "colouring view on")
+	MOCK.api.setColourView(false) beat()
+	MOCK.api.paletteShade(-1, "sel") beat()
+	c = cols()
+	assert(c[1] < RED and math.floor(c[1] / 65536) < 0xd6, "darker: " .. string.format("%06X", c[1]))
+	-- (0.33.2) through the panel too, in the Material tab: Darker only touches the picked face
+	propTab(4)
+	do
+		local pal0 = find("Frame", function(x) return x.Name == "RB_Palette" end)
+		local function inPanel(text) for _, x in ipairs(pal0.Parent:GetDescendants()) do if x.ClassName == "TextButton" and x.Text == text then return x end end end
+		inPanel("Darker").Activated:Fire() beat() beat()
+		eq(#cols(), 1, "Darker from the panel: still only the picked face")
+	end
+	-- (0.33.2) Selected with nothing picked: nothing happens (no surprise whole part); Part = every face
+	press("A", { "LeftAlt" }) beat()
+	MOCK.api.paletteShade(-1, "sel") beat()
+	eq(#cols(), 1, "nothing picked: nothing changed")
+	assert(MOCK.status:find("Pick the faces first"), "says to pick faces")
+	MOCK.api.paletteApply(0xffffff, "part") beat()
+	eq(#cols(), 6, "Part: every face")
+	press("Tab") beat() beat()
+	-- the shown mesh carries the colours (and the part is white so they show true)
+	S.Selection:Set({ p }) beat() beat()
+	eq(p.Color.R + p.Color.G + p.Color.B, 3, "part colour white")
+	-- Material tab > Palette panel: Part, then a colour = every face
+	propTab(4)
+	local pal = find("Frame", function(x) return x.Name == "RB_Palette" end)
+	assert(pal, "the palette grid")
+	local panel = pal.Parent
+	local function btnIn(text) for _, x in ipairs(panel:GetDescendants()) do if x.ClassName == "TextButton" and x.Text == text then return x end end end
+	btnIn("Part").Activated:Fire() beat()
+	pal = find("Frame", function(x) return x.Name == "RB_Palette" end)
+	local sw = pal:FindFirstChild("RB_Pal_8_3")
+	assert(sw, "blue swatch (middle shade)")
+	sw.Activated:Fire() beat() beat()
+	c = cols()
+	eq(#c, 6, "whole part")
+	for _, h in ipairs(c) do eq(h, 0x2f6fd6, "blue") end
+	local em = p.Mesh
+	local found = false
+	for f, ids in pairs(em.fcol or {}) do local col = em.cols[ids[1]] if col and math.abs(col.B - 0xd6 / 255) < 0.01 and math.abs(col.R - 0x2f / 255) < 0.01 then found = true end end
+	assert(found, "the shown mesh is blue")
+	-- survives Edit Mode and back
+	press("Tab") beat() beat() press("Tab") beat() beat()
+	eq(#cols(), 6, "kept through Edit Mode")
+	-- Clear
+	S.Selection:Set({ p }) beat()
+	MOCK.api.paletteClear("part") beat()
+	eq(data(p).fc, nil, "cleared")
+end)
+
 check("wireframe, x-ray, Studio view switch, close", function()
 	press("Z", { "LeftShift" }) beat() beat()
 	press("Z", { "LeftShift" }) beat()

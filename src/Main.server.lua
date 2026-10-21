@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.30.0"
+local VERSION = "0.34.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -395,7 +395,7 @@ end
 local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Lua API\", then restart Studio."
 -- Roblox doesn't let plugins installed from the Creator Store upload anything yet (it's coming, with a permission
 -- prompt). Until then a store copy can't save meshes to Roblox: say so once, and stop trying in the background.
-EDIT.STORE_MSG = "Roblox doesn't let Creator Store plugins save meshes yet. Your meshes stay in this place in Studio, but won't show in a published game. To save them: get the free file version of ROBLEND (GitHub: CRUPPNOMICS/ROBLEND, Releases), or use Bake to Parts / Export .obj (Mesh menu)."
+EDIT.STORE_MSG = "Store copy: Roblox doesn't let store plugins upload meshes, so ROBLEND keeps them in the place (MeshKeeper) and they're built when the game runs - turn on Game Settings > Security > Allow Mesh / Image APIs. (The free file version from GitHub: CRUPPNOMICS/ROBLEND, Releases uploads real meshes.)"
 pcall(function() EDIT.storeBlocked = plugin:GetSetting("RB_StoreBlocked") == true end)
 -- 0.28.0 (Dylan): no automatic saves while you work (every save is an upload, and uploads are limited). Meshes save
 -- when you Place in Studio (EDIT.saveOnPlace) or press File > Save Mesh to Roblox / Save All Meshes.
@@ -408,11 +408,111 @@ local function dataHash(str)
 end
 local function isSaved(p)
 	local d = p and p:FindFirstChild("RB_Data")
-	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(saveKey(p))
+	if d == nil then return false end
+	local h = dataHash(saveKey(p))
+	if p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == h then return true end
+	-- 0.34.0: a store copy keeps the mesh in the place (MeshKeeper) - that counts as saved
+	return p:GetAttribute("RB_KeptHash") == h and p:FindFirstChild("MeshKeeperData") ~= nil
+end
+-- ===== 0.34.0 MESH KEEPER (Dylan 21 Oct: "can the store version work"). Roblox won't let a plugin installed from the
+-- Creator Store upload meshes. So a store copy KEEPS each mesh in the place as data (a MeshKeeperData folder in the
+-- part, tag "MeshKeeper"), and the MeshKeeper scripts - added to the game once: ReplicatedStorage.MeshKeeper +
+-- ServerScriptService.MeshKeeperServer + StarterPlayerScripts.MeshKeeperClient - build the real mesh when the game
+-- runs. Same format + scripts as PROTO's. The file version still uploads real meshes.
+local MKP = { RUN = 'require(game:GetService("ReplicatedStorage"):WaitForChild("MeshKeeper")).start()' }
+function MKP.lib()
+	if MKP.MK then return MKP.MK end
+	local ok, M = pcall(function() return require(script.MeshKeeper) end)
+	if ok and type(M) == "table" then MKP.MK = M end
+	return MKP.MK
+end
+-- the MeshKeeper scripts in the game (once; an older module is brought up to date). Call inside a recording.
+function MKP.install()
+	local src = require(script.MeshKeeperSrc)
+	local RS = game:GetService("ReplicatedStorage")
+	local ver = tonumber(src:match("M%.VERSION = (%d+)")) or 1
+	local mod = RS:FindFirstChild("MeshKeeper")
+	if not (mod and mod:IsA("ModuleScript")) then
+		mod = Instance.new("ModuleScript")
+		mod.Name = "MeshKeeper"
+		mod.Source = src
+		mod:SetAttribute("Version", ver)
+		mod.Parent = RS
+	elseif (tonumber(mod:GetAttribute("Version")) or 0) < ver then
+		mod.Source = src
+		mod:SetAttribute("Version", ver)
+	end
+	local SSS = game:GetService("ServerScriptService")
+	if not SSS:FindFirstChild("MeshKeeperServer") then
+		local sc = Instance.new("Script")
+		sc.Name = "MeshKeeperServer"
+		sc.Source = MKP.RUN
+		sc.Parent = SSS
+	end
+	local SPS = game:GetService("StarterPlayer"):FindFirstChildOfClass("StarterPlayerScripts")
+	if SPS and not SPS:FindFirstChild("MeshKeeperClient") then
+		local sc = Instance.new("LocalScript")
+		sc.Name = "MeshKeeperClient"
+		sc.Source = MKP.RUN
+		sc.Parent = SPS
+	end
+end
+-- keep part p's mesh (with its modifiers) in the place. true, or false + why
+function MKP.keep(p)
+	local M = MKP.lib()
+	if not M then return false, "the MeshKeeper module is missing from the plugin" end
+	local data = saveKey(p)
+	local m = evaluated(p, (loadFrom(p)))
+	local mp, _, berr, em = Display.build(m, nil, nil, uvOf(p))
+	if not em then return false, tostring(berr or "no mesh") end
+	local okP, packed, nf = pcall(M.pack, em)
+	Display.emOf[mp] = nil
+	pcall(function() mp:Destroy() end)
+	pcall(function() em:Destroy() end)
+	if not okP then return false, "couldn't pack the mesh (" .. tostring(packed) .. ")" end
+	local rec
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND keep mesh") end)
+	local okW, ew = pcall(function()
+		MKP.install()
+		M.write(p, packed)
+		p:SetAttribute("RB_KeptHash", dataHash(data))
+	end)
+	if rec then CHS:FinishRecording(rec, okW and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel) end
+	if not okW then return false, tostring(ew) end
+	if not MKP.told then
+		MKP.told = true
+		print(NAME .. " (store copy): Roblox doesn't let store plugins upload meshes, so ROBLEND keeps them IN THE PLACE instead and added the MeshKeeper scripts (ReplicatedStorage / ServerScriptService / StarterPlayerScripts) that build them when the game runs. For the published game turn on Game Settings > Security > Allow Mesh / Image APIs. (The file version from GitHub uploads real meshes instead.)")
+	end
+	return true, nf, #packed
+end
+-- a real upload worked: no kept copy needed any more
+function MKP.forget(p)
+	if not p:GetAttribute("RB_KeptHash") and not p:FindFirstChild("MeshKeeperData") then return end
+	local M = MKP.lib()
+	if M then pcall(M.forget, p) end
+	p:SetAttribute("RB_KeptHash", nil)
+end
+function MKP.keepNow(p, silent)
+	local ok, a, b, c = pcall(MKP.keep, p)
+	if ok and a then
+		local msg = ("Kept %s in the place (%d triangles, %d KB) - it shows in the published game (Game Settings > Security > Allow Mesh / Image APIs on)."):format(p.Name, b or 0, (c or 0) // 1024)
+		if not silent then setStatus(msg) end
+		print(NAME .. ": " .. msg)
+		return true
+	end
+	local why = ok and b or a
+	setStatus("Couldn't keep " .. p.Name .. ": " .. tostring(why))
+	warn(NAME .. ": couldn't keep " .. p.Name .. " - " .. tostring(why))
+	return false
 end
 local function saveMesh(p, quiet, silent)
 	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
-	if EDIT.storeBlocked and (quiet or silent) then return end   -- (no background tries from a store copy)
+	-- 0.34.0: a store copy can't upload - it keeps the mesh in the place instead (no upload, nothing to wait for)
+	-- (test switch: workspace attribute MeshKeeperTest = true makes the file version act like a store copy)
+	if workspace:GetAttribute("MeshKeeperTest") == true then MKP.keepNow(p, quiet or silent) return end
+	-- a known store copy: background saves keep it straight away (a save you press still tries the upload first, so a
+	-- copy that CAN upload again clears the block)
+	if EDIT.storeBlocked and (quiet or silent) then MKP.keepNow(p, true) return end
 	saving[p] = true
 	task.spawn(function()
 		local ok, err = pcall(function()
@@ -431,7 +531,7 @@ local function saveMesh(p, quiet, silent)
 				if tostring(uerr):lower():find("store plugin", 1, true) then
 					EDIT.storeBlocked = true
 					pcall(function() plugin:SetSetting("RB_StoreBlocked", true) end)
-					setStatus(EDIT.STORE_MSG)
+					MKP.keepNow(p, silent)   -- 0.34.0
 				else
 					setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
 				end
@@ -453,6 +553,7 @@ local function saveMesh(p, quiet, silent)
 				pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND save") end)
 				applyBuilt(p, real, c)
 				p:SetAttribute("RB_SavedHash", dataHash(data))
+				MKP.forget(p)   -- 0.34.0
 				if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
 				setStatus(("Saved %s to Roblox (rbxassetid://%s). It stays in the place and publishes."):format(p.Name, tostring(id)))
 			else
@@ -476,9 +577,11 @@ function EDIT.saveOnPlace(things)
 	end
 	if #todo == 0 then return 0 end
 	local what = #todo == 1 and todo[1].Name or (#todo .. " meshes")
-	if EDIT.storeBlocked then
-		setStatus(EDIT.STORE_MSG)
-		warn(NAME .. ": " .. what .. " isn't saved, so it will show as a checkered cube in the published game. " .. EDIT.STORE_MSG)
+	if EDIT.storeBlocked or workspace:GetAttribute("MeshKeeperTest") == true then
+		-- 0.34.0: kept in the place instead (MeshKeeper)
+		local bad = 0
+		for _, p in ipairs(todo) do if not MKP.keepNow(p, true) then bad += 1 end end
+		if bad == 0 then print(NAME .. ": kept " .. what .. " in the place - it will show in the published game (Game Settings > Security > Allow Mesh / Image APIs on).") end
 		return #todo
 	end
 	print(NAME .. ": saving " .. what .. " to Roblox so it works in the published game...")
@@ -512,7 +615,8 @@ local function fixUnsaved(p)
 	if meshApiOK == false then return end
 	if fixedLook[p] or not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) then return end
 	fixedLook[p] = true
-	if isSaved(p) or Display.partEm[p] then return end
+	-- (0.34.0: a mesh kept in the place has no uploaded copy to show - rebuild its look too)
+	if (isSaved(p) and not p:GetAttribute("RB_KeptHash")) or Display.partEm[p] then return end
 	local okC, okA, errA = pcall(function() return applyMesh(p, loadFrom(p), false) end)
 	local e = (not okC and okA) or errA
 	if meshRefused(e) then meshApiOK = false fixedLook[p] = nil end
@@ -520,7 +624,11 @@ end
 -- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
 local function restoreSaved(p)
 	local id = p:GetAttribute("RB_AssetId")
-	if not id then return end
+	if not id then
+		-- 0.34.0: kept in the place (store copy) - there's no uploaded mesh, so show it from its data
+		if p:GetAttribute("RB_KeptHash") then pcall(function() applyMesh(p, loadFrom(p), false) end) end
+		return
+	end
 	task.spawn(function()
 		local real = Display.fromAsset(id, (Display.fidelity(p)))
 		if real and p.Parent and not (editing and p == obj) and isSaved(p) then
@@ -1018,6 +1126,20 @@ local function addShape(kind)
 		return
 	end
 	if editing then exitEdit() end
+	-- 0.31.9 (Dylan: "when I add a cube it's miles away" / "all things should start at the same xyz under the map"):
+	-- new things start at HOME, the same spot every time (the middle of the workshop floor, where imports land too).
+	-- The 3D cursor only stays put if you placed it yourself and it's still on screen; otherwise it goes back home,
+	-- and if the view isn't looking there it comes to the new thing, so you always see it.
+	local jumpTo = false
+	if ownView() and view then
+		local _, onScreen = view:WorldToViewportPoint(CURSOR)
+		if not onScreen or (CURSOR - view.focus).Magnitude > math.max(view.dist * 3, 20) then
+			CURSOR = home() + V3(0, 2, 0)
+			dirtyCage = true
+			local _, homeOn = view:WorldToViewportPoint(CURSOR)
+			jumpTo = not homeOn or (CURSOR - view.focus).Magnitude > math.max(view.dist * 3, 20)
+		end
+	end
 	local m = BMesh.new()
 	primitive(m, kind)
 	-- a curve comes with a Tube modifier (so it shows as a pipe); edit its path in Edit Mode
@@ -1059,6 +1181,13 @@ local function addShape(kind)
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND add") end
 	Selection:Set({ mp })
 	activeObj = mp
+	if jumpTo and view then   -- (0.31.9: the view comes home to it)
+		local lo, hi = mp.CFrame.Position - mp.Size / 2, mp.CFrame.Position + mp.Size / 2
+		view.ortho, view.autoOrtho, view.viewName = false, false, nil
+		view.yaw, view.pitch = math.rad(35), math.rad(26)
+		view:frameBox(lo, hi)
+		dirtyCage = true
+	end
 	if CURVE_KINDS[kind] then
 		setStatus("Added a " .. CURVE_KINDS[kind] .. ". Tab = edit its points (Ctrl + right click extends it); pipe size in Properties > Modifiers.")
 	elseif kind == "Text" then
@@ -2052,9 +2181,15 @@ end
 local function frameAll()
 	if not view then return end
 	local pts = {}
-	for p, r in pairs(scene) do if p.Parent and not r.hidden then partCorners(p, pts) end end
-	for p in pairs(extras) do if p.Parent then partCorners(p, pts) end end
-	if #pts == 0 then view.focus, view.dist = CURSOR, 30 view:update() else view:frameBox(boundsOf(pts)) end
+	-- (0.31.7, Dylan: "after placing an item I get sent to an empty view"): only what's really down in the workshop
+	-- counts. Something just placed back on the map was still on the list, so the view framed the map AND the
+	-- workshop 10,000 studs apart - far too far out to see anything.
+	for p, r in pairs(scene) do if p.Parent and not r.hidden and shownHere(p) then partCorners(p, pts) end end
+	for p in pairs(extras) do if p.Parent and shownHere(p) then partCorners(p, pts) end end
+	if #pts == 0 then
+		if workshopOn and not shownHere({ GetPivot = function() return CFrame.new(CURSOR) end }) then CURSOR = home() + Vector3.new(0, 2, 0) end
+		view.focus, view.dist = CURSOR, 30 view:update()
+	else view:frameBox(boundsOf(pts)) end
 	view.viewName = nil
 	dirtyCage = true
 end
@@ -3838,7 +3973,7 @@ local TOOL = {
 		local p = selectedPart()
 		if not isRB(p) then setStatus("Select a " .. NAME .. " mesh to save.") return end
 		if editing and p == obj then exitEdit() end
-		if isSaved(p) then setStatus(p.Name .. " is already saved (rbxassetid://" .. tostring(p:GetAttribute("RB_AssetId")) .. ").") return end
+		if isSaved(p) then setStatus(p.Name .. (p:GetAttribute("RB_AssetId") and (" is already saved (rbxassetid://" .. tostring(p:GetAttribute("RB_AssetId")) .. ").") or " is already kept in the place (MeshKeeper).")) return end
 		saveMesh(p)
 	end,
 	SaveAll = function()
@@ -3890,7 +4025,7 @@ api.toggleGizmo = function()
 end
 local setUIOn, setStudioView
 function api.state()
-	local st = { orbitMode = MOD.orbitMode == true, editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
+	local st = { robloxNav = MOD.robloxNav == true, orbitMode = MOD.orbitMode == true, editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -4229,7 +4364,15 @@ importSelected = function(list)
 	dirtyCage = true
 	if view then
 		local nlo, nhi = lo + delta, hi + delta
-		task.defer(function() if view then view:frameBox(nlo, nhi) end end)
+		-- (0.31.6, Dylan: "the camera ends up in the sky after an import"): the view starts from the normal home angle
+		-- on what came in - not whatever way it was last turned (or flown) - and nothing carries on flying
+		MOD.flyHeld = {}
+		task.defer(function()
+			if not view then return end
+			view.ortho, view.autoOrtho, view.viewName = false, false, nil
+			view.yaw, view.pitch = math.rad(35), math.rad(26)
+			view:frameBox(nlo, nhi)
+		end)
 	end
 	setStatus(("Brought in %s%s. Tab on a part edits it; Place in Studio sends it back."):format(up[1].Name, #up > 1 and (" + " .. (#up - 1) .. " more") or ""))
 end
@@ -4372,6 +4515,19 @@ local function finishPlacing(how)
 	end
 	if P.rec then CHS:FinishRecording(P.rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND Place in Studio") end
 	pcall(function() plugin:Deactivate() end)
+	-- 0.31.5 (Dylan: "make sure it resets the cam after the part is placed"): Studio's camera goes back to how it was
+	-- before ROBLEND opened - its normal type, its place and its pivot (Focus), never under the map
+	pcall(function()
+		MOD.fixCamType()
+		local cam, pc = workspace.CurrentCamera, MOD.preCam
+		if cam and pc and pc.cf and not MOD.underMap(pc.cf) then
+			cam.CFrame = pc.cf
+			if pc.focus then cam.Focus = pc.focus end
+		end
+		MOD.rescueCam()
+	end)
+	-- (0.31.6) and ROBLEND's own view goes back home too, so it starts there next time it opens
+	pcall(MOD.resetView)
 	if how == "cancel" then
 		print(NAME .. ": placing cancelled - it's back in the workshop (open ROBLEND to see it).")
 	else
@@ -4384,7 +4540,15 @@ api.exportSelected = function(list)
 	if modal or placing then return end
 	if editing then exitEdit() end
 	local picked = workshopThings(list)
-	if #picked == 0 then setStatus("Select what to place in Studio (click it, or pick it in the Outliner), then Place in Studio.") return end
+	-- 0.31.8 (Dylan: "this box does not work"): with nothing selected, Place in Studio takes everything that's in the
+	-- workshop (it used to just ask you to select something first, and looked broken)
+	if #picked == 0 and not list then
+		local all = {}
+		for p in pairs(scene) do if p.Parent then all[#all + 1] = p end end
+		for p in pairs(extras) do if p.Parent then all[#all + 1] = p end end
+		picked = workshopThings(all)
+	end
+	if #picked == 0 then setStatus("The workshop is empty - nothing to place in Studio.") return end
 	-- a group (folder) is carried as the things inside it
 	local things, folders = {}, {}
 	for _, x in ipairs(picked) do
@@ -4499,9 +4663,90 @@ end
 api.paintClear = function()
 	if not (editing and bm) then return end
 	for v in pairs(bm.verts) do v.col = nil end
+	for f in pairs(bm.faces) do f.col = nil end
 	dirtyMesh = true
 	commit("Clear Colours")
 	setStatus("Colours cleared.")
+end
+-- ===== Palette (0.33.0, Material > Palette): colour whole faces, like Blender's palette-texture trick =====
+-- scope "sel": Edit Mode = the selected faces (none selected = all), Object Mode = the selected parts;
+-- "part": every face of the part; "all": every ROBLEND part in the workshop (Object Mode).
+-- meshFn(m, faces) colours a ROBLEND mesh; partFn(p) handles a plain Roblox part (just its Color).
+api.palette2 = { hues = Paint.PAL_HUES, rows = #Paint.PAL_SHADES, color = Paint.palColor }
+api.palDo = function(what, scope, meshFn, partFn)
+	scope = scope or "sel"
+	local white = Color3.new(1, 1, 1)
+	if editing and bm then
+		if scope == "all" then setStatus("Whole Build works in Object Mode - press Tab to leave Edit Mode first.") return 0 end
+		local fs = scope == "sel" and MT.selFaces(bm) or {}
+		local picked = next(fs) ~= nil
+		-- (0.33.2) "Selected" with nothing picked does nothing (it used to do every face - a surprise when
+		-- shading one face); Part is the way to do the whole thing
+		if scope == "sel" and not picked then
+			setStatus("Pick the faces first (click them; Shift-click for more), or set Apply to: Part for the whole thing.")
+			return 0
+		end
+		if not picked then for f in pairs(bm.faces) do if not f.hide then fs[f] = true end end end
+		local n = meshFn(bm, fs)
+		-- the part's own colour tints face colours: keep it white so they show true
+		if obj and obj.Color ~= white then pcall(function() obj.Color = white end) end
+		dirtyMesh = true
+		commit(what)
+		setStatus(("%s: %d face%s%s."):format(what, n, n == 1 and "" or "s", picked and "" or " (the whole part)"))
+		return n
+	end
+	local parts = {}
+	if scope == "all" then
+		for p in pairs(scene) do if isRB(p) and p.Parent then parts[#parts + 1] = p end end
+	else
+		parts = selectedParts()
+	end
+	if #parts == 0 then setStatus("Select a part first (or pick Whole Build).") return 0 end
+	local n = 0
+	record(what, function()
+		for _, p in ipairs(parts) do
+			if isRB(p) then
+				local m = loadFrom(p)
+				local fs = {}
+				for f in pairs(m.faces) do fs[f] = true end
+				meshFn(m, fs)
+				dataOf(p).Value = encode(m)
+				if p.Color ~= white then p.Color = white end
+				modsChanged(p)
+				n += 1
+			elseif partFn then
+				partFn(p)
+				n += 1
+			end
+		end
+	end)
+	dirtyCage = true
+	setStatus(("%s: %d part%s."):format(what, n, n == 1 and "" or "s"))
+	return n
+end
+-- (0.33.1) colouring view: while the Material tab is open, selected faces aren't filled orange
+-- (just the outline), so the colours show true
+api.setColourView = function(on)
+	on = on and true or false
+	if (Display.colourView or false) ~= on then
+		Display.colourView = on
+		if editing and bm then dirtyMesh = true end
+		dirtyCage = true
+	end
+end
+api.paletteApply = function(color, scope)
+	if type(color) == "number" then color = Paint.fromInt(color) elseif type(color) == "string" then color = Paint.fromHex(color) end
+	if not color then return 0 end
+	return api.palDo("Colour", scope, function(_, fs) return Paint.colorFaces(fs, color) end,
+		function(p) p.Color = color end)
+end
+-- step = +1 lighter, -1 darker
+api.paletteShade = function(step, scope)
+	return api.palDo(step > 0 and "Lighter" or "Darker", scope, function(m, fs) return Paint.shadeFaces(BMesh, fs, step) end,
+		function(p) p.Color = Paint.shade(p.Color, step * 0.18) end)
+end
+api.paletteClear = function(scope)
+	return api.palDo("Clear Colour", scope, function(_, fs) return Paint.colorFaces(fs, nil) end, nil)
 end
 -- Sculpt > Subdivide: one Catmull-Clark level for the whole mesh (more points to sculpt), smooth shaded
 api.sculptSubdivide = function()
@@ -4540,6 +4785,7 @@ end
 api.navDrag = function(kind, dx, dy)
 	if not view then return end
 	if kind == "orbit" then view:orbit(dx, dy) view.viewName = nil
+	elseif kind == "look" then view:look(dx, dy) view.viewName = nil
 	elseif kind == "pan" then view:pan(dx, dy)
 	else view:zoom(-dy / 30) end
 	-- (0.28.1: no forced cage redraw - the Heartbeat redraws it once the view has moved enough: View:cageStale)
@@ -4692,6 +4938,7 @@ local function saveStudioCam()
 	local cam = workspace.CurrentCamera
 	if cam then
 		MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus }
+		if not MOD.underMap(cam.CFrame) then MOD.preCam = MOD.savedCam end   -- (0.31.5: Studio's view before ROBLEND)
 		MOD.rememberCam(cam.CFrame)
 	end
 end
@@ -4726,10 +4973,13 @@ setStudioView = function(b)
 end
 function MOD.resetView()
 	if not view then return end
+	MOD.flyHeld = {}
+	if navDrag then navDrag = nil end
 	view.ortho, view.autoOrtho, view.viewName = false, false, nil
 	view.yaw, view.pitch = math.rad(35), math.rad(26)
 	local any = false
-	for _, r in pairs(scene) do if r.shown then any = true break end end
+	for p, r in pairs(scene) do if r.shown and p.Parent and shownHere(p) then any = true break end end
+	for p in pairs(extras) do if p.Parent and shownHere(p) then any = true break end end
 	if any then frameAll() else view.focus, view.dist = home(), 30 view:update() end
 	dirtyCage = true
 end
@@ -4743,6 +4993,96 @@ api.setOrbitMode = function(b)
 	if navDrag and navDrag.lmb then navDrag = nil end
 	setStatus(MOD.orbitMode and "ORBIT MODE: left-drag turns the view, Shift + drag slides it, Ctrl + drag zooms. Esc or the orbit button = off." or "Orbit mode off: left-click selects again.")
 end
+-- 0.31.0 ROBLOX CAMERA (Dylan: "an option up top right to enable roblox movement"): the camera button in the 3D
+-- view's header. On = Studio's controls: hold right mouse + drag = look around, WASD = fly while right mouse is held
+-- (Q / E down / up, Shift = slower), wheel = zoom, middle mouse = pan, F = focus the selection. A quick right-click
+-- still opens the menu, and WASD / Q / E are Blender keys again as soon as right mouse comes up.
+pcall(function() MOD.robloxNav = plugin:GetSetting("RB_RobloxNav") == true end)
+MOD.FLY_KEYS = { [Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true, [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true, [Enum.KeyCode.Q] = true, [Enum.KeyCode.E] = true }
+api.setRobloxNav = function(b)
+	MOD.robloxNav = b == true
+	pcall(function() plugin:SetSetting("RB_RobloxNav", MOD.robloxNav) end)
+	MOD.flyHeld = {}
+	setStatus(MOD.robloxNav and "ROBLOX CAMERA: WASD to fly (Q / E down / up, Shift = slower), right mouse + drag to look (right mouse is only for the camera), wheel = zoom, middle mouse = pan, F = focus." or "Blender camera: middle mouse = orbit, Shift + middle = pan, wheel = zoom.")
+end
+-- 0.31.1 (Dylan: "the roblox cam does not work"): the fly keys are tracked from the key-down / key-up events
+-- themselves (Studio's own camera grabs right mouse + WASD in the 3D view, and asking "is W down?" wasn't
+-- reliable then), and like Studio, WASD flies in Object Mode WITHOUT holding right mouse. In Edit Mode W A S D Q E
+-- are Blender's keys (E = extrude, S = scale...) unless right mouse is held.
+MOD.flyHeld = {}
+function MOD.canFly(k, shift, ctrl, alt)
+	if not (MOD.robloxNav and MOD.FLY_KEYS[k] and uiOn and ownView() and not modal) then return false end
+	if ctrl or alt or ui.menuOpen then return false end
+	local nd = navDrag
+	if nd and nd.rmb then return true end   -- right mouse held: always flies (any mode)
+	-- (0.31.4, Dylan: "in edit mode the shortcut keys still apply"): Edit Mode flies freely too - with the Roblox
+	-- camera on, W A S D Q E are the camera's everywhere (Extrude, Scale... are in the tool strip and menus)
+	if shift and (k == Enum.KeyCode.A or k == Enum.KeyCode.D) then return false end   -- Shift A = Add, Shift D = Duplicate
+	return ui:inCanvas(mousePos()) and not ui:overUI(mousePos())
+end
+function MOD.flyTick(now)
+	local dt = now - (MOD.flyT or now)
+	MOD.flyT = now
+	if not next(MOD.flyHeld) then return end
+	if not (MOD.robloxNav and view and ownView() and uiOn and not modal) then MOD.flyHeld = {} return end
+	-- 0.31.5 (Dylan: "after an import the camera ends up in the sky"): a key let go while Studio had the keyboard
+	-- (a dialog, another window, Import from Studio) never sent its key-up, so ROBLEND kept flying - E = up, into the
+	-- sky. Every held key is checked against the keyboard itself; once that check has ever seen a key down, a key it
+	-- says is up is dropped. And no key flies for more than 6 seconds without being pressed again.
+	for k, t in pairs(MOD.flyHeld) do
+		local down = keyDown(k)
+		if down then MOD.kdOK = true end
+		if (MOD.kdOK and not down) or (type(t) == "number" and now - t > 6) then MOD.flyHeld[k] = nil end
+	end
+	if not next(MOD.flyHeld) then return end
+	local h = MOD.flyHeld
+	local function kd(c) return h[c] and 1 or 0 end
+	local mv = Vector3.new(kd(Enum.KeyCode.D) - kd(Enum.KeyCode.A), kd(Enum.KeyCode.E) - kd(Enum.KeyCode.Q), kd(Enum.KeyCode.W) - kd(Enum.KeyCode.S))
+	if mv.Magnitude > 0 then
+		if navDrag and navDrag.rmb then navDrag.flew = true end
+		view:fly(mv, dt, shiftDown())
+		view.viewName = nil
+	end
+end
+-- right mouse down in the view with the Roblox camera on: start looking round (either source)
+function MOD.rmbLook(mp)
+	if not (MOD.robloxNav and uiOn and ownView() and not modal and ui:inCanvas(mp)) then return false end
+	if navDrag and navDrag.rmb then return true end
+	local cam0
+	pcall(function() cam0 = workspace.CurrentCamera.CFrame end)
+	navDrag = { kind = "look", last = mp, moved = 0, rmb = true, t0 = os.clock(), cam0 = cam0, camLast = cam0 }
+	return true
+end
+-- 0.31.3 (Dylan: "right click and turn does not work in roblox cam mode"): in Studio, holding right mouse over the
+-- 3D view hands the mouse to Studio's OWN camera - it locks the cursor and turns Studio's camera (hidden under
+-- ROBLEND's view), and the mouse movement never reaches ROBLEND. So ROBLEND watches Studio's camera instead: however
+-- much it turned (and flew, with WASD) this frame, ROBLEND's view does the same. When right mouse comes up, Studio's
+-- camera is put back where it was. (If the mouse movement does arrive, that drives it and this does nothing.)
+local function yawPitch(look) return math.atan2(-look.X, -look.Z), math.asin(math.clamp(-look.Y, -1, 1)) end
+function MOD.mirrorTick()
+	local nd = navDrag
+	if not (nd and nd.kind == "look" and nd.camLast and view and ownView()) then return end
+	local cf
+	pcall(function() cf = workspace.CurrentCamera.CFrame end)
+	if not cf or cf == nd.camLast then return end
+	local last = nd.camLast
+	-- (ROBLEND holds Studio's camera still while its own view is up - MOD.holdStudioCam puts it back every frame - so
+	-- each frame's turn is measured from that held place)
+	nd.camLast = (MOD.savedCam and MOD.savedCam.cf) or cf
+	if nd.lastMoveT and os.clock() - nd.lastMoveT < 0.15 then return end   -- (ROBLEND hears the mouse itself)
+	local y0, p0 = yawPitch(last.LookVector)
+	local y1, p1 = yawPitch(cf.LookVector)
+	local dy = (y1 - y0 + math.pi) % (2 * math.pi) - math.pi
+	-- (ROBLEND's yaw / pitch are measured on the pivot-to-eye direction = minus the look direction, the same way
+	-- yawPitch reads Studio's camera, so the change carries straight across)
+	-- (a jump of more than ~30 degrees in one frame isn't a mouse turn - something else moved Studio's camera)
+	if (math.abs(dy) > 1e-6 or math.abs(p1 - p0) > 1e-6) and math.abs(dy) < 0.5 and math.abs(p1 - p0) < 0.5 then
+		view:turn(dy, p1 - p0)
+		nd.moved += 5
+		view.viewName = nil
+	end
+	-- (0.31.5: Studio's camera moving is NOT copied any more - only its turning. Flying is ROBLEND's own WASD.)
+end
 -- start a left-drag view move in orbit mode (from the plugin mouse or UserInputService, whichever comes first)
 function MOD.orbitStart(mp)
 	if not (MOD.orbitMode and uiOn and ownView() and not modal and not paintMode) then return false end
@@ -4754,6 +5094,7 @@ function MOD.orbitStart(mp)
 	return true
 end
 setUIOn = function(on)
+	MOD.flyHeld = {}   -- (0.31.5: nothing keeps flying across open / close)
 	if on and placing then finishPlacing("place") end
 	-- Studio's own tool (Select / Move / Scale / Rotate): remembered on open, put back on close, so Studio's
 	-- move arrows don't appear on parts after leaving ROBLEND
@@ -5109,21 +5450,27 @@ hook("Button2Down", mouse.Button2Down, function()
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
 		return
 	end
+	if MOD.rmbLook(mp) then return end
 	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true, t0 = os.clock() } end
 end)
+-- right mouse up (from the plugin mouse or UserInputService, whichever comes first - the second does nothing)
+function MOD.rmbUp()
+	if lasso then finishLasso() return end
+	local nd = navDrag
+	if not (nd and nd.rmb) then return end
+	navDrag = nil
+	if nd.cam0 then pcall(function() workspace.CurrentCamera.CFrame = nd.cam0 end) end   -- (0.31.3: Studio's camera back)
+	-- (0.31.2, Dylan: "right click needs to be free for the roblox cam"): with the Roblox camera, right mouse is only
+	-- for the camera - no menu pops up, however short the click (the header menus have everything)
+	if nd.moved < 4 and not nd.flew and nd.kind ~= "look" then
+		local ok, err = pcall(function()
+			if nd.kind == "pan" then MOD.placeCursor(mousePos()) else ui:openContextMenu(mousePos()) end
+		end)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+	end
+end
 pcall(function()
-	hook("Button2Up", mouse.Button2Up, function()
-		if lasso then finishLasso() return end
-		local nd = navDrag
-		if not (nd and nd.rmb) then return end
-		navDrag = nil
-		if nd.moved < 4 then
-			local ok, err = pcall(function()
-				if nd.kind == "pan" then MOD.placeCursor(mousePos()) else ui:openContextMenu(mousePos()) end
-			end)
-			if not ok then warn(NAME .. ": " .. tostring(err)) end
-		end
-	end)
+	hook("Button2Up", mouse.Button2Up, function() MOD.rmbUp() end)
 end)
 -- one turn of the wheel can arrive twice (the plugin mouse and UserInputService): take the first, skip its twin.
 -- (Before, once the plugin mouse had sent one, the other was ignored for good, so the wheel died when Studio
@@ -5144,8 +5491,8 @@ local function wheel(steps)
 	view:zoomAt(steps, ok and target or nil)
 end
 pcall(function()
-	hook("WheelForward", mouse.WheelForward, function() if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
-	hook("WheelBackward", mouse.WheelBackward, function() if MOD.wheelFrom("mouse", -1) then wheel(-1) end end)
+	hook("WheelForward", mouse.WheelForward, function() if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
+	hook("WheelBackward", mouse.WheelBackward, function() if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end if MOD.wheelFrom("mouse", -1) then wheel(-1) end end)
 end)
 -- a view drag (middle / right button held) ends when the button comes up. If that release never reaches ROBLEND
 -- (let go over another window, a panel, or outside Studio), the view kept turning with every mouse move and
@@ -5160,6 +5507,7 @@ function MOD.navAlive()
 			nd.seenDown = true
 		elseif nd.seenDown and (nd.moved >= 4 or os.clock() - (nd.t0 or 0) > 0.5) then
 			navDrag = nil
+			if nd.cam0 then pcall(function() workspace.CurrentCamera.CFrame = nd.cam0 end) end   -- (0.31.3)
 			return false
 		end
 	end
@@ -5177,7 +5525,7 @@ function MOD.navMove(src, dx, dy)
 	if nd.src and nd.src ~= src and now - (nd.srcT or 0) < 0.2 then return false end
 	nd.src, nd.srcT = src, now
 	nd.moved += math.abs(dx) + math.abs(dy)
-	if dx ~= 0 or dy ~= 0 then api.navDrag(nd.kind, dx, dy) end
+	if dx ~= 0 or dy ~= 0 then nd.lastMoveT = now api.navDrag(nd.kind, dx, dy) end
 	return true
 end
 -- another plugin keeps taking control of the mouse (Studio gives it to one plugin at a time; ROBLEND takes it back
@@ -5429,14 +5777,29 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 		if MOD.orbitMode and not ui:overUI(mousePos()) then MOD.orbitStart(mousePos()) end
 		return
 	end
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if MOD.robloxNav and not ctrl and not UVE.open then MOD.rmbLook(mousePos()) end
+		return
+	end
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
 		local mp = mousePos()
-		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0, t0 = os.clock() } end
+		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = MOD.robloxNav and (ctrl and "zoom" or "pan") or (shift and "pan" or (ctrl and "zoom" or "orbit")), last = mp, moved = 0, t0 = os.clock() } end
 		return
 	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
 	if k == Enum.KeyCode.Escape and navDrag then navDrag = nil return end
+	-- 0.31.0 Roblox camera: WASD / Q E fly while right mouse is held (MOD.flyTick) - they aren't Blender keys then
+	if MOD.canFly(k, shift, ctrl, keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)) then
+		MOD.flyHeld[k] = os.clock()
+		if navDrag and navDrag.rmb then navDrag.flew = true end
+		return
+	end
+	if MOD.robloxNav and k == Enum.KeyCode.F and not ctrl and not shift and not editing and not modal and uiOn and not ui.menuOpen
+		and not (keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)) then
+		pcall(frameSelected)
+		return
+	end
 	if k == Enum.KeyCode.Escape and MOD.orbitMode and not modal and not ui.menuOpen then api.setOrbitMode(false) return end
 	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
@@ -5518,7 +5881,21 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if not ok then warn(NAME .. ": " .. tostring(err)) setStatus("Error: " .. tostring(err)) end
 end)
 pcall(function()
+	pcall(function()
+		UIS.WindowFocusReleased:Connect(function()
+			MOD.flyHeld = {}
+			if navDrag and navDrag.kind == "look" then MOD.rmbUp() end
+		end)
+	end)
 	hook("InputEnded", UIS.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			if MOD.flyHeld[input.KeyCode] then MOD.flyHeld[input.KeyCode] = nil end
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			if navDrag and navDrag.rmb and navDrag.kind == "look" then MOD.rmbUp() end
+			return
+		end
 		if input.UserInputType == Enum.UserInputType.MouseButton3 then
 			if navDrag and not navDrag.rmb then navDrag = nil end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -5526,8 +5903,31 @@ pcall(function()
 			if uiOn then ui:mouseUp() end
 		end
 	end)
+	-- 0.31.1 TRACKPAD (wahster: "2 fingers to zoom or rotate and shift + 2 fingers to pan"): Roblox's PointerAction
+	-- reports a two-finger swipe (both ways) and a pinch on trackpads that send them. Swipe = turn the view,
+	-- Shift + swipe = pan, pinch = zoom. A plain mouse wheel sends no swipe, so nothing changes for a mouse. While a
+	-- swipe is coming in, the wheel event Windows makes from the same swipe is skipped (no zoom on top of the turn).
+	pcall(function()
+		hook("PointerAction", UIS.PointerAction, function(_, pan, pinch)
+			if not (uiOn and ownView() and not modal and not ui.menuOpen) then return end
+			local mp = mousePos()
+			if not ui:inCanvas(mp) or ui:overUI(mp) then return end
+			if typeof(pan) == "Vector2" and pan.Magnitude > 1e-3 then
+				MOD.swipeT = os.clock()
+				MOD.trackpadSeen = true
+				local k = MOD.TRACKPAD_SPEED or 1
+				if shiftDown() then api.navDrag("pan", pan.X * k, pan.Y * k) else api.navDrag("orbit", pan.X * k, pan.Y * k) end
+			end
+			if type(pinch) == "number" and math.abs(pinch) > 1e-4 then
+				MOD.swipeT = os.clock()
+				local ok, target = pcall(MOD.zoomTarget, mp)
+				view:zoomAt(math.clamp(pinch * 8, -3, 3), ok and target or nil)
+			end
+		end)
+	end)
 	hook("InputChanged", UIS.InputChanged, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end   -- (the wheel twin of a trackpad swipe)
 			local dir = input.Position.Z > 0 and 1 or -1
 			if MOD.wheelFrom("uis", dir) then wheel(dir) end
 		elseif input.UserInputType == Enum.UserInputType.MouseMovement then
@@ -5591,6 +5991,8 @@ RunService.Heartbeat:Connect(function()
 	MOD.mt.fps = MOD.mt.lastF and (MOD.mt.fps * 0.9 + 0.1 / math.max(now - MOD.mt.lastF, 1e-3)) or 0
 	MOD.mt.lastF = now
 	if navDrag then MOD.navAlive() end
+	pcall(MOD.flyTick, now)
+	pcall(MOD.mirrorTick)
 	if placing then pcall(placeUpdate) end
 	if uiOn and ownView() then catchRibbonTool() end
 	if uiOn and now - lastUI > 0.1 then

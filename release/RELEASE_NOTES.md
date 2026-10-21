@@ -1,4 +1,4 @@
-# ROBLEND 0.30.0
+# ROBLEND 0.34.0
 
 A free, open-source (GPL-2.0-or-later) Blender-style modelling plugin for Roblox Studio, by Cruppnomics.
 ROBLEND is not affiliated with or endorsed by the Blender Foundation.
@@ -10,6 +10,36 @@ ROBLEND is not affiliated with or endorsed by the Blender Foundation.
 3. In your place: Game Settings > Security > allow Mesh / Image APIs. Saving meshes needs File > Beta Features > "CreateAssetAsync Lua API".
 
 ## New since 0.16
+
+**0.34.0 - store copies can publish meshes (MeshKeeper):** Roblox doesn't let plugins installed from the Creator Store upload meshes. A store copy of ROBLEND now **keeps each mesh in the place** as data instead, and adds three small **MeshKeeper** scripts to the game (ReplicatedStorage.MeshKeeper, ServerScriptService.MeshKeeperServer, StarterPlayerScripts.MeshKeeperClient) that build the real mesh when the game runs - on the server for collisions and on each player for what they see. Turn on **Game Settings > Security > Allow Mesh / Image APIs** for the published game. The file version from GitHub still uploads real meshes (no scripts needed). PROTO uses the same MeshKeeper. (Test it with the file version: in the Command Bar `workspace:SetAttribute("MeshKeeperTest", true)`, save, press Play.)
+
+**0.33.2:** Palette **Lighter / Darker / colours** with Apply to: **Selected** only touch the faces you picked. With nothing picked they do nothing and say so (they used to do the whole part). Use Apply to: **Part** for the whole thing.
+
+**0.33.1:** Colouring shows the real colour: a coloured face stays its true colour when it's picked (the yellow outline shows it's picked), and while the **Material** tab is open picked faces aren't filled orange at all.
+
+**0.33.0 - Palette + shading:** **Properties > Material > Palette** - a grid of 13 colours x 5 shades (light rows on top, dark below), like the low-poly "palette texture" trick in Blender. Tab into Edit Mode, pick faces (Alt-click = a ring, L = a whole piece), click a colour: those faces take it, with sharp edges between colours. **Apply to** Selected / Part / Build (every ROBLEND part). **Lighter / Darker** shade what's picked one step (rims, undersides, gaps); **Clear** goes back to plain. No image, UVs or upload needed - the colours are part of the mesh, save with it, and survive bevel, extrude and modifiers. Paint > Clear Colours clears them too.
+
+**0.32.0 - Modes button + tutorial:** A **Modes** button in the 3D view header, next to the camera button, opens the Mode menu (Object / Edit / Sculpt / Vertex Paint) - the same as Q, and still there when the Roblox camera uses Q to fly down. The **Tutorial** (Help > Tutorial) now ends by showing the Roblox camera button and the Modes button (each lights up yellow while it's explained; Next moves on).
+
+**0.31.9:** New shapes always start at **home** - the same spot under the map every time, where imports land too - instead of miles away where the 3D cursor was left. If the view is looking somewhere else (after flying off with the Roblox camera, say), it comes to the new shape. A 3D cursor you placed yourself and can still see is still used.
+
+**0.31.8:** **Place in Studio** with nothing selected now takes everything in the workshop (it used to only ask you to select something, and looked broken). Select something first to place just that.
+
+**0.31.7:** Opening ROBLEND again after **Place in Studio** no longer shows an empty grey view: what you'd just placed back on the map was still counted, so the view zoomed out to fit both the map and the workshop (10,000 studs apart). Now only what's really in the workshop is framed, and an empty workshop starts at home (the 3D cursor too).
+
+**0.31.6:** Back to home: after **Import from Studio** the view starts from the normal home angle on what came in (not whatever way it was last turned or flown), and after **Place in Studio** ROBLEND's view goes back home, so it starts there next time. Nothing carries on flying through either.
+
+**0.31.5:** The Roblox camera no longer drifts off into the sky: a key let go while Studio had the keyboard (Import from Studio, a dialog, another window) never sent its key-up, so ROBLEND kept flying. Held keys are now checked against the keyboard, cleared when Studio loses focus or ROBLEND opens / closes, and never fly more than 6 seconds on one press. Right-drag only copies Studio's camera turning (not its moving), and ignores sudden jumps. After **Place in Studio**, Studio's camera is put back how it was before ROBLEND opened (its place, pivot and normal camera type).
+
+**0.31.4:** With the Roblox camera on, W A S D Q E fly in Edit Mode too (no right mouse needed); Extrude, Scale and the rest are in the tool strip and menus. Turn the camera off for Blender's keys.
+
+**0.31.3:** Right mouse + drag now turns the view with the Roblox camera on. In Studio, holding right mouse hands the mouse to Studio's own camera, so the movement never reached ROBLEND; now ROBLEND follows how Studio's camera turns (and flies) and puts Studio's camera back when you let go.
+
+**0.31.2:** With the Roblox camera on, right mouse is only for the camera: no menu pops up, even on a quick right-click (the header menus have everything).
+
+**0.31.1 - Roblox camera works like Studio, and trackpads:** With the Roblox camera on, **WASD flies in Object Mode without holding right mouse**, like Studio (Q / E down / up, Shift = slower; Shift A and Shift D are still Add and Duplicate). In Edit Mode, hold right mouse to fly, so E, S, A... stay Blender's keys there. The keys and right mouse are now read from both of Studio's input sources, so the camera keeps working when Studio's own camera grabs right mouse. It's also in **View > Roblox Camera**. **Trackpads:** on a laptop trackpad that sends two-finger gestures, a **two-finger swipe turns the view**, **Shift + swipe pans** and a **pinch zooms** (a swipe no longer also zooms). A plain mouse wheel works as before.
+
+**0.31.0 - Roblox camera:** A new **camera button** in the 3D view's header (top right, next to X-Ray). Turn it on (lit blue) and ROBLEND's view moves like Roblox Studio: **hold right mouse and drag** to look around, **WASD** to fly while right mouse is held (**Q / E** down / up, **Shift** = slower), **mouse wheel** to zoom, **middle mouse** to pan, **F** to focus on the selection. A quick right-click (no drag) still opens the menu, and W / A / S / D / Q / E are Blender keys again as soon as right mouse comes up. The status bar shows the controls while it's on. Click it again for Blender's controls (middle mouse = orbit). It's remembered. On a laptop trackpad: a two-finger click is a right-click, so two-finger click + drag looks around; two-finger scroll zooms.
 
 **0.30.0 - Transform gizmo:** Blender's move / rotate / scale gizmo. Pick **Move**, **Rotate**, **Scale** or **Transform** in the tool strip (left) and coloured handles sit on whatever is selected, in Object Mode and Edit Mode: **arrows** (drag = move along X, Y or Z), **rings** (drag = turn round that axis), **boxes** (drag = stretch along it), little **squares** (move or scale flat on that plane) and a **white ring** (move freely, or turn / scale round the view). They light up under the mouse, and letting go finishes it. It's the same move as G / R / S with X / Y / Z, so typing a number, Ctrl to snap and Esc to cancel still work. No more lining things up by eye. **View > Transform Gizmo** turns it off. Turning round an axis now follows the mouse the same way whichever way the axis points (Blender), with the keys too.
 

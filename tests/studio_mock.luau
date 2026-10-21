@@ -146,7 +146,7 @@ function Signal:Fire(...) for _, f in ipairs(table.clone(self.fns)) do f(...) en
 -- ===== instances =====
 MOCK = { buttons = {}, warns = {}, opened = {} }
 local Inst = {}
-local SIGNALS = { SelectionChanged = true, MouseButton1Up = true, Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, DescendantAdded = true, MouseButton1Down = true }
+local SIGNALS = { SelectionChanged = true, MouseButton1Up = true, Triggered = true, Activated = true, Changed = true, Click = true, Deactivation = true, Button1Down = true, Button1Up = true, Button2Down = true, Move = true, MouseEnter = true, MouseLeave = true, FocusLost = true, MouseButton2Click = true, Unloading = true, Button2Up = true, WheelForward = true, WheelBackward = true, InputEnded = true, InputChanged = true, PointerAction = true, DescendantAdded = true, MouseButton1Down = true }
 local function newInst(class)
 	local o = { __inst = true, _p = { ClassName = class, Name = class }, _kids = {}, _attr = {}, _sig = {}, _psig = {} }
 	return setmetatable(o, Inst)
@@ -369,7 +369,7 @@ function EM:AddTriangle(a, b, c)
 	assert(#self.t <= 20000, "too many triangles")
 	return #self.t
 end
-function EM:AddColor() self.c += 1 return self.c end
+function EM:AddColor(col) self.c += 1 self.cols = self.cols or {} self.cols[self.c] = col return self.c end
 function EM:AddUV(p) assert(p.X == p.X and p.Y == p.Y, "NaN uv") self.uv = self.uv or {} self.uv[#self.uv + 1] = p return #self.uv end
 function EM:SetFaceUVs(f, ids) assert(self.t[f] and #ids == 3, "face uvs") for _, i in ipairs(ids) do assert(self.uv[i], "bad uv id") end self.fuv = (self.fuv or 0) + 1 self.fuvs = self.fuvs or {} self.fuvs[f] = table.clone(ids) end
 function EM:GetFaceUVs(f) local u = self.fuvs and self.fuvs[f] if not u then error("face has no UVs") end return table.clone(u) end
@@ -379,7 +379,7 @@ function EM:SetFaceNormals(f, ids) assert(self.t[f] and #ids == 3, "face normals
 function EM:GetFaceNormals(f) local u = self.fns and self.fns[f] if not u then error("face has no normals") end return table.clone(u) end
 function EM:GetNormal(i) return assert(self.n and self.n[i], "bad normal id") end
 function EM:Destroy() if not self.destroyed then MOCK.emAlive -= 1 end self.destroyed = true end
-function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) end
+function EM:SetFaceColors(f, cols) assert(self.t[f] and #cols == 3) for _, c in ipairs(cols) do assert(self.cols and self.cols[c], "bad colour id") end self.fcol = self.fcol or {} self.fcol[f] = table.clone(cols) end
 -- reading a mesh back (Convert): ids are just the array indices
 function EM:GetVertices() local o = {} for i in ipairs(self.v) do o[i] = i end return o end
 function EM:GetPosition(i) return assert(self.v[i], "bad vert id") end
@@ -490,6 +490,14 @@ function Inst.GetTextSize(_, text, size) return Vector2.new(#text * size * 0.55,
 MOCK.textService = TextSvc
 local services = { Selection = Selection, UserInputService = UIS, RunService = RunService, ChangeHistoryService = CHS,
 	HttpService = Http, CoreGui = CoreGui, TextService = TextSvc, AssetService = Asset, GeometryService = Geo, Workspace = workspace }
+-- (0.34.0: MeshKeeper puts its scripts in the game)
+services.ReplicatedStorage = newInst("ReplicatedStorage")
+services.ServerScriptService = newInst("ServerScriptService")
+services.StarterPlayer = newInst("StarterPlayer")
+do local sps = newInst("StarterPlayerScripts") sps.Name = "StarterPlayerScripts" sps.Parent = services.StarterPlayer end
+-- (0.34.0: MeshKeeper tags parts)
+services.CollectionService = { AddTag = function() end, RemoveTag = function() end, GetTagged = function() return {} end,
+	GetInstanceAddedSignal = function() return { Connect = function() return { Disconnect = function() end } end } end }
 game = newInst("DataModel")
 function Inst.GetService(_, n) return assert(services[n], "no service " .. n) end
 MOCK.services = services

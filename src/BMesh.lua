@@ -177,7 +177,7 @@ end
 function BMesh:faceCreate(verts, example)
 	local n = #verts
 	if n < 3 then return nil end
-	local f = { l = nil, len = n, no = V3(0, 1, 0), sel = false, mat = example and example.mat or nil, smooth = example and example.smooth or nil }
+	local f = { l = nil, len = n, no = V3(0, 1, 0), sel = false, mat = example and example.mat or nil, smooth = example and example.smooth or nil, col = example and example.col or nil }
 	local prev, first
 	for i = 1, n do
 		local v, vn = verts[i], verts[i % n + 1]
@@ -284,7 +284,7 @@ end
 function BMesh:faceSplit(f, lA, lB)
 	local v1, v2 = lA.v, lB.v
 	local e = self:edgeCreate(v1, v2, true)
-	local f2 = { l = nil, len = 0, no = f.no, sel = f.sel, mat = f.mat, smooth = f.smooth }
+	local f2 = { l = nil, len = 0, no = f.no, sel = f.sel, mat = f.mat, smooth = f.smooth, col = f.col }
 	local lF1 = loopCreate(v2, e, f)
 	local lF2 = loopCreate(v1, e, f2)
 	lF1.prev = lB.prev
@@ -419,6 +419,14 @@ function BMesh:toData()
 		vc[vi[v]] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or 0xFFFFFF
 	end
 	if anyCol then d.vc = vc end
+	-- face colours (Palette, 0.33.0): one 0xRRGGBB per face in face order, -1 = none; only saved when used
+	local fc, anyFC = {}, false
+	for i, f in ipairs(fOrder) do
+		local c = f.col
+		if c then anyFC = true end
+		fc[i] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or -1
+	end
+	if anyFC then d.fc = fc end
 	-- UVs (Unwrap / Smart UV Project): per face, u v for each corner in face order (0 = this face has none)
 	local uvs, anyUV = {}, false
 	for i, f in ipairs(fOrder) do
@@ -456,6 +464,9 @@ function BMesh.fromData(d)
 	local es = d.e or {}
 	for i = 1, #es, 2 do if vs[es[i]] and vs[es[i + 1]] then bm:edgeCreate(vs[es[i]], vs[es[i + 1]], true) end end
 	for _, i in ipairs(d.s or {}) do if fl[i] then fl[i].smooth = true end end
+	for i, hex in ipairs(d.fc or {}) do
+		if fl[i] and type(hex) == "number" and hex >= 0 then fl[i].col = Color3.fromRGB(math.floor(hex / 65536) % 256, math.floor(hex / 256) % 256, hex % 256) end
+	end
 	if d.uv and Vector2 then
 		for i, list in ipairs(d.uv) do
 			local f = fl[i]

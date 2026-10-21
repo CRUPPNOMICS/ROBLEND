@@ -96,7 +96,7 @@ local function mirrorAxis(bm, axis, merge, dist, bisect)
 		local f = spec.faces[i]
 		local r = {}
 		for j = #f.v, 1, -1 do r[#r + 1] = twin[f.v[j]] end
-		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 	end
 	local ne = #spec.edges
 	for i = 1, ne do
@@ -167,7 +167,7 @@ local function catmullClark(bm)
 	for f in pairs(bm.faces) do
 		for _, l in ipairs(BMesh.faceLoops(f)) do
 			-- corner quad: v, middle of the edge out, face centre, middle of the edge in
-			spec.faces[#spec.faces + 1] = { v = { vp[l.v], ep[l.e], fp[f], ep[l.prev.e] }, sel = f.sel, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = { vp[l.v], ep[l.e], fp[f], ep[l.prev.e] }, sel = f.sel, smooth = f.smooth, col = f.col }
 		end
 	end
 	return (MT.fromSpec(spec))
@@ -228,7 +228,7 @@ function Mods.array(bm, m)
 			local f = spec.faces[i]
 			local r = {}
 			for j, k in ipairs(f.v) do r[j] = k + base end
-			spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 		end
 		for i = 1, ne do
 			local e = spec.edges[i]
@@ -900,7 +900,7 @@ function Mods.edgesplit(bm, m)
 		for i, l in ipairs(ls) do list[i] = newOf[l.v][f] end
 		local nf = out:faceCreate(list)
 		if nf then
-			nf.smooth, nf.sel = f.smooth, f.sel
+			nf.smooth, nf.sel, nf.col = f.smooth, f.sel, f.col
 			local nls = BMesh.faceLoops(nf)
 			for i, l in ipairs(ls) do if l.uv and nls[i] then nls[i].uv = l.uv end end
 		end

@@ -20,6 +20,50 @@ Paint.BY_ID = {}
 for _, b in ipairs(Paint.BRUSHES) do Paint.BY_ID[b.id] = b end
 Paint.PALETTE = { 0xffffff, 0x1e1e1e, 0x7a7a7a, 0xc42b2b, 0xe8822e, 0xf2cd37, 0x5ba84a, 0x2b86c4, 0x6a4bc4, 0xd96ab8, 0x8a5a36, 0xffd60a }
 
+-- ===== Palette (0.33.0): low-poly colouring, like the "palette texture" trick in Blender =====
+-- 13 base colours across, 5 shades down (light to dark). Clicking one colours whole faces (f.col), so the
+-- mesh stays one piece with sharp colour edges - no image or UVs needed, and it saves with the mesh.
+Paint.PAL_HUES = { 0xd63a3a, 0xf08a2e, 0xf5d13a, 0x9ad13a, 0x3fae4f, 0x2fb39a, 0x37b7e6, 0x2f6fd6, 0x7a4fd6, 0xd65fb0, 0x8a5a36, 0xe0b48a, 0x8c8c8c }
+Paint.PAL_SHADES = { 0.55, 0.28, 0, -0.32, -0.6 } -- + = towards white, - = towards black
+-- one shade step lighter (+) or darker (-) of a colour
+function Paint.shade(c, amount)
+	c = c or Color3.new(1, 1, 1)
+	local t = math.min(math.abs(amount), 1)
+	local to = amount >= 0 and 1 or 0
+	return Color3.new(c.R + (to - c.R) * t, c.G + (to - c.G) * t, c.B + (to - c.B) * t)
+end
+-- the colour in column `col` (1-13), row `row` (1-5) of the palette; the grey column runs white to black
+function Paint.palColor(col, row)
+	local base = Paint.fromInt(Paint.PAL_HUES[col])
+	if col == #Paint.PAL_HUES then
+		local v = ({ 0.97, 0.78, 0.55, 0.32, 0.12 })[row]
+		return Color3.new(v, v, v)
+	end
+	return Paint.shade(base, Paint.PAL_SHADES[row])
+end
+-- colour faces (a set, f -> true): returns how many
+function Paint.colorFaces(faces, color)
+	local n = 0
+	for f in pairs(faces) do f.col = color n += 1 end
+	return n
+end
+-- the colour a face shows now (its own, or the average of its points, or white)
+function Paint.faceColor(BMesh, f)
+	if f.col then return f.col end
+	local r, g, b, k = 0, 0, 0, 0
+	for _, v in ipairs(BMesh.faceVerts(f)) do
+		local c = v.col or Color3.new(1, 1, 1)
+		r += c.R g += c.G b += c.B k += 1
+	end
+	return k > 0 and Color3.new(r / k, g / k, b / k) or Color3.new(1, 1, 1)
+end
+-- Lighter / Darker: move each face one shade step (step = +1 / -1)
+function Paint.shadeFaces(BMesh, faces, step)
+	local n = 0
+	for f in pairs(faces) do f.col = Paint.shade(Paint.faceColor(BMesh, f), step * 0.18) n += 1 end
+	return n
+end
+
 local function rgb(c) return c and c.R or 1, c and c.G or 1, c and c.B or 1 end
 local function mix(a, b, t)
 	local ar, ag, ab = rgb(a)

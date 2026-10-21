@@ -1,4 +1,4 @@
-<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0026"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4"><External>null</External><External>nil</External><Item class="Script" referent="RBX0028"><Properties><string name="Name">ROBLEND</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - a free, open-source mesh editor for Roblox Studio
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27). Mesh engine converted from Blender's BMesh
@@ -15,7 +15,7 @@
 ]]
 
 local NAME = "ROBLEND"
-local VERSION = "0.30.0"
+local VERSION = "0.34.0"
 
 local BMesh = require(script.BMesh)
 local Ops = require(script.Ops)
@@ -395,7 +395,7 @@ end
 local BETA_MSG = "Saving needs Studio's beta: File > Beta Features > turn on \"CreateAssetAsync Lua API\", then restart Studio."
 -- Roblox doesn't let plugins installed from the Creator Store upload anything yet (it's coming, with a permission
 -- prompt). Until then a store copy can't save meshes to Roblox: say so once, and stop trying in the background.
-EDIT.STORE_MSG = "Roblox doesn't let Creator Store plugins save meshes yet. Your meshes stay in this place in Studio, but won't show in a published game. To save them: get the free file version of ROBLEND (GitHub: CRUPPNOMICS/ROBLEND, Releases), or use Bake to Parts / Export .obj (Mesh menu)."
+EDIT.STORE_MSG = "Store copy: Roblox doesn't let store plugins upload meshes, so ROBLEND keeps them in the place (MeshKeeper) and they're built when the game runs - turn on Game Settings > Security > Allow Mesh / Image APIs. (The free file version from GitHub: CRUPPNOMICS/ROBLEND, Releases uploads real meshes.)"
 pcall(function() EDIT.storeBlocked = plugin:GetSetting("RB_StoreBlocked") == true end)
 -- 0.28.0 (Dylan): no automatic saves while you work (every save is an upload, and uploads are limited). Meshes save
 -- when you Place in Studio (EDIT.saveOnPlace) or press File > Save Mesh to Roblox / Save All Meshes.
@@ -408,11 +408,111 @@ local function dataHash(str)
 end
 local function isSaved(p)
 	local d = p and p:FindFirstChild("RB_Data")
-	return d ~= nil and p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == dataHash(saveKey(p))
+	if d == nil then return false end
+	local h = dataHash(saveKey(p))
+	if p:GetAttribute("RB_AssetId") ~= nil and p:GetAttribute("RB_SavedHash") == h then return true end
+	-- 0.34.0: a store copy keeps the mesh in the place (MeshKeeper) - that counts as saved
+	return p:GetAttribute("RB_KeptHash") == h and p:FindFirstChild("MeshKeeperData") ~= nil
+end
+-- ===== 0.34.0 MESH KEEPER (Dylan 21 Oct: "can the store version work"). Roblox won't let a plugin installed from the
+-- Creator Store upload meshes. So a store copy KEEPS each mesh in the place as data (a MeshKeeperData folder in the
+-- part, tag "MeshKeeper"), and the MeshKeeper scripts - added to the game once: ReplicatedStorage.MeshKeeper +
+-- ServerScriptService.MeshKeeperServer + StarterPlayerScripts.MeshKeeperClient - build the real mesh when the game
+-- runs. Same format + scripts as PROTO's. The file version still uploads real meshes.
+local MKP = { RUN = 'require(game:GetService("ReplicatedStorage"):WaitForChild("MeshKeeper")).start()' }
+function MKP.lib()
+	if MKP.MK then return MKP.MK end
+	local ok, M = pcall(function() return require(script.MeshKeeper) end)
+	if ok and type(M) == "table" then MKP.MK = M end
+	return MKP.MK
+end
+-- the MeshKeeper scripts in the game (once; an older module is brought up to date). Call inside a recording.
+function MKP.install()
+	local src = require(script.MeshKeeperSrc)
+	local RS = game:GetService("ReplicatedStorage")
+	local ver = tonumber(src:match("M%.VERSION = (%d+)")) or 1
+	local mod = RS:FindFirstChild("MeshKeeper")
+	if not (mod and mod:IsA("ModuleScript")) then
+		mod = Instance.new("ModuleScript")
+		mod.Name = "MeshKeeper"
+		mod.Source = src
+		mod:SetAttribute("Version", ver)
+		mod.Parent = RS
+	elseif (tonumber(mod:GetAttribute("Version")) or 0) < ver then
+		mod.Source = src
+		mod:SetAttribute("Version", ver)
+	end
+	local SSS = game:GetService("ServerScriptService")
+	if not SSS:FindFirstChild("MeshKeeperServer") then
+		local sc = Instance.new("Script")
+		sc.Name = "MeshKeeperServer"
+		sc.Source = MKP.RUN
+		sc.Parent = SSS
+	end
+	local SPS = game:GetService("StarterPlayer"):FindFirstChildOfClass("StarterPlayerScripts")
+	if SPS and not SPS:FindFirstChild("MeshKeeperClient") then
+		local sc = Instance.new("LocalScript")
+		sc.Name = "MeshKeeperClient"
+		sc.Source = MKP.RUN
+		sc.Parent = SPS
+	end
+end
+-- keep part p's mesh (with its modifiers) in the place. true, or false + why
+function MKP.keep(p)
+	local M = MKP.lib()
+	if not M then return false, "the MeshKeeper module is missing from the plugin" end
+	local data = saveKey(p)
+	local m = evaluated(p, (loadFrom(p)))
+	local mp, _, berr, em = Display.build(m, nil, nil, uvOf(p))
+	if not em then return false, tostring(berr or "no mesh") end
+	local okP, packed, nf = pcall(M.pack, em)
+	Display.emOf[mp] = nil
+	pcall(function() mp:Destroy() end)
+	pcall(function() em:Destroy() end)
+	if not okP then return false, "couldn't pack the mesh (" .. tostring(packed) .. ")" end
+	local rec
+	pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND keep mesh") end)
+	local okW, ew = pcall(function()
+		MKP.install()
+		M.write(p, packed)
+		p:SetAttribute("RB_KeptHash", dataHash(data))
+	end)
+	if rec then CHS:FinishRecording(rec, okW and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel) end
+	if not okW then return false, tostring(ew) end
+	if not MKP.told then
+		MKP.told = true
+		print(NAME .. " (store copy): Roblox doesn't let store plugins upload meshes, so ROBLEND keeps them IN THE PLACE instead and added the MeshKeeper scripts (ReplicatedStorage / ServerScriptService / StarterPlayerScripts) that build them when the game runs. For the published game turn on Game Settings > Security > Allow Mesh / Image APIs. (The file version from GitHub uploads real meshes instead.)")
+	end
+	return true, nf, #packed
+end
+-- a real upload worked: no kept copy needed any more
+function MKP.forget(p)
+	if not p:GetAttribute("RB_KeptHash") and not p:FindFirstChild("MeshKeeperData") then return end
+	local M = MKP.lib()
+	if M then pcall(M.forget, p) end
+	p:SetAttribute("RB_KeptHash", nil)
+end
+function MKP.keepNow(p, silent)
+	local ok, a, b, c = pcall(MKP.keep, p)
+	if ok and a then
+		local msg = ("Kept %s in the place (%d triangles, %d KB) - it shows in the published game (Game Settings > Security > Allow Mesh / Image APIs on)."):format(p.Name, b or 0, (c or 0) // 1024)
+		if not silent then setStatus(msg) end
+		print(NAME .. ": " .. msg)
+		return true
+	end
+	local why = ok and b or a
+	setStatus("Couldn't keep " .. p.Name .. ": " .. tostring(why))
+	warn(NAME .. ": couldn't keep " .. p.Name .. " - " .. tostring(why))
+	return false
 end
 local function saveMesh(p, quiet, silent)
 	if not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) or saving[p] then return end
-	if EDIT.storeBlocked and (quiet or silent) then return end   -- (no background tries from a store copy)
+	-- 0.34.0: a store copy can't upload - it keeps the mesh in the place instead (no upload, nothing to wait for)
+	-- (test switch: workspace attribute MeshKeeperTest = true makes the file version act like a store copy)
+	if workspace:GetAttribute("MeshKeeperTest") == true then MKP.keepNow(p, quiet or silent) return end
+	-- a known store copy: background saves keep it straight away (a save you press still tries the upload first, so a
+	-- copy that CAN upload again clears the block)
+	if EDIT.storeBlocked and (quiet or silent) then MKP.keepNow(p, true) return end
 	saving[p] = true
 	task.spawn(function()
 		local ok, err = pcall(function()
@@ -431,7 +531,7 @@ local function saveMesh(p, quiet, silent)
 				if tostring(uerr):lower():find("store plugin", 1, true) then
 					EDIT.storeBlocked = true
 					pcall(function() plugin:SetSetting("RB_StoreBlocked", true) end)
-					setStatus(EDIT.STORE_MSG)
+					MKP.keepNow(p, silent)   -- 0.34.0
 				else
 					setStatus(kind == "api" and BETA_MSG or ("Couldn't save " .. p.Name .. ": " .. tostring(uerr)))
 				end
@@ -453,6 +553,7 @@ local function saveMesh(p, quiet, silent)
 				pcall(function() rec = CHS:TryBeginRecording("ROBLEND", "ROBLEND save") end)
 				applyBuilt(p, real, c)
 				p:SetAttribute("RB_SavedHash", dataHash(data))
+				MKP.forget(p)   -- 0.34.0
 				if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) end
 				setStatus(("Saved %s to Roblox (rbxassetid://%s). It stays in the place and publishes."):format(p.Name, tostring(id)))
 			else
@@ -476,9 +577,11 @@ function EDIT.saveOnPlace(things)
 	end
 	if #todo == 0 then return 0 end
 	local what = #todo == 1 and todo[1].Name or (#todo .. " meshes")
-	if EDIT.storeBlocked then
-		setStatus(EDIT.STORE_MSG)
-		warn(NAME .. ": " .. what .. " isn't saved, so it will show as a checkered cube in the published game. " .. EDIT.STORE_MSG)
+	if EDIT.storeBlocked or workspace:GetAttribute("MeshKeeperTest") == true then
+		-- 0.34.0: kept in the place instead (MeshKeeper)
+		local bad = 0
+		for _, p in ipairs(todo) do if not MKP.keepNow(p, true) then bad += 1 end end
+		if bad == 0 then print(NAME .. ": kept " .. what .. " in the place - it will show in the published game (Game Settings > Security > Allow Mesh / Image APIs on).") end
 		return #todo
 	end
 	print(NAME .. ": saving " .. what .. " to Roblox so it works in the published game...")
@@ -512,7 +615,8 @@ local function fixUnsaved(p)
 	if meshApiOK == false then return end
 	if fixedLook[p] or not (p and p:IsA("MeshPart") and p:FindFirstChild("RB_Data")) then return end
 	fixedLook[p] = true
-	if isSaved(p) or Display.partEm[p] then return end
+	-- (0.34.0: a mesh kept in the place has no uploaded copy to show - rebuild its look too)
+	if (isSaved(p) and not p:GetAttribute("RB_KeptHash")) or Display.partEm[p] then return end
 	local okC, okA, errA = pcall(function() return applyMesh(p, loadFrom(p), false) end)
 	local e = (not okC and okA) or errA
 	if meshRefused(e) then meshApiOK = false fixedLook[p] = nil end
@@ -520,7 +624,11 @@ end
 -- the part has a saved mesh and nothing changed: put the saved one back (edit mode swaps in a temporary one)
 local function restoreSaved(p)
 	local id = p:GetAttribute("RB_AssetId")
-	if not id then return end
+	if not id then
+		-- 0.34.0: kept in the place (store copy) - there's no uploaded mesh, so show it from its data
+		if p:GetAttribute("RB_KeptHash") then pcall(function() applyMesh(p, loadFrom(p), false) end) end
+		return
+	end
 	task.spawn(function()
 		local real = Display.fromAsset(id, (Display.fidelity(p)))
 		if real and p.Parent and not (editing and p == obj) and isSaved(p) then
@@ -1018,6 +1126,20 @@ local function addShape(kind)
 		return
 	end
 	if editing then exitEdit() end
+	-- 0.31.9 (Dylan: "when I add a cube it's miles away" / "all things should start at the same xyz under the map"):
+	-- new things start at HOME, the same spot every time (the middle of the workshop floor, where imports land too).
+	-- The 3D cursor only stays put if you placed it yourself and it's still on screen; otherwise it goes back home,
+	-- and if the view isn't looking there it comes to the new thing, so you always see it.
+	local jumpTo = false
+	if ownView() and view then
+		local _, onScreen = view:WorldToViewportPoint(CURSOR)
+		if not onScreen or (CURSOR - view.focus).Magnitude > math.max(view.dist * 3, 20) then
+			CURSOR = home() + V3(0, 2, 0)
+			dirtyCage = true
+			local _, homeOn = view:WorldToViewportPoint(CURSOR)
+			jumpTo = not homeOn or (CURSOR - view.focus).Magnitude > math.max(view.dist * 3, 20)
+		end
+	end
 	local m = BMesh.new()
 	primitive(m, kind)
 	-- a curve comes with a Tube modifier (so it shows as a pipe); edit its path in Edit Mode
@@ -1059,6 +1181,13 @@ local function addShape(kind)
 	if rec then CHS:FinishRecording(rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND add") end
 	Selection:Set({ mp })
 	activeObj = mp
+	if jumpTo and view then   -- (0.31.9: the view comes home to it)
+		local lo, hi = mp.CFrame.Position - mp.Size / 2, mp.CFrame.Position + mp.Size / 2
+		view.ortho, view.autoOrtho, view.viewName = false, false, nil
+		view.yaw, view.pitch = math.rad(35), math.rad(26)
+		view:frameBox(lo, hi)
+		dirtyCage = true
+	end
 	if CURVE_KINDS[kind] then
 		setStatus("Added a " .. CURVE_KINDS[kind] .. ". Tab = edit its points (Ctrl + right click extends it); pipe size in Properties > Modifiers.")
 	elseif kind == "Text" then
@@ -2052,9 +2181,15 @@ end
 local function frameAll()
 	if not view then return end
 	local pts = {}
-	for p, r in pairs(scene) do if p.Parent and not r.hidden then partCorners(p, pts) end end
-	for p in pairs(extras) do if p.Parent then partCorners(p, pts) end end
-	if #pts == 0 then view.focus, view.dist = CURSOR, 30 view:update() else view:frameBox(boundsOf(pts)) end
+	-- (0.31.7, Dylan: "after placing an item I get sent to an empty view"): only what's really down in the workshop
+	-- counts. Something just placed back on the map was still on the list, so the view framed the map AND the
+	-- workshop 10,000 studs apart - far too far out to see anything.
+	for p, r in pairs(scene) do if p.Parent and not r.hidden and shownHere(p) then partCorners(p, pts) end end
+	for p in pairs(extras) do if p.Parent and shownHere(p) then partCorners(p, pts) end end
+	if #pts == 0 then
+		if workshopOn and not shownHere({ GetPivot = function() return CFrame.new(CURSOR) end }) then CURSOR = home() + Vector3.new(0, 2, 0) end
+		view.focus, view.dist = CURSOR, 30 view:update()
+	else view:frameBox(boundsOf(pts)) end
 	view.viewName = nil
 	dirtyCage = true
 end
@@ -3838,7 +3973,7 @@ local TOOL = {
 		local p = selectedPart()
 		if not isRB(p) then setStatus("Select a " .. NAME .. " mesh to save.") return end
 		if editing and p == obj then exitEdit() end
-		if isSaved(p) then setStatus(p.Name .. " is already saved (rbxassetid://" .. tostring(p:GetAttribute("RB_AssetId")) .. ").") return end
+		if isSaved(p) then setStatus(p.Name .. (p:GetAttribute("RB_AssetId") and (" is already saved (rbxassetid://" .. tostring(p:GetAttribute("RB_AssetId")) .. ").") or " is already kept in the place (MeshKeeper).")) return end
 		saveMesh(p)
 	end,
 	SaveAll = function()
@@ -3890,7 +4025,7 @@ api.toggleGizmo = function()
 end
 local setUIOn, setStudioView
 function api.state()
-	local st = { orbitMode = MOD.orbitMode == true, editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
+	local st = { robloxNav = MOD.robloxNav == true, orbitMode = MOD.orbitMode == true, editing = editing, mode = mode, xray = xray, shading = shading, studioView = useStudio, autoSave = autoSave, workshop = workshopOn, blockKeys = KC and KC.enabled and not KC.failed,
 		modal = modal and modal.kind or nil, modalWhat = modal and modal.what or nil, modalText = lastStatus,
 		camCF = camera().CFrame,
 		viewName = view and ((view.viewName or "User") .. (view.ortho and " Orthographic" or " Perspective")) or nil,
@@ -4229,7 +4364,15 @@ importSelected = function(list)
 	dirtyCage = true
 	if view then
 		local nlo, nhi = lo + delta, hi + delta
-		task.defer(function() if view then view:frameBox(nlo, nhi) end end)
+		-- (0.31.6, Dylan: "the camera ends up in the sky after an import"): the view starts from the normal home angle
+		-- on what came in - not whatever way it was last turned (or flown) - and nothing carries on flying
+		MOD.flyHeld = {}
+		task.defer(function()
+			if not view then return end
+			view.ortho, view.autoOrtho, view.viewName = false, false, nil
+			view.yaw, view.pitch = math.rad(35), math.rad(26)
+			view:frameBox(nlo, nhi)
+		end)
 	end
 	setStatus(("Brought in %s%s. Tab on a part edits it; Place in Studio sends it back."):format(up[1].Name, #up > 1 and (" + " .. (#up - 1) .. " more") or ""))
 end
@@ -4372,6 +4515,19 @@ local function finishPlacing(how)
 	end
 	if P.rec then CHS:FinishRecording(P.rec, Enum.FinishRecordingOperation.Commit) else CHS:SetWaypoint("ROBLEND Place in Studio") end
 	pcall(function() plugin:Deactivate() end)
+	-- 0.31.5 (Dylan: "make sure it resets the cam after the part is placed"): Studio's camera goes back to how it was
+	-- before ROBLEND opened - its normal type, its place and its pivot (Focus), never under the map
+	pcall(function()
+		MOD.fixCamType()
+		local cam, pc = workspace.CurrentCamera, MOD.preCam
+		if cam and pc and pc.cf and not MOD.underMap(pc.cf) then
+			cam.CFrame = pc.cf
+			if pc.focus then cam.Focus = pc.focus end
+		end
+		MOD.rescueCam()
+	end)
+	-- (0.31.6) and ROBLEND's own view goes back home too, so it starts there next time it opens
+	pcall(MOD.resetView)
 	if how == "cancel" then
 		print(NAME .. ": placing cancelled - it's back in the workshop (open ROBLEND to see it).")
 	else
@@ -4384,7 +4540,15 @@ api.exportSelected = function(list)
 	if modal or placing then return end
 	if editing then exitEdit() end
 	local picked = workshopThings(list)
-	if #picked == 0 then setStatus("Select what to place in Studio (click it, or pick it in the Outliner), then Place in Studio.") return end
+	-- 0.31.8 (Dylan: "this box does not work"): with nothing selected, Place in Studio takes everything that's in the
+	-- workshop (it used to just ask you to select something first, and looked broken)
+	if #picked == 0 and not list then
+		local all = {}
+		for p in pairs(scene) do if p.Parent then all[#all + 1] = p end end
+		for p in pairs(extras) do if p.Parent then all[#all + 1] = p end end
+		picked = workshopThings(all)
+	end
+	if #picked == 0 then setStatus("The workshop is empty - nothing to place in Studio.") return end
 	-- a group (folder) is carried as the things inside it
 	local things, folders = {}, {}
 	for _, x in ipairs(picked) do
@@ -4499,9 +4663,90 @@ end
 api.paintClear = function()
 	if not (editing and bm) then return end
 	for v in pairs(bm.verts) do v.col = nil end
+	for f in pairs(bm.faces) do f.col = nil end
 	dirtyMesh = true
 	commit("Clear Colours")
 	setStatus("Colours cleared.")
+end
+-- ===== Palette (0.33.0, Material > Palette): colour whole faces, like Blender's palette-texture trick =====
+-- scope "sel": Edit Mode = the selected faces (none selected = all), Object Mode = the selected parts;
+-- "part": every face of the part; "all": every ROBLEND part in the workshop (Object Mode).
+-- meshFn(m, faces) colours a ROBLEND mesh; partFn(p) handles a plain Roblox part (just its Color).
+api.palette2 = { hues = Paint.PAL_HUES, rows = #Paint.PAL_SHADES, color = Paint.palColor }
+api.palDo = function(what, scope, meshFn, partFn)
+	scope = scope or "sel"
+	local white = Color3.new(1, 1, 1)
+	if editing and bm then
+		if scope == "all" then setStatus("Whole Build works in Object Mode - press Tab to leave Edit Mode first.") return 0 end
+		local fs = scope == "sel" and MT.selFaces(bm) or {}
+		local picked = next(fs) ~= nil
+		-- (0.33.2) "Selected" with nothing picked does nothing (it used to do every face - a surprise when
+		-- shading one face); Part is the way to do the whole thing
+		if scope == "sel" and not picked then
+			setStatus("Pick the faces first (click them; Shift-click for more), or set Apply to: Part for the whole thing.")
+			return 0
+		end
+		if not picked then for f in pairs(bm.faces) do if not f.hide then fs[f] = true end end end
+		local n = meshFn(bm, fs)
+		-- the part's own colour tints face colours: keep it white so they show true
+		if obj and obj.Color ~= white then pcall(function() obj.Color = white end) end
+		dirtyMesh = true
+		commit(what)
+		setStatus(("%s: %d face%s%s."):format(what, n, n == 1 and "" or "s", picked and "" or " (the whole part)"))
+		return n
+	end
+	local parts = {}
+	if scope == "all" then
+		for p in pairs(scene) do if isRB(p) and p.Parent then parts[#parts + 1] = p end end
+	else
+		parts = selectedParts()
+	end
+	if #parts == 0 then setStatus("Select a part first (or pick Whole Build).") return 0 end
+	local n = 0
+	record(what, function()
+		for _, p in ipairs(parts) do
+			if isRB(p) then
+				local m = loadFrom(p)
+				local fs = {}
+				for f in pairs(m.faces) do fs[f] = true end
+				meshFn(m, fs)
+				dataOf(p).Value = encode(m)
+				if p.Color ~= white then p.Color = white end
+				modsChanged(p)
+				n += 1
+			elseif partFn then
+				partFn(p)
+				n += 1
+			end
+		end
+	end)
+	dirtyCage = true
+	setStatus(("%s: %d part%s."):format(what, n, n == 1 and "" or "s"))
+	return n
+end
+-- (0.33.1) colouring view: while the Material tab is open, selected faces aren't filled orange
+-- (just the outline), so the colours show true
+api.setColourView = function(on)
+	on = on and true or false
+	if (Display.colourView or false) ~= on then
+		Display.colourView = on
+		if editing and bm then dirtyMesh = true end
+		dirtyCage = true
+	end
+end
+api.paletteApply = function(color, scope)
+	if type(color) == "number" then color = Paint.fromInt(color) elseif type(color) == "string" then color = Paint.fromHex(color) end
+	if not color then return 0 end
+	return api.palDo("Colour", scope, function(_, fs) return Paint.colorFaces(fs, color) end,
+		function(p) p.Color = color end)
+end
+-- step = +1 lighter, -1 darker
+api.paletteShade = function(step, scope)
+	return api.palDo(step > 0 and "Lighter" or "Darker", scope, function(m, fs) return Paint.shadeFaces(BMesh, fs, step) end,
+		function(p) p.Color = Paint.shade(p.Color, step * 0.18) end)
+end
+api.paletteClear = function(scope)
+	return api.palDo("Clear Colour", scope, function(_, fs) return Paint.colorFaces(fs, nil) end, nil)
 end
 -- Sculpt > Subdivide: one Catmull-Clark level for the whole mesh (more points to sculpt), smooth shaded
 api.sculptSubdivide = function()
@@ -4540,6 +4785,7 @@ end
 api.navDrag = function(kind, dx, dy)
 	if not view then return end
 	if kind == "orbit" then view:orbit(dx, dy) view.viewName = nil
+	elseif kind == "look" then view:look(dx, dy) view.viewName = nil
 	elseif kind == "pan" then view:pan(dx, dy)
 	else view:zoom(-dy / 30) end
 	-- (0.28.1: no forced cage redraw - the Heartbeat redraws it once the view has moved enough: View:cageStale)
@@ -4692,6 +4938,7 @@ local function saveStudioCam()
 	local cam = workspace.CurrentCamera
 	if cam then
 		MOD.savedCam = { cf = cam.CFrame, focus = cam.Focus }
+		if not MOD.underMap(cam.CFrame) then MOD.preCam = MOD.savedCam end   -- (0.31.5: Studio's view before ROBLEND)
 		MOD.rememberCam(cam.CFrame)
 	end
 end
@@ -4726,10 +4973,13 @@ setStudioView = function(b)
 end
 function MOD.resetView()
 	if not view then return end
+	MOD.flyHeld = {}
+	if navDrag then navDrag = nil end
 	view.ortho, view.autoOrtho, view.viewName = false, false, nil
 	view.yaw, view.pitch = math.rad(35), math.rad(26)
 	local any = false
-	for _, r in pairs(scene) do if r.shown then any = true break end end
+	for p, r in pairs(scene) do if r.shown and p.Parent and shownHere(p) then any = true break end end
+	for p in pairs(extras) do if p.Parent and shownHere(p) then any = true break end end
 	if any then frameAll() else view.focus, view.dist = home(), 30 view:update() end
 	dirtyCage = true
 end
@@ -4743,6 +4993,96 @@ api.setOrbitMode = function(b)
 	if navDrag and navDrag.lmb then navDrag = nil end
 	setStatus(MOD.orbitMode and "ORBIT MODE: left-drag turns the view, Shift + drag slides it, Ctrl + drag zooms. Esc or the orbit button = off." or "Orbit mode off: left-click selects again.")
 end
+-- 0.31.0 ROBLOX CAMERA (Dylan: "an option up top right to enable roblox movement"): the camera button in the 3D
+-- view's header. On = Studio's controls: hold right mouse + drag = look around, WASD = fly while right mouse is held
+-- (Q / E down / up, Shift = slower), wheel = zoom, middle mouse = pan, F = focus the selection. A quick right-click
+-- still opens the menu, and WASD / Q / E are Blender keys again as soon as right mouse comes up.
+pcall(function() MOD.robloxNav = plugin:GetSetting("RB_RobloxNav") == true end)
+MOD.FLY_KEYS = { [Enum.KeyCode.W] = true, [Enum.KeyCode.A] = true, [Enum.KeyCode.S] = true, [Enum.KeyCode.D] = true, [Enum.KeyCode.Q] = true, [Enum.KeyCode.E] = true }
+api.setRobloxNav = function(b)
+	MOD.robloxNav = b == true
+	pcall(function() plugin:SetSetting("RB_RobloxNav", MOD.robloxNav) end)
+	MOD.flyHeld = {}
+	setStatus(MOD.robloxNav and "ROBLOX CAMERA: WASD to fly (Q / E down / up, Shift = slower), right mouse + drag to look (right mouse is only for the camera), wheel = zoom, middle mouse = pan, F = focus." or "Blender camera: middle mouse = orbit, Shift + middle = pan, wheel = zoom.")
+end
+-- 0.31.1 (Dylan: "the roblox cam does not work"): the fly keys are tracked from the key-down / key-up events
+-- themselves (Studio's own camera grabs right mouse + WASD in the 3D view, and asking "is W down?" wasn't
+-- reliable then), and like Studio, WASD flies in Object Mode WITHOUT holding right mouse. In Edit Mode W A S D Q E
+-- are Blender's keys (E = extrude, S = scale...) unless right mouse is held.
+MOD.flyHeld = {}
+function MOD.canFly(k, shift, ctrl, alt)
+	if not (MOD.robloxNav and MOD.FLY_KEYS[k] and uiOn and ownView() and not modal) then return false end
+	if ctrl or alt or ui.menuOpen then return false end
+	local nd = navDrag
+	if nd and nd.rmb then return true end   -- right mouse held: always flies (any mode)
+	-- (0.31.4, Dylan: "in edit mode the shortcut keys still apply"): Edit Mode flies freely too - with the Roblox
+	-- camera on, W A S D Q E are the camera's everywhere (Extrude, Scale... are in the tool strip and menus)
+	if shift and (k == Enum.KeyCode.A or k == Enum.KeyCode.D) then return false end   -- Shift A = Add, Shift D = Duplicate
+	return ui:inCanvas(mousePos()) and not ui:overUI(mousePos())
+end
+function MOD.flyTick(now)
+	local dt = now - (MOD.flyT or now)
+	MOD.flyT = now
+	if not next(MOD.flyHeld) then return end
+	if not (MOD.robloxNav and view and ownView() and uiOn and not modal) then MOD.flyHeld = {} return end
+	-- 0.31.5 (Dylan: "after an import the camera ends up in the sky"): a key let go while Studio had the keyboard
+	-- (a dialog, another window, Import from Studio) never sent its key-up, so ROBLEND kept flying - E = up, into the
+	-- sky. Every held key is checked against the keyboard itself; once that check has ever seen a key down, a key it
+	-- says is up is dropped. And no key flies for more than 6 seconds without being pressed again.
+	for k, t in pairs(MOD.flyHeld) do
+		local down = keyDown(k)
+		if down then MOD.kdOK = true end
+		if (MOD.kdOK and not down) or (type(t) == "number" and now - t > 6) then MOD.flyHeld[k] = nil end
+	end
+	if not next(MOD.flyHeld) then return end
+	local h = MOD.flyHeld
+	local function kd(c) return h[c] and 1 or 0 end
+	local mv = Vector3.new(kd(Enum.KeyCode.D) - kd(Enum.KeyCode.A), kd(Enum.KeyCode.E) - kd(Enum.KeyCode.Q), kd(Enum.KeyCode.W) - kd(Enum.KeyCode.S))
+	if mv.Magnitude > 0 then
+		if navDrag and navDrag.rmb then navDrag.flew = true end
+		view:fly(mv, dt, shiftDown())
+		view.viewName = nil
+	end
+end
+-- right mouse down in the view with the Roblox camera on: start looking round (either source)
+function MOD.rmbLook(mp)
+	if not (MOD.robloxNav and uiOn and ownView() and not modal and ui:inCanvas(mp)) then return false end
+	if navDrag and navDrag.rmb then return true end
+	local cam0
+	pcall(function() cam0 = workspace.CurrentCamera.CFrame end)
+	navDrag = { kind = "look", last = mp, moved = 0, rmb = true, t0 = os.clock(), cam0 = cam0, camLast = cam0 }
+	return true
+end
+-- 0.31.3 (Dylan: "right click and turn does not work in roblox cam mode"): in Studio, holding right mouse over the
+-- 3D view hands the mouse to Studio's OWN camera - it locks the cursor and turns Studio's camera (hidden under
+-- ROBLEND's view), and the mouse movement never reaches ROBLEND. So ROBLEND watches Studio's camera instead: however
+-- much it turned (and flew, with WASD) this frame, ROBLEND's view does the same. When right mouse comes up, Studio's
+-- camera is put back where it was. (If the mouse movement does arrive, that drives it and this does nothing.)
+local function yawPitch(look) return math.atan2(-look.X, -look.Z), math.asin(math.clamp(-look.Y, -1, 1)) end
+function MOD.mirrorTick()
+	local nd = navDrag
+	if not (nd and nd.kind == "look" and nd.camLast and view and ownView()) then return end
+	local cf
+	pcall(function() cf = workspace.CurrentCamera.CFrame end)
+	if not cf or cf == nd.camLast then return end
+	local last = nd.camLast
+	-- (ROBLEND holds Studio's camera still while its own view is up - MOD.holdStudioCam puts it back every frame - so
+	-- each frame's turn is measured from that held place)
+	nd.camLast = (MOD.savedCam and MOD.savedCam.cf) or cf
+	if nd.lastMoveT and os.clock() - nd.lastMoveT < 0.15 then return end   -- (ROBLEND hears the mouse itself)
+	local y0, p0 = yawPitch(last.LookVector)
+	local y1, p1 = yawPitch(cf.LookVector)
+	local dy = (y1 - y0 + math.pi) % (2 * math.pi) - math.pi
+	-- (ROBLEND's yaw / pitch are measured on the pivot-to-eye direction = minus the look direction, the same way
+	-- yawPitch reads Studio's camera, so the change carries straight across)
+	-- (a jump of more than ~30 degrees in one frame isn't a mouse turn - something else moved Studio's camera)
+	if (math.abs(dy) > 1e-6 or math.abs(p1 - p0) > 1e-6) and math.abs(dy) < 0.5 and math.abs(p1 - p0) < 0.5 then
+		view:turn(dy, p1 - p0)
+		nd.moved += 5
+		view.viewName = nil
+	end
+	-- (0.31.5: Studio's camera moving is NOT copied any more - only its turning. Flying is ROBLEND's own WASD.)
+end
 -- start a left-drag view move in orbit mode (from the plugin mouse or UserInputService, whichever comes first)
 function MOD.orbitStart(mp)
 	if not (MOD.orbitMode and uiOn and ownView() and not modal and not paintMode) then return false end
@@ -4754,6 +5094,7 @@ function MOD.orbitStart(mp)
 	return true
 end
 setUIOn = function(on)
+	MOD.flyHeld = {}   -- (0.31.5: nothing keeps flying across open / close)
 	if on and placing then finishPlacing("place") end
 	-- Studio's own tool (Select / Move / Scale / Rotate): remembered on open, put back on close, so Studio's
 	-- move arrows don't appear on parts after leaving ROBLEND
@@ -5109,21 +5450,27 @@ hook("Button2Down", mouse.Button2Down, function()
 		lasso = { pts = { mp }, len = 0, sub = shiftDown() }
 		return
 	end
+	if MOD.rmbLook(mp) then return end
 	if ownView() and ui:inCanvas(mp) then navDrag = { kind = shiftDown() and "pan" or "orbit", last = mp, moved = 0, rmb = true, t0 = os.clock() } end
 end)
+-- right mouse up (from the plugin mouse or UserInputService, whichever comes first - the second does nothing)
+function MOD.rmbUp()
+	if lasso then finishLasso() return end
+	local nd = navDrag
+	if not (nd and nd.rmb) then return end
+	navDrag = nil
+	if nd.cam0 then pcall(function() workspace.CurrentCamera.CFrame = nd.cam0 end) end   -- (0.31.3: Studio's camera back)
+	-- (0.31.2, Dylan: "right click needs to be free for the roblox cam"): with the Roblox camera, right mouse is only
+	-- for the camera - no menu pops up, however short the click (the header menus have everything)
+	if nd.moved < 4 and not nd.flew and nd.kind ~= "look" then
+		local ok, err = pcall(function()
+			if nd.kind == "pan" then MOD.placeCursor(mousePos()) else ui:openContextMenu(mousePos()) end
+		end)
+		if not ok then warn(NAME .. ": " .. tostring(err)) end
+	end
+end
 pcall(function()
-	hook("Button2Up", mouse.Button2Up, function()
-		if lasso then finishLasso() return end
-		local nd = navDrag
-		if not (nd and nd.rmb) then return end
-		navDrag = nil
-		if nd.moved < 4 then
-			local ok, err = pcall(function()
-				if nd.kind == "pan" then MOD.placeCursor(mousePos()) else ui:openContextMenu(mousePos()) end
-			end)
-			if not ok then warn(NAME .. ": " .. tostring(err)) end
-		end
-	end)
+	hook("Button2Up", mouse.Button2Up, function() MOD.rmbUp() end)
 end)
 -- one turn of the wheel can arrive twice (the plugin mouse and UserInputService): take the first, skip its twin.
 -- (Before, once the plugin mouse had sent one, the other was ignored for good, so the wheel died when Studio
@@ -5144,8 +5491,8 @@ local function wheel(steps)
 	view:zoomAt(steps, ok and target or nil)
 end
 pcall(function()
-	hook("WheelForward", mouse.WheelForward, function() if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
-	hook("WheelBackward", mouse.WheelBackward, function() if MOD.wheelFrom("mouse", -1) then wheel(-1) end end)
+	hook("WheelForward", mouse.WheelForward, function() if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end if MOD.wheelFrom("mouse", 1) then wheel(1) end end)
+	hook("WheelBackward", mouse.WheelBackward, function() if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end if MOD.wheelFrom("mouse", -1) then wheel(-1) end end)
 end)
 -- a view drag (middle / right button held) ends when the button comes up. If that release never reaches ROBLEND
 -- (let go over another window, a panel, or outside Studio), the view kept turning with every mouse move and
@@ -5160,6 +5507,7 @@ function MOD.navAlive()
 			nd.seenDown = true
 		elseif nd.seenDown and (nd.moved >= 4 or os.clock() - (nd.t0 or 0) > 0.5) then
 			navDrag = nil
+			if nd.cam0 then pcall(function() workspace.CurrentCamera.CFrame = nd.cam0 end) end   -- (0.31.3)
 			return false
 		end
 	end
@@ -5177,7 +5525,7 @@ function MOD.navMove(src, dx, dy)
 	if nd.src and nd.src ~= src and now - (nd.srcT or 0) < 0.2 then return false end
 	nd.src, nd.srcT = src, now
 	nd.moved += math.abs(dx) + math.abs(dy)
-	if dx ~= 0 or dy ~= 0 then api.navDrag(nd.kind, dx, dy) end
+	if dx ~= 0 or dy ~= 0 then nd.lastMoveT = now api.navDrag(nd.kind, dx, dy) end
 	return true
 end
 -- another plugin keeps taking control of the mouse (Studio gives it to one plugin at a time; ROBLEND takes it back
@@ -5429,14 +5777,29 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 		if MOD.orbitMode and not ui:overUI(mousePos()) then MOD.orbitStart(mousePos()) end
 		return
 	end
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		if MOD.robloxNav and not ctrl and not UVE.open then MOD.rmbLook(mousePos()) end
+		return
+	end
 	if input.UserInputType == Enum.UserInputType.MouseButton3 then
 		local mp = mousePos()
-		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = shift and "pan" or (ctrl and "zoom" or "orbit"), last = mp, moved = 0, t0 = os.clock() } end
+		if ownView() and not modal and ui:inCanvas(mp) then navDrag = { kind = MOD.robloxNav and (ctrl and "zoom" or "pan") or (shift and "pan" or (ctrl and "zoom" or "orbit")), last = mp, moved = 0, t0 = os.clock() } end
 		return
 	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
 	local k = input.KeyCode
 	if k == Enum.KeyCode.Escape and navDrag then navDrag = nil return end
+	-- 0.31.0 Roblox camera: WASD / Q E fly while right mouse is held (MOD.flyTick) - they aren't Blender keys then
+	if MOD.canFly(k, shift, ctrl, keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)) then
+		MOD.flyHeld[k] = os.clock()
+		if navDrag and navDrag.rmb then navDrag.flew = true end
+		return
+	end
+	if MOD.robloxNav and k == Enum.KeyCode.F and not ctrl and not shift and not editing and not modal and uiOn and not ui.menuOpen
+		and not (keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)) then
+		pcall(frameSelected)
+		return
+	end
 	if k == Enum.KeyCode.Escape and MOD.orbitMode and not modal and not ui.menuOpen then api.setOrbitMode(false) return end
 	local alt = keyDown(Enum.KeyCode.LeftAlt) or keyDown(Enum.KeyCode.RightAlt)
 	-- while ROBLEND holds the keyboard Studio doesn't see Ctrl Z / Ctrl Y, so do them here
@@ -5518,7 +5881,21 @@ hook("InputBegan", UIS.InputBegan, function(input, gp)
 	if not ok then warn(NAME .. ": " .. tostring(err)) setStatus("Error: " .. tostring(err)) end
 end)
 pcall(function()
+	pcall(function()
+		UIS.WindowFocusReleased:Connect(function()
+			MOD.flyHeld = {}
+			if navDrag and navDrag.kind == "look" then MOD.rmbUp() end
+		end)
+	end)
 	hook("InputEnded", UIS.InputEnded, function(input)
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			if MOD.flyHeld[input.KeyCode] then MOD.flyHeld[input.KeyCode] = nil end
+			return
+		end
+		if input.UserInputType == Enum.UserInputType.MouseButton2 then
+			if navDrag and navDrag.rmb and navDrag.kind == "look" then MOD.rmbUp() end
+			return
+		end
 		if input.UserInputType == Enum.UserInputType.MouseButton3 then
 			if navDrag and not navDrag.rmb then navDrag = nil end
 		elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -5526,8 +5903,31 @@ pcall(function()
 			if uiOn then ui:mouseUp() end
 		end
 	end)
+	-- 0.31.1 TRACKPAD (wahster: "2 fingers to zoom or rotate and shift + 2 fingers to pan"): Roblox's PointerAction
+	-- reports a two-finger swipe (both ways) and a pinch on trackpads that send them. Swipe = turn the view,
+	-- Shift + swipe = pan, pinch = zoom. A plain mouse wheel sends no swipe, so nothing changes for a mouse. While a
+	-- swipe is coming in, the wheel event Windows makes from the same swipe is skipped (no zoom on top of the turn).
+	pcall(function()
+		hook("PointerAction", UIS.PointerAction, function(_, pan, pinch)
+			if not (uiOn and ownView() and not modal and not ui.menuOpen) then return end
+			local mp = mousePos()
+			if not ui:inCanvas(mp) or ui:overUI(mp) then return end
+			if typeof(pan) == "Vector2" and pan.Magnitude > 1e-3 then
+				MOD.swipeT = os.clock()
+				MOD.trackpadSeen = true
+				local k = MOD.TRACKPAD_SPEED or 1
+				if shiftDown() then api.navDrag("pan", pan.X * k, pan.Y * k) else api.navDrag("orbit", pan.X * k, pan.Y * k) end
+			end
+			if type(pinch) == "number" and math.abs(pinch) > 1e-4 then
+				MOD.swipeT = os.clock()
+				local ok, target = pcall(MOD.zoomTarget, mp)
+				view:zoomAt(math.clamp(pinch * 8, -3, 3), ok and target or nil)
+			end
+		end)
+	end)
 	hook("InputChanged", UIS.InputChanged, function(input)
 		if input.UserInputType == Enum.UserInputType.MouseWheel then
+			if MOD.swipeT and os.clock() - MOD.swipeT < 0.15 then return end   -- (the wheel twin of a trackpad swipe)
 			local dir = input.Position.Z > 0 and 1 or -1
 			if MOD.wheelFrom("uis", dir) then wheel(dir) end
 		elseif input.UserInputType == Enum.UserInputType.MouseMovement then
@@ -5591,6 +5991,8 @@ RunService.Heartbeat:Connect(function()
 	MOD.mt.fps = MOD.mt.lastF and (MOD.mt.fps * 0.9 + 0.1 / math.max(now - MOD.mt.lastF, 1e-3)) or 0
 	MOD.mt.lastF = now
 	if navDrag then MOD.navAlive() end
+	pcall(MOD.flyTick, now)
+	pcall(MOD.mirrorTick)
 	if placing then pcall(placeUpdate) end
 	if uiOn and ownView() then catchRibbonTool() end
 	if uiOn and now - lastUI > 0.1 then
@@ -7066,7 +7468,7 @@ end
 function BMesh:faceCreate(verts, example)
 	local n = #verts
 	if n < 3 then return nil end
-	local f = { l = nil, len = n, no = V3(0, 1, 0), sel = false, mat = example and example.mat or nil, smooth = example and example.smooth or nil }
+	local f = { l = nil, len = n, no = V3(0, 1, 0), sel = false, mat = example and example.mat or nil, smooth = example and example.smooth or nil, col = example and example.col or nil }
 	local prev, first
 	for i = 1, n do
 		local v, vn = verts[i], verts[i % n + 1]
@@ -7173,7 +7575,7 @@ end
 function BMesh:faceSplit(f, lA, lB)
 	local v1, v2 = lA.v, lB.v
 	local e = self:edgeCreate(v1, v2, true)
-	local f2 = { l = nil, len = 0, no = f.no, sel = f.sel, mat = f.mat, smooth = f.smooth }
+	local f2 = { l = nil, len = 0, no = f.no, sel = f.sel, mat = f.mat, smooth = f.smooth, col = f.col }
 	local lF1 = loopCreate(v2, e, f)
 	local lF2 = loopCreate(v1, e, f2)
 	lF1.prev = lB.prev
@@ -7308,6 +7710,14 @@ function BMesh:toData()
 		vc[vi[v]] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or 0xFFFFFF
 	end
 	if anyCol then d.vc = vc end
+	-- face colours (Palette, 0.33.0): one 0xRRGGBB per face in face order, -1 = none; only saved when used
+	local fc, anyFC = {}, false
+	for i, f in ipairs(fOrder) do
+		local c = f.col
+		if c then anyFC = true end
+		fc[i] = c and (math.floor(c.R * 255 + 0.5) * 65536 + math.floor(c.G * 255 + 0.5) * 256 + math.floor(c.B * 255 + 0.5)) or -1
+	end
+	if anyFC then d.fc = fc end
 	-- UVs (Unwrap / Smart UV Project): per face, u v for each corner in face order (0 = this face has none)
 	local uvs, anyUV = {}, false
 	for i, f in ipairs(fOrder) do
@@ -7345,6 +7755,9 @@ function BMesh.fromData(d)
 	local es = d.e or {}
 	for i = 1, #es, 2 do if vs[es[i]] and vs[es[i + 1]] then bm:edgeCreate(vs[es[i]], vs[es[i + 1]], true) end end
 	for _, i in ipairs(d.s or {}) do if fl[i] then fl[i].smooth = true end end
+	for i, hex in ipairs(d.fc or {}) do
+		if fl[i] and type(hex) == "number" and hex >= 0 then fl[i].col = Color3.fromRGB(math.floor(hex / 65536) % 256, math.floor(hex / 256) % 256, hex % 256) end
+	end
 	if d.uv and Vector2 then
 		for i, list in ipairs(d.uv) do
 			local f = fl[i]
@@ -7617,7 +8030,7 @@ function Boolean.fromMesh(bm, keep, side, opts)
 		if not keep or keep(f) then
 			local vs = {}
 			for i, v in ipairs(BMesh.faceVerts(f)) do vs[i] = v.co end
-			local tag = { face = f, side = side, smooth = f.smooth }
+			local tag = { face = f, side = side, smooth = f.smooth, col = f.col }
 			local p = newPoly(vs, tag)
 			if p then
 				-- a face that isn't flat (bent quad, or rounding in Roblox's 32-bit positions) is cut into triangles
@@ -7849,6 +8262,7 @@ function Boolean.toMesh(polys, opts)
 			for j, i in ipairs(f.v) do vs[j] = vOf(i) end
 			local nf = bm:faceCreate(vs)
 			if nf and f.tag and f.tag.smooth then nf.smooth = true end
+			if nf and f.tag and f.tag.col then nf.col = f.tag.col end
 		end
 	end
 	bm:normalsUpdate()
@@ -8338,6 +8752,8 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 	-- vertex colours (Vertex Paint): one colour id per distinct colour
 	local painted = false
 	for v in pairs(bm.verts) do if v.col then painted = true break end end
+	-- face colours (Palette): a face with f.col is that colour all over (sharp edges between colours)
+	if not painted then for f in pairs(bm.faces) do if f.col then painted = true break end end end
 	local colIds = {}
 	local function colId(c)
 		if not c then return white end
@@ -8414,7 +8830,12 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 			if uvids and uvids[t[3]] then pcall(function() em:SetFaceUVs(fid, { uvids[t[1]], uvids[t[2]], uvids[t[3]] }) end) end
 			if white then
 				pcall(function()
-					if sel and f.sel then
+					-- (0.33.1) a coloured face shows its true colour even when selected - the yellow outline shows
+					-- it's picked; while colouring (Material tab) no selected face gets the orange fill at all
+					if f.col then
+						local k = colId(f.col)
+						em:SetFaceColors(fid, { k, k, k })
+					elseif sel and f.sel and not Display.colourView then
 						em:SetFaceColors(fid, { sel, sel, sel })
 					elseif painted then
 						em:SetFaceColors(fid, { colId(vs[t[1]].col), colId(vs[t[2]].col), colId(vs[t[3]].col) })
@@ -8470,7 +8891,11 @@ function Display.updateColors(em, bm)
 	end
 	return (pcall(function()
 		for _, t in ipairs(info.t) do
-			if not (info.sel and t[5].sel) then em:SetFaceColors(t[1], { colId(t[2].col), colId(t[3].col), colId(t[4].col) }) end
+			if not (info.sel and t[5].sel) then
+				local fc = t[5].col
+				if fc then local k = colId(fc) em:SetFaceColors(t[1], { k, k, k })
+				else em:SetFaceColors(t[1], { colId(t[2].col), colId(t[3].col), colId(t[4].col) }) end
+			end
 		end
 	end))
 end
@@ -9299,7 +9724,661 @@ function KeyCapture.new(C)
 end
 
 return KeyCapture
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0010"><Properties><string name="Name">MeshKeeper</string><ProtectedString name="Source"><![CDATA[-- MeshKeeper v1 - made by PROTO / ROBLEND (CRUPPNOMICS). Free to use and change.
+-- Plugins installed from the Creator Store aren't allowed to upload meshes to Roblox. So instead, the plugin keeps each
+-- mesh IN THE PLACE as data (a "MeshKeeperData" folder inside the part, tagged "MeshKeeper"), and this module builds the
+-- real mesh again when the game runs (on the server for collisions, on each player for what they see) - and in Studio
+-- when the place is opened.
+-- Needs: Game Settings > Security > "Allow Mesh / Image APIs" ON (Creator Dashboard > Configure > Settings, "Enable
+-- Mesh / Image APIs"). Without it Roblox won't let the game build meshes.
+local AssetService = game:GetService("AssetService")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+
+local M = {}
+M.VERSION = 4
+M.TAG = "MeshKeeper"
+M.DATA = "MeshKeeperData"
+M.CHUNK = 100000   -- characters per StringValue
+
+-- ===== base64 (binary-safe text for the place file) =====
+local A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local ENC, DEC = {}, {}
+for i = 1, 64 do
+	local c = string.byte(A, i)
+	ENC[i - 1] = c
+	DEC[c] = i - 1
+end
+function M.toB64(b)
+	local n = buffer.len(b)
+	local out = buffer.create(math.ceil(n / 3) * 4)
+	local o = 0
+	local i = 0
+	while i + 2 < n do
+		local v = buffer.readu8(b, i) * 65536 + buffer.readu8(b, i + 1) * 256 + buffer.readu8(b, i + 2)
+		buffer.writeu8(out, o, ENC[bit32.rshift(v, 18)])
+		buffer.writeu8(out, o + 1, ENC[bit32.band(bit32.rshift(v, 12), 63)])
+		buffer.writeu8(out, o + 2, ENC[bit32.band(bit32.rshift(v, 6), 63)])
+		buffer.writeu8(out, o + 3, ENC[bit32.band(v, 63)])
+		i += 3
+		o += 4
+	end
+	local r = n - i
+	if r > 0 then
+		local v = buffer.readu8(b, i) * 65536 + ((r == 2) and buffer.readu8(b, i + 1) * 256 or 0)
+		buffer.writeu8(out, o, ENC[bit32.rshift(v, 18)])
+		buffer.writeu8(out, o + 1, ENC[bit32.band(bit32.rshift(v, 12), 63)])
+		buffer.writeu8(out, o + 2, (r == 2) and ENC[bit32.band(bit32.rshift(v, 6), 63)] or 61)
+		buffer.writeu8(out, o + 3, 61)
+	end
+	return buffer.tostring(out)
+end
+function M.fromB64(s)
+	local n = #s
+	local pad = 0
+	if n >= 1 and string.byte(s, n) == 61 then pad += 1 end
+	if n >= 2 and string.byte(s, n - 1) == 61 then pad += 1 end
+	local out = buffer.create(math.floor(n / 4) * 3 - pad)
+	local src = buffer.fromstring(s)
+	local o = 0
+	for i = 0, n - 4, 4 do
+		local a = DEC[buffer.readu8(src, i)] or 0
+		local b = DEC[buffer.readu8(src, i + 1)] or 0
+		local c = DEC[buffer.readu8(src, i + 2)] or 0
+		local d = DEC[buffer.readu8(src, i + 3)] or 0
+		local v = a * 262144 + b * 4096 + c * 64 + d
+		if o < buffer.len(out) then buffer.writeu8(out, o, bit32.rshift(v, 16)) end
+		if o + 1 < buffer.len(out) then buffer.writeu8(out, o + 1, bit32.band(bit32.rshift(v, 8), 255)) end
+		if o + 2 < buffer.len(out) then buffer.writeu8(out, o + 2, bit32.band(v, 255)) end
+		o += 3
+	end
+	return out
+end
+
+-- ===== mesh <-> data =====
+-- format 1: "MK1" | u32 nV, nUV, nN, nC, nF | nV x f32 xyz | nUV x f32 uv | nN x f32 xyz | nC x u8 rgba |
+--           nF x (u32 v1 v2 v3, u32 uv1 uv2 uv3, u32 n1 n2 n3, u32 c1 c2 c3)   (0 = none, else 1-based)
+local NONE = 0
+-- everything an EditableMesh holds that shows: points, UVs, normals, colours, triangles
+function M.pack(em)
+	local vIds, uvIds, nIds, cIds = {}, {}, {}, {}
+	local verts, uvs, nrms, cols = {}, {}, {}, {}
+	local function idx(map, list, id)
+		if id == nil then return NONE end
+		local k = map[id]
+		if not k then
+			list[#list + 1] = id
+			k = #list
+			map[id] = k
+		end
+		return k
+	end
+	local faces = {}
+	for _, f in ipairs(em:GetFaces()) do
+		local fv = em:GetFaceVertices(f)
+		if #fv == 3 then
+			local fu, fn, fc = {}, {}, {}
+			pcall(function() fu = em:GetFaceUVs(f) or {} end)
+			pcall(function() fn = em:GetFaceNormals(f) or {} end)
+			pcall(function() fc = em:GetFaceColors(f) or {} end)
+			faces[#faces + 1] = {
+				idx(vIds, verts, fv[1]), idx(vIds, verts, fv[2]), idx(vIds, verts, fv[3]),
+				idx(uvIds, uvs, fu[1]), idx(uvIds, uvs, fu[2]), idx(uvIds, uvs, fu[3]),
+				idx(nIds, nrms, fn[1]), idx(nIds, nrms, fn[2]), idx(nIds, nrms, fn[3]),
+				idx(cIds, cols, fc[1]), idx(cIds, cols, fc[2]), idx(cIds, cols, fc[3]),
+			}
+		end
+	end
+	local nV, nU, nN, nC, nF = #verts, #uvs, #nrms, #cols, #faces
+	local b = buffer.create(3 + 20 + nV * 12 + nU * 8 + nN * 12 + nC * 4 + nF * 48)
+	buffer.writestring(b, 0, "MK1")
+	local o = 3
+	for _, n in ipairs({ nV, nU, nN, nC, nF }) do buffer.writeu32(b, o, n) o += 4 end
+	for _, id in ipairs(verts) do
+		local p = em:GetPosition(id)
+		buffer.writef32(b, o, p.X) buffer.writef32(b, o + 4, p.Y) buffer.writef32(b, o + 8, p.Z)
+		o += 12
+	end
+	for _, id in ipairs(uvs) do
+		local u = em:GetUV(id)
+		buffer.writef32(b, o, u.X) buffer.writef32(b, o + 4, u.Y)
+		o += 8
+	end
+	for _, id in ipairs(nrms) do
+		local n = em:GetNormal(id)
+		buffer.writef32(b, o, n.X) buffer.writef32(b, o + 4, n.Y) buffer.writef32(b, o + 8, n.Z)
+		o += 12
+	end
+	for _, id in ipairs(cols) do
+		local c = em:GetColor(id)
+		local a = 1
+		pcall(function() a = em:GetColorAlpha(id) end)
+		buffer.writeu8(b, o, math.clamp(math.floor(c.R * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 1, math.clamp(math.floor(c.G * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 2, math.clamp(math.floor(c.B * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 3, math.clamp(math.floor(a * 255 + 0.5), 0, 255))
+		o += 4
+	end
+	for _, f in ipairs(faces) do
+		for k = 1, 12 do buffer.writeu32(b, o, f[k]) o += 4 end
+	end
+	return M.toB64(b), nF
+end
+-- data -> a new EditableMesh (nil, why if it can't)
+function M.build(s)
+	local b = M.fromB64(s)
+	if buffer.len(b) < 23 or buffer.readstring(b, 0, 3) ~= "MK1" then return nil, "not MeshKeeper data" end
+	local o = 3
+	local cnt = {}
+	for k = 1, 5 do cnt[k] = buffer.readu32(b, o) o += 4 end
+	local nV, nU, nN, nC, nF = cnt[1], cnt[2], cnt[3], cnt[4], cnt[5]
+	local em = AssetService:CreateEditableMesh()
+	if not em then return nil, "Roblox wouldn't make a mesh (Allow Mesh / Image APIs off, or out of mesh memory)" end
+	local V, Uv, N, C = {}, {}, {}, {}
+	for i = 1, nV do
+		V[i] = em:AddVertex(Vector3.new(buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)))
+		o += 12
+	end
+	for i = 1, nU do
+		Uv[i] = em:AddUV(Vector2.new(buffer.readf32(b, o), buffer.readf32(b, o + 4)))
+		o += 8
+	end
+	for i = 1, nN do
+		N[i] = em:AddNormal(Vector3.new(buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)))
+		o += 12
+	end
+	for i = 1, nC do
+		C[i] = em:AddColor(Color3.fromRGB(buffer.readu8(b, o), buffer.readu8(b, o + 1), buffer.readu8(b, o + 2)), buffer.readu8(b, o + 3) / 255)
+		o += 4
+	end
+	for _ = 1, nF do
+		local f = {}
+		for k = 1, 12 do f[k] = buffer.readu32(b, o) o += 4 end
+		local fid = em:AddTriangle(V[f[1]], V[f[2]], V[f[3]])
+		if f[4] ~= NONE and f[5] ~= NONE and f[6] ~= NONE then pcall(function() em:SetFaceUVs(fid, { Uv[f[4]], Uv[f[5]], Uv[f[6]] }) end) end
+		if f[7] ~= NONE and f[8] ~= NONE and f[9] ~= NONE then pcall(function() em:SetFaceNormals(fid, { N[f[7]], N[f[8]], N[f[9]] }) end) end
+		if f[10] ~= NONE and f[11] ~= NONE and f[12] ~= NONE then pcall(function() em:SetFaceColors(fid, { C[f[10]], C[f[11]], C[f[12]] }) end) end
+	end
+	return em
+end
+
+-- ===== kept in the place =====
+function M.read(part)
+	local f = part:FindFirstChild(M.DATA)
+	if not f then return nil end
+	local bits = {}
+	for _, v in ipairs(f:GetChildren()) do
+		if v:IsA("StringValue") then
+			local i = tonumber(v.Name)
+			if i then bits[i] = v.Value end
+		end
+	end
+	return table.concat(bits)
+end
+-- (plugins) keep this mesh on the part as data + tag it
+function M.write(part, s)
+	local old = part:FindFirstChild(M.DATA)
+	if old then old.Parent = nil end
+	local f = Instance.new("Folder")
+	f.Name = M.DATA
+	f:SetAttribute("v", M.VERSION)
+	local i = 0
+	for at = 1, #s, M.CHUNK do
+		i += 1
+		local v = Instance.new("StringValue")
+		v.Name = tostring(i)
+		v.Value = string.sub(s, at, at + M.CHUNK - 1)
+		v.Parent = f
+	end
+	f.Parent = part
+	CollectionService:AddTag(part, M.TAG)
+end
+-- (plugins) the part's mesh changed - forget the kept copy
+function M.forget(part)
+	local f = part:FindFirstChild(M.DATA)
+	if f then f.Parent = nil end
+	pcall(function() CollectionService:RemoveTag(part, M.TAG) end)
+end
+
+-- ===== putting the mesh on a part =====
+-- v2: each player may only hold ~8 live EditableMeshes (Roblox's client memory budget). So once a mesh is on its part,
+-- its EditableMesh is freed (FREE = true) - the part should keep the shape. If a game shows blank parts with this, set
+-- the module's attribute FreeAfterApply = false (then only ~8 meshes can show per player).
+M.FREE = false   -- (v4: freeing it loses the shape - tested 21 Oct; keep it, ~8 meshes per player)
+local cache = {}   -- same data + same collision = one mesh shared by every part that uses it (less memory)
+local warned = false
+function M.apply(part)
+	if not (part and part:IsA("MeshPart")) then return false end
+	local s = M.read(part)
+	if not s or s == "" then return false end
+	local fid = part.CollisionFidelity
+	local key = s .. "|" .. tostring(fid)
+	local free = M.FREE
+	pcall(function()
+		local mod = script
+		if mod and mod:GetAttribute("FreeAfterApply") ~= nil then free = mod:GetAttribute("FreeAfterApply") == true end
+	end)
+	if M.noShare then free = false end   -- (Studio: the plugins keep editing it)
+	local tpl = (not M.noShare and not free) and cache[key] or nil
+	if not tpl then
+		local em, why = M.build(s)
+		if not em then
+			if not warned then warned = true warn("MeshKeeper: " .. tostring(why) .. " - turn on Game Settings > Security > Allow Mesh / Image APIs.") end
+			return false
+		end
+		local ok, mp = pcall(function()
+			return AssetService:CreateMeshPartAsync(Content.fromObject(em), { CollisionFidelity = fid })
+		end)
+		if not ok or not mp then
+			if not warned then warned = true warn("MeshKeeper: couldn't make the mesh part - " .. tostring(mp)) end
+			return false
+		end
+		tpl = { em = em, mp = mp }
+		if not M.noShare and not free then cache[key] = tpl end
+	end
+	local okA, err = pcall(function() part:ApplyMesh(tpl.mp) end)
+	if okA then
+		if free then
+			-- the shape is on the part now: give the memory back so the next mesh fits in the budget
+			pcall(function() tpl.mp:Destroy() end)
+			pcall(function() tpl.em:Destroy() end)
+		end
+		return true
+	end
+	-- (no ApplyMesh: a copy of the built part takes this one's place - same look, place, children)
+	local okS, err2 = pcall(function()
+		local np = tpl.mp:Clone()
+		for _, k in ipairs({ "Name", "Size", "CFrame", "Color", "Material", "MaterialVariant", "Transparency", "Reflectance", "Anchored",
+			"CanCollide", "CanQuery", "CanTouch", "CastShadow", "Massless", "CollisionGroup", "Locked", "TextureID" }) do
+			pcall(function() np[k] = part[k] end)
+		end
+		for k, v in pairs(part:GetAttributes()) do np:SetAttribute(k, v) end
+		for _, ch in ipairs(part:GetChildren()) do ch.Parent = np end
+		np.Parent = part.Parent
+		part.Parent = nil
+	end)
+	if not okS then warn("MeshKeeper: couldn't put the mesh on " .. part:GetFullName() .. " - " .. tostring(err) .. " / " .. tostring(err2)) return false end
+	return true
+end
+-- every kept part now (onlyMissing = skip parts that already show a live mesh - Studio)
+function M.applyAll(onlyMissing)
+	local n = 0
+	for _, p in ipairs(CollectionService:GetTagged(M.TAG)) do
+		local skip = false
+		if onlyMissing then
+			pcall(function()
+				local mc = p.MeshContent
+				skip = mc.SourceType == Enum.ContentSourceType.Object
+			end)
+		end
+		if not skip and M.apply(p) then n += 1 end
+	end
+	return n
+end
+-- the game: every kept part, now and as they stream in. v3: ONE AT A TIME (a queue) and each part once - building
+-- several at the same time held several meshes in memory together and ran past the players' mesh budget.
+local started = false
+local queue, queued, done = {}, setmetatable({}, { __mode = "k" }), setmetatable({}, { __mode = "k" })
+local running = false
+local function pump()
+	if running then return end
+	running = true
+	task.spawn(function()
+		while #queue > 0 do
+			local p = table.remove(queue, 1)
+			queued[p] = nil
+			if p.Parent and not done[p] then
+				if not p:FindFirstChild(M.DATA) then p:WaitForChild(M.DATA, 10) end
+				local ok, applied = pcall(M.apply, p)
+				if ok and applied then done[p] = true end
+				task.wait()   -- (let Roblox take the freed memory back before the next one)
+			end
+		end
+		running = false
+	end)
+end
+function M.queue(p)
+	if not (p and p:IsA("MeshPart")) or queued[p] or done[p] then return end
+	queued[p] = true
+	table.insert(queue, p)
+	pump()
+end
+function M.start()
+	if started then return end
+	started = true
+	CollectionService:GetInstanceAddedSignal(M.TAG):Connect(M.queue)
+	for _, p in ipairs(CollectionService:GetTagged(M.TAG)) do M.queue(p) end
+end
+return M
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">MeshKeeperSrc</string><ProtectedString name="Source"><![CDATA[-- the MeshKeeper module's source, for putting a copy in the game (ReplicatedStorage.MeshKeeper)
+return [====[-- MeshKeeper v1 - made by PROTO / ROBLEND (CRUPPNOMICS). Free to use and change.
+-- Plugins installed from the Creator Store aren't allowed to upload meshes to Roblox. So instead, the plugin keeps each
+-- mesh IN THE PLACE as data (a "MeshKeeperData" folder inside the part, tagged "MeshKeeper"), and this module builds the
+-- real mesh again when the game runs (on the server for collisions, on each player for what they see) - and in Studio
+-- when the place is opened.
+-- Needs: Game Settings > Security > "Allow Mesh / Image APIs" ON (Creator Dashboard > Configure > Settings, "Enable
+-- Mesh / Image APIs"). Without it Roblox won't let the game build meshes.
+local AssetService = game:GetService("AssetService")
+local CollectionService = game:GetService("CollectionService")
+local RunService = game:GetService("RunService")
+
+local M = {}
+M.VERSION = 4
+M.TAG = "MeshKeeper"
+M.DATA = "MeshKeeperData"
+M.CHUNK = 100000   -- characters per StringValue
+
+-- ===== base64 (binary-safe text for the place file) =====
+local A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local ENC, DEC = {}, {}
+for i = 1, 64 do
+	local c = string.byte(A, i)
+	ENC[i - 1] = c
+	DEC[c] = i - 1
+end
+function M.toB64(b)
+	local n = buffer.len(b)
+	local out = buffer.create(math.ceil(n / 3) * 4)
+	local o = 0
+	local i = 0
+	while i + 2 < n do
+		local v = buffer.readu8(b, i) * 65536 + buffer.readu8(b, i + 1) * 256 + buffer.readu8(b, i + 2)
+		buffer.writeu8(out, o, ENC[bit32.rshift(v, 18)])
+		buffer.writeu8(out, o + 1, ENC[bit32.band(bit32.rshift(v, 12), 63)])
+		buffer.writeu8(out, o + 2, ENC[bit32.band(bit32.rshift(v, 6), 63)])
+		buffer.writeu8(out, o + 3, ENC[bit32.band(v, 63)])
+		i += 3
+		o += 4
+	end
+	local r = n - i
+	if r > 0 then
+		local v = buffer.readu8(b, i) * 65536 + ((r == 2) and buffer.readu8(b, i + 1) * 256 or 0)
+		buffer.writeu8(out, o, ENC[bit32.rshift(v, 18)])
+		buffer.writeu8(out, o + 1, ENC[bit32.band(bit32.rshift(v, 12), 63)])
+		buffer.writeu8(out, o + 2, (r == 2) and ENC[bit32.band(bit32.rshift(v, 6), 63)] or 61)
+		buffer.writeu8(out, o + 3, 61)
+	end
+	return buffer.tostring(out)
+end
+function M.fromB64(s)
+	local n = #s
+	local pad = 0
+	if n >= 1 and string.byte(s, n) == 61 then pad += 1 end
+	if n >= 2 and string.byte(s, n - 1) == 61 then pad += 1 end
+	local out = buffer.create(math.floor(n / 4) * 3 - pad)
+	local src = buffer.fromstring(s)
+	local o = 0
+	for i = 0, n - 4, 4 do
+		local a = DEC[buffer.readu8(src, i)] or 0
+		local b = DEC[buffer.readu8(src, i + 1)] or 0
+		local c = DEC[buffer.readu8(src, i + 2)] or 0
+		local d = DEC[buffer.readu8(src, i + 3)] or 0
+		local v = a * 262144 + b * 4096 + c * 64 + d
+		if o < buffer.len(out) then buffer.writeu8(out, o, bit32.rshift(v, 16)) end
+		if o + 1 < buffer.len(out) then buffer.writeu8(out, o + 1, bit32.band(bit32.rshift(v, 8), 255)) end
+		if o + 2 < buffer.len(out) then buffer.writeu8(out, o + 2, bit32.band(v, 255)) end
+		o += 3
+	end
+	return out
+end
+
+-- ===== mesh <-> data =====
+-- format 1: "MK1" | u32 nV, nUV, nN, nC, nF | nV x f32 xyz | nUV x f32 uv | nN x f32 xyz | nC x u8 rgba |
+--           nF x (u32 v1 v2 v3, u32 uv1 uv2 uv3, u32 n1 n2 n3, u32 c1 c2 c3)   (0 = none, else 1-based)
+local NONE = 0
+-- everything an EditableMesh holds that shows: points, UVs, normals, colours, triangles
+function M.pack(em)
+	local vIds, uvIds, nIds, cIds = {}, {}, {}, {}
+	local verts, uvs, nrms, cols = {}, {}, {}, {}
+	local function idx(map, list, id)
+		if id == nil then return NONE end
+		local k = map[id]
+		if not k then
+			list[#list + 1] = id
+			k = #list
+			map[id] = k
+		end
+		return k
+	end
+	local faces = {}
+	for _, f in ipairs(em:GetFaces()) do
+		local fv = em:GetFaceVertices(f)
+		if #fv == 3 then
+			local fu, fn, fc = {}, {}, {}
+			pcall(function() fu = em:GetFaceUVs(f) or {} end)
+			pcall(function() fn = em:GetFaceNormals(f) or {} end)
+			pcall(function() fc = em:GetFaceColors(f) or {} end)
+			faces[#faces + 1] = {
+				idx(vIds, verts, fv[1]), idx(vIds, verts, fv[2]), idx(vIds, verts, fv[3]),
+				idx(uvIds, uvs, fu[1]), idx(uvIds, uvs, fu[2]), idx(uvIds, uvs, fu[3]),
+				idx(nIds, nrms, fn[1]), idx(nIds, nrms, fn[2]), idx(nIds, nrms, fn[3]),
+				idx(cIds, cols, fc[1]), idx(cIds, cols, fc[2]), idx(cIds, cols, fc[3]),
+			}
+		end
+	end
+	local nV, nU, nN, nC, nF = #verts, #uvs, #nrms, #cols, #faces
+	local b = buffer.create(3 + 20 + nV * 12 + nU * 8 + nN * 12 + nC * 4 + nF * 48)
+	buffer.writestring(b, 0, "MK1")
+	local o = 3
+	for _, n in ipairs({ nV, nU, nN, nC, nF }) do buffer.writeu32(b, o, n) o += 4 end
+	for _, id in ipairs(verts) do
+		local p = em:GetPosition(id)
+		buffer.writef32(b, o, p.X) buffer.writef32(b, o + 4, p.Y) buffer.writef32(b, o + 8, p.Z)
+		o += 12
+	end
+	for _, id in ipairs(uvs) do
+		local u = em:GetUV(id)
+		buffer.writef32(b, o, u.X) buffer.writef32(b, o + 4, u.Y)
+		o += 8
+	end
+	for _, id in ipairs(nrms) do
+		local n = em:GetNormal(id)
+		buffer.writef32(b, o, n.X) buffer.writef32(b, o + 4, n.Y) buffer.writef32(b, o + 8, n.Z)
+		o += 12
+	end
+	for _, id in ipairs(cols) do
+		local c = em:GetColor(id)
+		local a = 1
+		pcall(function() a = em:GetColorAlpha(id) end)
+		buffer.writeu8(b, o, math.clamp(math.floor(c.R * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 1, math.clamp(math.floor(c.G * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 2, math.clamp(math.floor(c.B * 255 + 0.5), 0, 255))
+		buffer.writeu8(b, o + 3, math.clamp(math.floor(a * 255 + 0.5), 0, 255))
+		o += 4
+	end
+	for _, f in ipairs(faces) do
+		for k = 1, 12 do buffer.writeu32(b, o, f[k]) o += 4 end
+	end
+	return M.toB64(b), nF
+end
+-- data -> a new EditableMesh (nil, why if it can't)
+function M.build(s)
+	local b = M.fromB64(s)
+	if buffer.len(b) < 23 or buffer.readstring(b, 0, 3) ~= "MK1" then return nil, "not MeshKeeper data" end
+	local o = 3
+	local cnt = {}
+	for k = 1, 5 do cnt[k] = buffer.readu32(b, o) o += 4 end
+	local nV, nU, nN, nC, nF = cnt[1], cnt[2], cnt[3], cnt[4], cnt[5]
+	local em = AssetService:CreateEditableMesh()
+	if not em then return nil, "Roblox wouldn't make a mesh (Allow Mesh / Image APIs off, or out of mesh memory)" end
+	local V, Uv, N, C = {}, {}, {}, {}
+	for i = 1, nV do
+		V[i] = em:AddVertex(Vector3.new(buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)))
+		o += 12
+	end
+	for i = 1, nU do
+		Uv[i] = em:AddUV(Vector2.new(buffer.readf32(b, o), buffer.readf32(b, o + 4)))
+		o += 8
+	end
+	for i = 1, nN do
+		N[i] = em:AddNormal(Vector3.new(buffer.readf32(b, o), buffer.readf32(b, o + 4), buffer.readf32(b, o + 8)))
+		o += 12
+	end
+	for i = 1, nC do
+		C[i] = em:AddColor(Color3.fromRGB(buffer.readu8(b, o), buffer.readu8(b, o + 1), buffer.readu8(b, o + 2)), buffer.readu8(b, o + 3) / 255)
+		o += 4
+	end
+	for _ = 1, nF do
+		local f = {}
+		for k = 1, 12 do f[k] = buffer.readu32(b, o) o += 4 end
+		local fid = em:AddTriangle(V[f[1]], V[f[2]], V[f[3]])
+		if f[4] ~= NONE and f[5] ~= NONE and f[6] ~= NONE then pcall(function() em:SetFaceUVs(fid, { Uv[f[4]], Uv[f[5]], Uv[f[6]] }) end) end
+		if f[7] ~= NONE and f[8] ~= NONE and f[9] ~= NONE then pcall(function() em:SetFaceNormals(fid, { N[f[7]], N[f[8]], N[f[9]] }) end) end
+		if f[10] ~= NONE and f[11] ~= NONE and f[12] ~= NONE then pcall(function() em:SetFaceColors(fid, { C[f[10]], C[f[11]], C[f[12]] }) end) end
+	end
+	return em
+end
+
+-- ===== kept in the place =====
+function M.read(part)
+	local f = part:FindFirstChild(M.DATA)
+	if not f then return nil end
+	local bits = {}
+	for _, v in ipairs(f:GetChildren()) do
+		if v:IsA("StringValue") then
+			local i = tonumber(v.Name)
+			if i then bits[i] = v.Value end
+		end
+	end
+	return table.concat(bits)
+end
+-- (plugins) keep this mesh on the part as data + tag it
+function M.write(part, s)
+	local old = part:FindFirstChild(M.DATA)
+	if old then old.Parent = nil end
+	local f = Instance.new("Folder")
+	f.Name = M.DATA
+	f:SetAttribute("v", M.VERSION)
+	local i = 0
+	for at = 1, #s, M.CHUNK do
+		i += 1
+		local v = Instance.new("StringValue")
+		v.Name = tostring(i)
+		v.Value = string.sub(s, at, at + M.CHUNK - 1)
+		v.Parent = f
+	end
+	f.Parent = part
+	CollectionService:AddTag(part, M.TAG)
+end
+-- (plugins) the part's mesh changed - forget the kept copy
+function M.forget(part)
+	local f = part:FindFirstChild(M.DATA)
+	if f then f.Parent = nil end
+	pcall(function() CollectionService:RemoveTag(part, M.TAG) end)
+end
+
+-- ===== putting the mesh on a part =====
+-- v2: each player may only hold ~8 live EditableMeshes (Roblox's client memory budget). So once a mesh is on its part,
+-- its EditableMesh is freed (FREE = true) - the part should keep the shape. If a game shows blank parts with this, set
+-- the module's attribute FreeAfterApply = false (then only ~8 meshes can show per player).
+M.FREE = false   -- (v4: freeing it loses the shape - tested 21 Oct; keep it, ~8 meshes per player)
+local cache = {}   -- same data + same collision = one mesh shared by every part that uses it (less memory)
+local warned = false
+function M.apply(part)
+	if not (part and part:IsA("MeshPart")) then return false end
+	local s = M.read(part)
+	if not s or s == "" then return false end
+	local fid = part.CollisionFidelity
+	local key = s .. "|" .. tostring(fid)
+	local free = M.FREE
+	pcall(function()
+		local mod = script
+		if mod and mod:GetAttribute("FreeAfterApply") ~= nil then free = mod:GetAttribute("FreeAfterApply") == true end
+	end)
+	if M.noShare then free = false end   -- (Studio: the plugins keep editing it)
+	local tpl = (not M.noShare and not free) and cache[key] or nil
+	if not tpl then
+		local em, why = M.build(s)
+		if not em then
+			if not warned then warned = true warn("MeshKeeper: " .. tostring(why) .. " - turn on Game Settings > Security > Allow Mesh / Image APIs.") end
+			return false
+		end
+		local ok, mp = pcall(function()
+			return AssetService:CreateMeshPartAsync(Content.fromObject(em), { CollisionFidelity = fid })
+		end)
+		if not ok or not mp then
+			if not warned then warned = true warn("MeshKeeper: couldn't make the mesh part - " .. tostring(mp)) end
+			return false
+		end
+		tpl = { em = em, mp = mp }
+		if not M.noShare and not free then cache[key] = tpl end
+	end
+	local okA, err = pcall(function() part:ApplyMesh(tpl.mp) end)
+	if okA then
+		if free then
+			-- the shape is on the part now: give the memory back so the next mesh fits in the budget
+			pcall(function() tpl.mp:Destroy() end)
+			pcall(function() tpl.em:Destroy() end)
+		end
+		return true
+	end
+	-- (no ApplyMesh: a copy of the built part takes this one's place - same look, place, children)
+	local okS, err2 = pcall(function()
+		local np = tpl.mp:Clone()
+		for _, k in ipairs({ "Name", "Size", "CFrame", "Color", "Material", "MaterialVariant", "Transparency", "Reflectance", "Anchored",
+			"CanCollide", "CanQuery", "CanTouch", "CastShadow", "Massless", "CollisionGroup", "Locked", "TextureID" }) do
+			pcall(function() np[k] = part[k] end)
+		end
+		for k, v in pairs(part:GetAttributes()) do np:SetAttribute(k, v) end
+		for _, ch in ipairs(part:GetChildren()) do ch.Parent = np end
+		np.Parent = part.Parent
+		part.Parent = nil
+	end)
+	if not okS then warn("MeshKeeper: couldn't put the mesh on " .. part:GetFullName() .. " - " .. tostring(err) .. " / " .. tostring(err2)) return false end
+	return true
+end
+-- every kept part now (onlyMissing = skip parts that already show a live mesh - Studio)
+function M.applyAll(onlyMissing)
+	local n = 0
+	for _, p in ipairs(CollectionService:GetTagged(M.TAG)) do
+		local skip = false
+		if onlyMissing then
+			pcall(function()
+				local mc = p.MeshContent
+				skip = mc.SourceType == Enum.ContentSourceType.Object
+			end)
+		end
+		if not skip and M.apply(p) then n += 1 end
+	end
+	return n
+end
+-- the game: every kept part, now and as they stream in. v3: ONE AT A TIME (a queue) and each part once - building
+-- several at the same time held several meshes in memory together and ran past the players' mesh budget.
+local started = false
+local queue, queued, done = {}, setmetatable({}, { __mode = "k" }), setmetatable({}, { __mode = "k" })
+local running = false
+local function pump()
+	if running then return end
+	running = true
+	task.spawn(function()
+		while #queue > 0 do
+			local p = table.remove(queue, 1)
+			queued[p] = nil
+			if p.Parent and not done[p] then
+				if not p:FindFirstChild(M.DATA) then p:WaitForChild(M.DATA, 10) end
+				local ok, applied = pcall(M.apply, p)
+				if ok and applied then done[p] = true end
+				task.wait()   -- (let Roblox take the freed memory back before the next one)
+			end
+		end
+		running = false
+	end)
+end
+function M.queue(p)
+	if not (p and p:IsA("MeshPart")) or queued[p] or done[p] then return end
+	queued[p] = true
+	table.insert(queue, p)
+	pump()
+end
+function M.start()
+	if started then return end
+	started = true
+	CollectionService:GetInstanceAddedSignal(M.TAG):Connect(M.queue)
+	for _, p in ipairs(CollectionService:GetTagged(M.TAG)) do M.queue(p) end
+end
+return M
+]====]
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">MeshTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Edit Mode mesh tools (the Modeling tab)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -9382,7 +10461,7 @@ function MT.toSpec(bm)
 			idx[i] = spec.vi[l.v]
 			if uvk and l.uv then uvk[idx[i]] = l.uv else uvk = nil end
 		end
-		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, src = f, uvk = uvk }
+		spec.faces[#spec.faces + 1] = { v = idx, sel = f.sel, smooth = f.smooth, col = f.col, src = f, uvk = uvk }
 	end
 	for e in pairs(bm.edges) do
 		local a, b = spec.vi[e.v1], spec.vi[e.v2]
@@ -9410,7 +10489,7 @@ function MT.fromSpec(spec)
 			local uniq, ok = {}, #list >= 3
 			for _, k in ipairs(list) do if uniq[k] then ok = false end uniq[k] = true end
 			if ok then
-				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth, uvk = f.uvk }
+				faces[#faces + 1] = { v = list, sel = f.sel, smooth = f.smooth, col = f.col, uvk = f.uvk }
 				for _, k in ipairs(list) do used[k] = true end
 			end
 		end
@@ -9432,7 +10511,7 @@ function MT.fromSpec(spec)
 		for j, k in ipairs(f.v) do list[j] = vs[k] end
 		local nf = nb:faceCreate(list)
 		if nf then
-			nf.sel = f.sel == true nf.smooth = f.smooth fl[i] = nf
+			nf.sel = f.sel == true nf.smooth = f.smooth nf.col = f.col fl[i] = nf
 			-- UVs come along when every corner still has one
 			if f.uvk then
 				local all = true
@@ -9605,12 +10684,12 @@ function MT.bevel(bm, offset, vertexOnly, segments)
 		local function near(pts, side) return side == "first" and pts[1] or pts[#pts] end
 		local pB1, pA1, pA2, pB2 = near(B1, "first"), near(A1, "last"), near(A2, "first"), near(B2, "last")
 		if segments <= 1 then
-			spec.faces[#spec.faces + 1] = { v = { pB1, pA1, pA2, pB2 }, sel = true }
+			spec.faces[#spec.faces + 1] = { v = { pB1, pA1, pA2, pB2 }, sel = true, col = f1.col or f2.col }
 			newFaces[#newFaces + 1] = spec.faces[#spec.faces]
 		else
 			local ra, rb = run(pA1, pA2, a.co), run(pB1, pB2, b.co)
 			for k = 1, segments do
-				spec.faces[#spec.faces + 1] = { v = { rb[k], ra[k], ra[k + 1], rb[k + 1] }, sel = true }
+				spec.faces[#spec.faces + 1] = { v = { rb[k], ra[k], ra[k + 1], rb[k + 1] }, sel = true, col = f1.col or f2.col }
 				newFaces[#newFaces + 1] = spec.faces[#spec.faces]
 			end
 		end
@@ -9640,7 +10719,7 @@ function MT.bevel(bm, offset, vertexOnly, segments)
 					for i = #pts, 1, -1 do r[#r + 1] = pts[i] end
 					pts = r
 				end
-				spec.faces[#spec.faces + 1] = { v = pts, sel = true }
+				spec.faces[#spec.faces + 1] = { v = pts, sel = true, col = ring[1] and ring[1].f.col }
 			end
 		end
 	end
@@ -10000,7 +11079,7 @@ function MT.duplicate(bm)
 		if f.sel and not f.hide then
 			local list = {}
 			for i, v in ipairs(fverts(f)) do list[i] = dup(v) end
-			spec.faces[#spec.faces + 1] = { v = list, sel = true, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = list, sel = true, smooth = f.smooth, col = f.col }
 			nf += 1
 		end
 	end
@@ -10714,7 +11793,7 @@ function MT.symmetrize(bm, axis, positiveToNegative)
 		local f = spec.faces[i]
 		local r = {}
 		for j = #f.v, 1, -1 do r[#r + 1] = mirror[f.v[j]] end
-		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 	end
 	return MT.fromSpec(spec)
 end
@@ -11081,7 +12160,7 @@ function MT.mirror(bm, verts, center, axis)
 end
 
 return MT
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0011"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">ModStack</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the modifier stack and UV / texture commands behind Properties > Modifiers, Material > Texture,
 	the U menu and Ctrl 0-4 (Blender's object.modifier_add / modifier_apply / subdivision_set, uv projections).
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -11321,7 +12400,7 @@ function ModStack.install(api, C)
 end
 
 return ModStack
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0012"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Modifiers</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - modifiers: a non-destructive stack on each mesh (Blender's Properties > Modifiers)
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -11419,7 +12498,7 @@ local function mirrorAxis(bm, axis, merge, dist, bisect)
 		local f = spec.faces[i]
 		local r = {}
 		for j = #f.v, 1, -1 do r[#r + 1] = twin[f.v[j]] end
-		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+		spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 	end
 	local ne = #spec.edges
 	for i = 1, ne do
@@ -11490,7 +12569,7 @@ local function catmullClark(bm)
 	for f in pairs(bm.faces) do
 		for _, l in ipairs(BMesh.faceLoops(f)) do
 			-- corner quad: v, middle of the edge out, face centre, middle of the edge in
-			spec.faces[#spec.faces + 1] = { v = { vp[l.v], ep[l.e], fp[f], ep[l.prev.e] }, sel = f.sel, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = { vp[l.v], ep[l.e], fp[f], ep[l.prev.e] }, sel = f.sel, smooth = f.smooth, col = f.col }
 		end
 	end
 	return (MT.fromSpec(spec))
@@ -11551,7 +12630,7 @@ function Mods.array(bm, m)
 			local f = spec.faces[i]
 			local r = {}
 			for j, k in ipairs(f.v) do r[j] = k + base end
-			spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth }
+			spec.faces[#spec.faces + 1] = { v = r, sel = f.sel, smooth = f.smooth, col = f.col }
 		end
 		for i = 1, ne do
 			local e = spec.edges[i]
@@ -12223,7 +13302,7 @@ function Mods.edgesplit(bm, m)
 		for i, l in ipairs(ls) do list[i] = newOf[l.v][f] end
 		local nf = out:faceCreate(list)
 		if nf then
-			nf.smooth, nf.sel = f.smooth, f.sel
+			nf.smooth, nf.sel, nf.col = f.smooth, f.sel, f.col
 			local nls = BMesh.faceLoops(nf)
 			for i, l in ipairs(ls) do if l.uv and nls[i] then nls[i].uv = l.uv end end
 		end
@@ -12416,7 +13495,7 @@ function Mods.mergeDoubles(bm, dist)
 end
 
 return Mods
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0013"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">ObjectTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Object Mode tools: Join, Set Origin, Apply Rotation, Shade Smooth / Flat / Auto, Hide / Reveal,
 	Clear Location / Rotation, Local View, Convert to ROBLEND Mesh. Converted from Blender's object operators
 	(source/blender/editors/object/object_transform.cc, object_relations.cc, view3d localview).
@@ -12735,7 +13814,7 @@ function ObjectTools.new(C)
 end
 
 return ObjectTools
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0014"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">Ops</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - mesh operators
 	SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -13365,7 +14444,7 @@ function Ops.fill(bm, vertSet)
 end
 
 return Ops
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0015"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">Paint</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Vertex Paint: paint colours onto the mesh's points (the colour blends across each face).
 	Converted to Luau (and cut down) from Blender's vertex paint:
 	  source/blender/editors/sculpt_paint/paint_vertex.cc (draw / blur / fill / sample, brush falloff, front faces only)
@@ -13386,6 +14465,50 @@ Paint.BRUSHES = {
 Paint.BY_ID = {}
 for _, b in ipairs(Paint.BRUSHES) do Paint.BY_ID[b.id] = b end
 Paint.PALETTE = { 0xffffff, 0x1e1e1e, 0x7a7a7a, 0xc42b2b, 0xe8822e, 0xf2cd37, 0x5ba84a, 0x2b86c4, 0x6a4bc4, 0xd96ab8, 0x8a5a36, 0xffd60a }
+
+-- ===== Palette (0.33.0): low-poly colouring, like the "palette texture" trick in Blender =====
+-- 13 base colours across, 5 shades down (light to dark). Clicking one colours whole faces (f.col), so the
+-- mesh stays one piece with sharp colour edges - no image or UVs needed, and it saves with the mesh.
+Paint.PAL_HUES = { 0xd63a3a, 0xf08a2e, 0xf5d13a, 0x9ad13a, 0x3fae4f, 0x2fb39a, 0x37b7e6, 0x2f6fd6, 0x7a4fd6, 0xd65fb0, 0x8a5a36, 0xe0b48a, 0x8c8c8c }
+Paint.PAL_SHADES = { 0.55, 0.28, 0, -0.32, -0.6 } -- + = towards white, - = towards black
+-- one shade step lighter (+) or darker (-) of a colour
+function Paint.shade(c, amount)
+	c = c or Color3.new(1, 1, 1)
+	local t = math.min(math.abs(amount), 1)
+	local to = amount >= 0 and 1 or 0
+	return Color3.new(c.R + (to - c.R) * t, c.G + (to - c.G) * t, c.B + (to - c.B) * t)
+end
+-- the colour in column `col` (1-13), row `row` (1-5) of the palette; the grey column runs white to black
+function Paint.palColor(col, row)
+	local base = Paint.fromInt(Paint.PAL_HUES[col])
+	if col == #Paint.PAL_HUES then
+		local v = ({ 0.97, 0.78, 0.55, 0.32, 0.12 })[row]
+		return Color3.new(v, v, v)
+	end
+	return Paint.shade(base, Paint.PAL_SHADES[row])
+end
+-- colour faces (a set, f -> true): returns how many
+function Paint.colorFaces(faces, color)
+	local n = 0
+	for f in pairs(faces) do f.col = color n += 1 end
+	return n
+end
+-- the colour a face shows now (its own, or the average of its points, or white)
+function Paint.faceColor(BMesh, f)
+	if f.col then return f.col end
+	local r, g, b, k = 0, 0, 0, 0
+	for _, v in ipairs(BMesh.faceVerts(f)) do
+		local c = v.col or Color3.new(1, 1, 1)
+		r += c.R g += c.G b += c.B k += 1
+	end
+	return k > 0 and Color3.new(r / k, g / k, b / k) or Color3.new(1, 1, 1)
+end
+-- Lighter / Darker: move each face one shade step (step = +1 / -1)
+function Paint.shadeFaces(BMesh, faces, step)
+	local n = 0
+	for f in pairs(faces) do f.col = Paint.shade(Paint.faceColor(BMesh, f), step * 0.18) n += 1 end
+	return n
+end
 
 local function rgb(c) return c and c.R or 1, c and c.G or 1, c and c.B or 1 end
 local function mix(a, b, t)
@@ -13655,7 +14778,7 @@ function Paint.new(C)
 end
 
 return Paint
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0016"><Properties><string name="Name">QuickTest</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">QuickTest</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Quick Test: a card that walks through every feature. For each one it sets the scene up
 	itself (adds the right shape, picks the mode, selects the faces), says what to press and what you should
 	see, and has Works / Broken / Skip buttons. "Show me" does the action for you where it can.
@@ -14288,7 +15411,7 @@ function QuickTest.new(C)
 end
 
 return QuickTest
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0017"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">Sculpt</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Sculpt Mode: brushes that push the surface around like clay.
 	Converted to Luau (and cut down) from Blender's sculpt brushes:
 	  source/blender/editors/sculpt_paint/brushes/draw.cc, clay_strips.cc, inflate.cc, grab.cc, smooth.cc,
@@ -14598,7 +15721,7 @@ function Sculpt.new(C)
 end
 
 return Sculpt
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0018"><Properties><string name="Name">SelfTest</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">SelfTest</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Run Self-Test: checks ROBLEND's features inside the real Studio (real EditableMesh,
 	AssetService, collision, Boolean, UVs, modifiers, Edit Mode tools) without any clicking, and prints a
 	report to the Output window ("ROBLEND TEST ..." lines). Everything it makes goes in a folder that is taken
@@ -14920,10 +16043,10 @@ function SelfTest.run(C, api)
 end
 
 return SelfTest
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0019"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">Setup</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - "Before you start": ROBLEND needs two things switched on, and this screen checks them itself.
 	  1. Mesh / Image APIs for this game (Game Settings > Security) - without it Roblox won't let any plugin make meshes.
-	  2. Studio's "CreateAssetAsync Lua API" beta (File > Beta Features) - saving meshes to Roblox needs it.
+	  2. Studio's "CreateAssetAsync Luau API" beta (File > Beta Features) - saving meshes to Roblox needs it.
 	Until both are on, the screen covers ROBLEND; when they are, Start lets you in.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -14985,7 +16108,7 @@ function Setup.new(C)
 		{ key = "mesh", title = "Mesh / Image APIs  (this game)",
 			how = "Home tab > Game Settings > Security > turn on \"Allow Mesh / Image APIs\" > Save. Every game needs this once." },
 		{ key = "beta", title = "CreateAssetAsync beta  (Studio)",
-			how = "File > Beta Features > tick \"CreateAssetAsync Lua API\" > Save, then close and reopen Studio." },
+			how = "File > Beta Features > tick \"CreateAssetAsync Luau API\" > Save, then close and reopen Studio." },
 	}
 	local function build()
 		local st = C.get()
@@ -15061,7 +16184,7 @@ function Setup.new(C)
 end
 
 return Setup
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0020"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">Tutorial</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - Help > Tutorial: step cards that wait for you to actually do each thing.
 	SPDX-License-Identifier: GPL-2.0-or-later
 	Copyright (C) 2026 Cruppnomics (Giga_gad27).
@@ -15102,6 +16225,14 @@ Tutorial.STEPS = {
 		check = function(st) return st.mods ~= nil and #st.mods > 0 end },
 	{ title = "Save it to Roblox", text = "File > Save Mesh uploads it as a real mesh so it stays in the place (it needs the CreateAssetAsync beta). Skip this if you haven't set that up.",
 		check = function(st) return st.saved == true end },
+	-- 0.32.0 (Dylan: "include these at the end of the tutorial - just show them and say it"): no action needed, the
+	-- button is lit up yellow; Next moves on
+	{ title = "The Roblox camera", point = "RB_RobloxCam", uiKey = "robloxNavBtn", show = true,
+		text = "This camera button (top right of the 3D view, lit yellow) moves the view like Roblox Studio: hold right mouse + drag to look, WASD to fly (Q / E = down / up, Shift = slower), F = focus. Click it again for Blender's controls.",
+		check = function() return false end },
+	{ title = "The Modes button", point = "RB_ModeMenuBtn", uiKey = "modeMenuBtn", show = true,
+		text = "Modes (lit yellow) is the same menu as Q: Object Mode, Edit Mode, Sculpt Mode and Vertex Paint. With the Roblox camera on, Q flies down, so use this button for the menu.",
+		check = function() return false end },
 	{ title = "You're done!", text = "F3 searches every command, right click opens the menu for what's selected, and Help > Tutorial runs this again. Have fun!",
 		check = function() return false end, last = true },
 }
@@ -15159,7 +16290,23 @@ function Tutorial.new(C)
 		body.Text = s.text
 		card.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
 		back.Visible = T.step > 1
-		skip.Text = s.last and "Restart" or "Skip"
+		skip.Text = s.last and "Restart" or (s.show and "Next" or "Skip")
+		-- (0.32.0) a "show" card lights up the button it's about
+		if T.hl then pcall(function() T.hl.Parent = nil end) T.hl = nil end
+		if s.point then
+			local st = C.get()
+			local gui = st.ui and st.ui.gui
+			local target = st.ui and st.ui[s.uiKey]
+			if not target and gui then pcall(function() target = gui:FindFirstChild(s.point, true) end) end
+			if target then
+				local hl = Instance.new("UIStroke")
+				hl.Name = "RB_TutorialHighlight"
+				hl.Color = Color3.fromRGB(255, 205, 40)
+				hl.Thickness = 3
+				hl.Parent = target
+				T.hl = hl
+			end
+		end
 	end
 	function T.go(i)
 		if i > #Tutorial.STEPS then i = 1 end
@@ -15176,6 +16323,7 @@ function Tutorial.new(C)
 	end
 	function T.close()
 		T.open = false
+		if T.hl then pcall(function() T.hl.Parent = nil end) T.hl = nil end
 		if card then card.Visible = false end
 	end
 	function T.toggle() if T.open then T.close() else T.openTutorial() end end
@@ -15204,7 +16352,7 @@ function Tutorial.new(C)
 end
 
 return Tutorial
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0021"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0023"><Properties><string name="Name">UI</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the Blender-style window: top bar, 3D view header + tool strip + navigation gizmo,
 	Outliner, Properties editor and status bar.
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -15349,6 +16497,8 @@ local function icon(parent, kind, col, size)
 		ring(box, 8, 8, 6, col, false) ring(box, 8, 8, 2.2, col, true)
 	elseif kind == "eyeoff" then
 		seg(box, 2, 8, 14, 8, col)
+	elseif kind == "camera" then
+		rect(box, 1, 5, 11, 8, col, false) ring(box, 6.5, 9, 2.2, col, false) seg(box, 12, 7, 15, 5, col) seg(box, 15, 5, 15, 13, col) seg(box, 15, 13, 12, 11, col) rect(box, 3, 3, 3, 2, col, true)
 	elseif kind == "zoom" then
 		ring(box, 7, 7, 4.5, col, false) seg(box, 10, 10, 15, 15, col, 2)
 	elseif kind == "hand" then
@@ -15746,6 +16896,19 @@ function UI:buildView()
 	end
 	make("Frame", { LayoutOrder = -30, BackgroundTransparency = 1, Size = UDim2.fromOffset(10, 1) }, right)
 	make("Frame", { LayoutOrder = -5, BackgroundTransparency = 1, Size = UDim2.fromOffset(8, 1) }, right)
+	-- 0.31.0 Roblox camera (Dylan): Studio's controls in ROBLEND's view - lit blue while on
+	self.robloxNavBtn = self:btn(right, { Name = "RB_RobloxCam", LayoutOrder = -7, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.setRobloxNav(not api.state().robloxNav) end, "toggle")
+	corner(self.robloxNavBtn, 4) icon(self.robloxNavBtn, "camera")
+	self:tip(self.robloxNavBtn, "Roblox Camera", "Move the view like Roblox Studio: hold right mouse + drag to look, WASD to fly (Q / E down / up, Shift = slower), wheel = zoom, middle mouse = pan, F = focus. Right mouse is only for the camera (no menu). Click again for Blender's controls.")
+	make("Frame", { LayoutOrder = -6, BackgroundTransparency = 1, Size = UDim2.fromOffset(6, 1) }, right)
+	-- 0.32.0 (Dylan: "Q has a lot of functionality - add a button for that near the cam button"): the Mode menu (Q)
+	-- as a button, so it's one click away - and still there when the Roblox camera uses Q to fly down
+	self.modeMenuBtn = self:btn(right, { Name = "RB_ModeMenuBtn", LayoutOrder = -9, Size = UDim2.fromOffset(52, 20), BackgroundColor3 = T.regular, Text = "Modes v", TextSize = 11 }, function(b)
+		self:openNamedMenu("mode", b)
+	end, "toggle")
+	corner(self.modeMenuBtn, 4)
+	self:tip(self.modeMenuBtn, "Mode Menu", "Object Mode, Edit Mode, Sculpt Mode, Vertex Paint - the same menu as Q (with the Roblox camera on, Q flies down, so use this).", "Q")
+	make("Frame", { LayoutOrder = -8, BackgroundTransparency = 1, Size = UDim2.fromOffset(4, 1) }, right)
 	self.xrayBtn = self:btn(right, { LayoutOrder = 1, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.toggleXray() end, "toggle")
 	corner(self.xrayBtn, 4) icon(self.xrayBtn, "xray")
 	self:tip(self.xrayBtn, "Toggle X-Ray", "Transparent scene display. Allow selecting through items", "Alt Z")
@@ -16032,7 +17195,7 @@ function UI:buildProperties()
 	make("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 3) }, tabs)
 	self.propTabs = {}
 	for i, t in ipairs({ { "object", "object", "Object", "Object properties" }, { "modifiers", "wrench", "Modifiers", "Modifier properties: non-destructive mirror, subdivision, array..." }, { "data", "meshdata", "Data", "Mesh data" }, { "material", "material", "Material", "Material properties" }, { "export", "export", "Output", "Bake / export" } }) do
-		local b = self:btn(tabs, { LayoutOrder = i, Size = UDim2.fromOffset(25, 25), BackgroundColor3 = T.tabInner }, function() self.propTab = t[1] self:buildPropContent() end, "tab")
+		local b = self:btn(tabs, { LayoutOrder = i, Size = UDim2.fromOffset(25, 25), BackgroundColor3 = T.tabInner }, function() self.propTab = t[1] if self.api.setColourView then self.api.setColourView(t[1] == "material") end self:buildPropContent() end, "tab")
 		corner(b, 4)
 		icon(b, t[2])
 		b:SetAttribute("rbTipRight", true)
@@ -16430,6 +17593,41 @@ function UI:buildPropContent()
 		end)
 	elseif tab == "material" then
 		if self.panelsOpen.texture == nil then self.panelsOpen.texture = true end
+		-- PALETTE (0.33.0): click a colour to paint whole faces / the part / the whole build; rows = shades
+		if self.panelsOpen.palette == nil then self.panelsOpen.palette = true end
+		self:panel(0, "palette", "Palette", function(b)
+			local pal = api.palette2
+			if not pal then return end
+			self.palScope = self.palScope or "sel"
+			local sc = self.palScope
+			self:toggleRow(b, 1, "Apply to", {
+				{ "Selected", sc == "sel", function() self.palScope = "sel" self:buildPropContent() end,
+					"Edit Mode: only the faces you picked. Object Mode: the selected parts." },
+				{ "Part", sc == "part", function() self.palScope = "part" self:buildPropContent() end, "Every face of the part" },
+				{ "Build", sc == "all", function() self.palScope = "all" self:buildPropContent() end, "Every ROBLEND part in the workshop (Object Mode)" } })
+			local cols, rows = #pal.hues, pal.rows
+			local g = make("Frame", { Name = "RB_Palette", LayoutOrder = 2, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, rows * 18) }, b)
+			make("UIGridLayout", { CellSize = UDim2.new(1 / cols, -2, 0, 16), CellPadding = UDim2.fromOffset(2, 2), FillDirectionMaxCells = cols, SortOrder = Enum.SortOrder.LayoutOrder }, g)
+			for row = 1, rows do
+				for col = 1, cols do
+					local c = pal.color(col, row)
+					local sw = make("TextButton", { Name = ("RB_Pal_%d_%d"):format(col, row), LayoutOrder = row * 100 + col, AutoButtonColor = true, BackgroundColor3 = c, BorderSizePixel = 0, Text = "" }, g)
+					corner(sw, 2)
+					if self.palPick and self.palPick[1] == col and self.palPick[2] == row then stroke(sw, T.white, 2) end
+					sw.Activated:Connect(function()
+						self.palPick = { col, row }
+						self:safe(function() api.paletteApply(c, self.palScope) end)
+						self:buildPropContent()
+					end)
+				end
+			end
+			self:toggleRow(b, 3, "Shade", {
+				{ "Lighter", false, function() api.paletteShade(1, self.palScope) end, "One shade lighter" },
+				{ "Darker", false, function() api.paletteShade(-1, self.palScope) end, "One shade darker - for rims, undersides and gaps" },
+				{ "Clear", false, function() api.paletteClear(self.palScope) end, "Back to plain (the part's colour)" } })
+			label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "Tab into Edit Mode, pick faces (Alt-click = a ring, L = a whole piece), then click a colour. Light rows on top, dark rows below for shading. The colours save with the mesh - no image needed." })
+		end)
 		self:panel(2, "texture", "Texture", function(b)
 			local r = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
 			label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Image", TextXAlignment = Enum.TextXAlignment.Right })
@@ -16644,6 +17842,7 @@ function UI:viewMenu()
 		{ "Toolbar", "T", function() self:toggleToolbar() end, check = self.toolbar },
 		{ "Sidebar", "N", function() self:toggleSidebar() end, check = self.sidebar },
 		{ "Transform Gizmo (arrows / rings on Move, Rotate, Scale)", "", function() if api.toggleGizmo then api.toggleGizmo() end end, check = api.gizmoOn and api.gizmoOn() == true },
+		{ "Roblox Camera (right-drag look, WASD fly)", "", function() api.setRobloxNav(not api.state().robloxNav) end, check = api.state().robloxNav == true },
 		"-",
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
 		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
@@ -17625,6 +18824,7 @@ function UI:refresh(force)
 	local meshMenus = s.editing and not sculpting
 	self.vertMenuBtn.Visible, self.edgeMenuBtn.Visible, self.faceMenuBtn.Visible = meshMenus, meshMenus, meshMenus
 	self:setOnStyle(self.xrayBtn, s.xray)
+	if self.robloxNavBtn then self:setOnStyle(self.robloxNavBtn, s.robloxNav == true) end
 	for k, b in pairs(self.shadeBtns) do self:setOnStyle(b, (s.shading or "solid") == k) end
 	self.opHeader.Visible = s.modal ~= nil
 	if s.modal then self.opText.Text = s.modalText or "" end
@@ -17722,9 +18922,11 @@ function UI:refresh(force)
 	elseif s.modal then
 		self.hints.Text = "<b>LMB</b> Confirm      <b>RMB</b> Cancel      <b>X Y Z</b> Axis      <b>Ctrl</b> Snap      <b>0-9</b> Value"
 	elseif s.editing then
-		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Mesh Context Menu      <b>Tab</b> Object Mode"
+		self.hints.Text = s.robloxNav and "<b>LMB</b> Select      <b>RMB drag</b> Look      <b>RMB + WASD</b> Fly      <b>MMB</b> Pan      <b>Tab</b> Object Mode"
+			or "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Mesh Context Menu      <b>Tab</b> Object Mode"
 	else
-		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Object Context Menu      <b>Shift A</b> Add"
+		self.hints.Text = s.robloxNav and "<b>LMB</b> Select      <b>RMB drag</b> Look      <b>RMB + WASD</b> Fly (Q E up/down)      <b>MMB</b> Pan      <b>F</b> Focus      <b>Shift A</b> Add"
+			or "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Object Context Menu      <b>Shift A</b> Add"
 	end
 	self.reportLbl.Text = (self.report ~= "" and (self.report .. "      ") or "") .. "ROBLEND " .. self.version
 end
@@ -17732,7 +18934,7 @@ end
 function UI:destroy() self.gui.Parent = nil end
 
 return UI
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0022"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0024"><Properties><string name="Name">UVEditor</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the UV Editor: a 2D window showing the UVs of the faces being edited over the texture,
 	where UV points are selected and moved (Blender's UV Editor, cut down).
 	Converted to Luau from Blender's UV editor behaviour:
@@ -18235,7 +19437,7 @@ function UVEditor.new(C)
 end
 
 return UVEditor
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0023"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0025"><Properties><string name="Name">UVTools</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - UV unwrapping: Unwrap (angle-preserving, cut at seams), Smart UV Project and Pack Islands.
 	Converted to Luau (and cut down) from Blender's UV tools:
 	  source/blender/editors/uvedit/uvedit_unwrap_ops.cc (unwrap / smart project operators)
@@ -18634,7 +19836,7 @@ function UV.facesWithUV(BMesh, bm)
 end
 
 return UV
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0024"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0026"><Properties><string name="Name">View</string><ProtectedString name="Source"><![CDATA[--[[
 	ROBLEND - the 3D view: a ViewportFrame with its own camera, Blender's grey background, grid,
 	axis lines and a headlight, plus the edit cage (lines + dots drawn as depth-tested parts).
 	SPDX-License-Identifier: GPL-2.0-or-later
@@ -18817,6 +20019,30 @@ function View:zoom(steps)
 		nd = math.min(self.dist, 1)
 	end
 	self.dist = math.clamp(nd, 0.3, 20000)
+	self:update()
+end
+-- 0.31.0 ROBLOX CAMERA (Dylan: "roblend needs a roblox-like movement setting"): right-drag turns the view where it
+-- stands, like Studio (the eye stays put, the pivot swings round it); WASD / Q E fly it. Same yaw / pitch as orbit.
+function View:look(dx, dy) self:turn(-dx * 0.005, dy * 0.005) end
+-- turn in place by an angle (radians): yaw round the up axis, pitch up / down
+function View:turn(dyaw, dpitch)
+	if self.ortho then self.ortho, self.autoOrtho = false, false self:update() end
+	local eye = self.CFrame.Position
+	self.yaw += dyaw
+	self.pitch = math.clamp(self.pitch + dpitch, math.rad(-89), math.rad(89))
+	local cp = math.cos(self.pitch)
+	self.focus = eye - V3(cp * math.sin(self.yaw), math.sin(self.pitch), cp * math.cos(self.yaw)) * self.dist
+	self:update()
+end
+-- move = (right, up, forward), each -1..1; up / down are straight up and down (Studio's Q / E)
+function View:fly(move, dt, slow)
+	if move.Magnitude < 1e-6 or dt <= 0 then return end
+	if self.ortho then self.ortho, self.autoOrtho = false, false end
+	local cf = self.CFrame
+	local d = cf.RightVector * move.X + V3(0, 1, 0) * move.Y + cf.LookVector * move.Z
+	if d.Magnitude < 1e-6 then return end
+	local speed = math.clamp(self.dist * 1.2, 10, 800) * (slow and 0.25 or 1)
+	self.focus += d.Unit * (speed * math.min(dt, 0.1))
 	self:update()
 end
 local VIEWS = {
@@ -19009,7 +20235,7 @@ end
 function View:destroy() self.frame.Parent = nil end
 
 return View
-]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0025"><Properties><string name="Name">LICENSE</string><ProtectedString name="Source"><![CDATA[--[==[
+]]></ProtectedString></Properties></Item><Item class="ModuleScript" referent="RBX0027"><Properties><string name="Name">LICENSE</string><ProtectedString name="Source"><![CDATA[--[==[
 ROBLEND - Licensing & Attribution
 
 ROBLEND is an independent, free and open-source Roblox Studio modelling plugin

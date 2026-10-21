@@ -143,6 +143,8 @@ local function icon(parent, kind, col, size)
 		ring(box, 8, 8, 6, col, false) ring(box, 8, 8, 2.2, col, true)
 	elseif kind == "eyeoff" then
 		seg(box, 2, 8, 14, 8, col)
+	elseif kind == "camera" then
+		rect(box, 1, 5, 11, 8, col, false) ring(box, 6.5, 9, 2.2, col, false) seg(box, 12, 7, 15, 5, col) seg(box, 15, 5, 15, 13, col) seg(box, 15, 13, 12, 11, col) rect(box, 3, 3, 3, 2, col, true)
 	elseif kind == "zoom" then
 		ring(box, 7, 7, 4.5, col, false) seg(box, 10, 10, 15, 15, col, 2)
 	elseif kind == "hand" then
@@ -540,6 +542,19 @@ function UI:buildView()
 	end
 	make("Frame", { LayoutOrder = -30, BackgroundTransparency = 1, Size = UDim2.fromOffset(10, 1) }, right)
 	make("Frame", { LayoutOrder = -5, BackgroundTransparency = 1, Size = UDim2.fromOffset(8, 1) }, right)
+	-- 0.31.0 Roblox camera (Dylan): Studio's controls in ROBLEND's view - lit blue while on
+	self.robloxNavBtn = self:btn(right, { Name = "RB_RobloxCam", LayoutOrder = -7, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.setRobloxNav(not api.state().robloxNav) end, "toggle")
+	corner(self.robloxNavBtn, 4) icon(self.robloxNavBtn, "camera")
+	self:tip(self.robloxNavBtn, "Roblox Camera", "Move the view like Roblox Studio: hold right mouse + drag to look, WASD to fly (Q / E down / up, Shift = slower), wheel = zoom, middle mouse = pan, F = focus. Right mouse is only for the camera (no menu). Click again for Blender's controls.")
+	make("Frame", { LayoutOrder = -6, BackgroundTransparency = 1, Size = UDim2.fromOffset(6, 1) }, right)
+	-- 0.32.0 (Dylan: "Q has a lot of functionality - add a button for that near the cam button"): the Mode menu (Q)
+	-- as a button, so it's one click away - and still there when the Roblox camera uses Q to fly down
+	self.modeMenuBtn = self:btn(right, { Name = "RB_ModeMenuBtn", LayoutOrder = -9, Size = UDim2.fromOffset(52, 20), BackgroundColor3 = T.regular, Text = "Modes v", TextSize = 11 }, function(b)
+		self:openNamedMenu("mode", b)
+	end, "toggle")
+	corner(self.modeMenuBtn, 4)
+	self:tip(self.modeMenuBtn, "Mode Menu", "Object Mode, Edit Mode, Sculpt Mode, Vertex Paint - the same menu as Q (with the Roblox camera on, Q flies down, so use this).", "Q")
+	make("Frame", { LayoutOrder = -8, BackgroundTransparency = 1, Size = UDim2.fromOffset(4, 1) }, right)
 	self.xrayBtn = self:btn(right, { LayoutOrder = 1, Size = UDim2.fromOffset(26, 20), BackgroundColor3 = T.regular }, function() api.toggleXray() end, "toggle")
 	corner(self.xrayBtn, 4) icon(self.xrayBtn, "xray")
 	self:tip(self.xrayBtn, "Toggle X-Ray", "Transparent scene display. Allow selecting through items", "Alt Z")
@@ -826,7 +841,7 @@ function UI:buildProperties()
 	make("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingLeft = UDim.new(0, 3) }, tabs)
 	self.propTabs = {}
 	for i, t in ipairs({ { "object", "object", "Object", "Object properties" }, { "modifiers", "wrench", "Modifiers", "Modifier properties: non-destructive mirror, subdivision, array..." }, { "data", "meshdata", "Data", "Mesh data" }, { "material", "material", "Material", "Material properties" }, { "export", "export", "Output", "Bake / export" } }) do
-		local b = self:btn(tabs, { LayoutOrder = i, Size = UDim2.fromOffset(25, 25), BackgroundColor3 = T.tabInner }, function() self.propTab = t[1] self:buildPropContent() end, "tab")
+		local b = self:btn(tabs, { LayoutOrder = i, Size = UDim2.fromOffset(25, 25), BackgroundColor3 = T.tabInner }, function() self.propTab = t[1] if self.api.setColourView then self.api.setColourView(t[1] == "material") end self:buildPropContent() end, "tab")
 		corner(b, 4)
 		icon(b, t[2])
 		b:SetAttribute("rbTipRight", true)
@@ -1224,6 +1239,41 @@ function UI:buildPropContent()
 		end)
 	elseif tab == "material" then
 		if self.panelsOpen.texture == nil then self.panelsOpen.texture = true end
+		-- PALETTE (0.33.0): click a colour to paint whole faces / the part / the whole build; rows = shades
+		if self.panelsOpen.palette == nil then self.panelsOpen.palette = true end
+		self:panel(0, "palette", "Palette", function(b)
+			local pal = api.palette2
+			if not pal then return end
+			self.palScope = self.palScope or "sel"
+			local sc = self.palScope
+			self:toggleRow(b, 1, "Apply to", {
+				{ "Selected", sc == "sel", function() self.palScope = "sel" self:buildPropContent() end,
+					"Edit Mode: only the faces you picked. Object Mode: the selected parts." },
+				{ "Part", sc == "part", function() self.palScope = "part" self:buildPropContent() end, "Every face of the part" },
+				{ "Build", sc == "all", function() self.palScope = "all" self:buildPropContent() end, "Every ROBLEND part in the workshop (Object Mode)" } })
+			local cols, rows = #pal.hues, pal.rows
+			local g = make("Frame", { Name = "RB_Palette", LayoutOrder = 2, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, rows * 18) }, b)
+			make("UIGridLayout", { CellSize = UDim2.new(1 / cols, -2, 0, 16), CellPadding = UDim2.fromOffset(2, 2), FillDirectionMaxCells = cols, SortOrder = Enum.SortOrder.LayoutOrder }, g)
+			for row = 1, rows do
+				for col = 1, cols do
+					local c = pal.color(col, row)
+					local sw = make("TextButton", { Name = ("RB_Pal_%d_%d"):format(col, row), LayoutOrder = row * 100 + col, AutoButtonColor = true, BackgroundColor3 = c, BorderSizePixel = 0, Text = "" }, g)
+					corner(sw, 2)
+					if self.palPick and self.palPick[1] == col and self.palPick[2] == row then stroke(sw, T.white, 2) end
+					sw.Activated:Connect(function()
+						self.palPick = { col, row }
+						self:safe(function() api.paletteApply(c, self.palScope) end)
+						self:buildPropContent()
+					end)
+				end
+			end
+			self:toggleRow(b, 3, "Shade", {
+				{ "Lighter", false, function() api.paletteShade(1, self.palScope) end, "One shade lighter" },
+				{ "Darker", false, function() api.paletteShade(-1, self.palScope) end, "One shade darker - for rims, undersides and gaps" },
+				{ "Clear", false, function() api.paletteClear(self.palScope) end, "Back to plain (the part's colour)" } })
+			label(b, { LayoutOrder = 4, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextWrapped = true, TextSize = 11, TextColor3 = T.textDim,
+				Text = "Tab into Edit Mode, pick faces (Alt-click = a ring, L = a whole piece), then click a colour. Light rows on top, dark rows below for shading. The colours save with the mesh - no image needed." })
+		end)
 		self:panel(2, "texture", "Texture", function(b)
 			local r = make("Frame", { LayoutOrder = 1, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22) }, b)
 			label(r, { Size = UDim2.new(0.38, -6, 1, 0), Text = "Image", TextXAlignment = Enum.TextXAlignment.Right })
@@ -1438,6 +1488,7 @@ function UI:viewMenu()
 		{ "Toolbar", "T", function() self:toggleToolbar() end, check = self.toolbar },
 		{ "Sidebar", "N", function() self:toggleSidebar() end, check = self.sidebar },
 		{ "Transform Gizmo (arrows / rings on Move, Rotate, Scale)", "", function() if api.toggleGizmo then api.toggleGizmo() end end, check = api.gizmoOn and api.gizmoOn() == true },
+		{ "Roblox Camera (right-drag look, WASD fly)", "", function() api.setRobloxNav(not api.state().robloxNav) end, check = api.state().robloxNav == true },
 		"-",
 		{ "Frame Selected", "Numpad .", function() api.frameSelected() end },
 		{ "Clear Annotations", "", function() api.tool("ClearAnnotations") end },
@@ -2419,6 +2470,7 @@ function UI:refresh(force)
 	local meshMenus = s.editing and not sculpting
 	self.vertMenuBtn.Visible, self.edgeMenuBtn.Visible, self.faceMenuBtn.Visible = meshMenus, meshMenus, meshMenus
 	self:setOnStyle(self.xrayBtn, s.xray)
+	if self.robloxNavBtn then self:setOnStyle(self.robloxNavBtn, s.robloxNav == true) end
 	for k, b in pairs(self.shadeBtns) do self:setOnStyle(b, (s.shading or "solid") == k) end
 	self.opHeader.Visible = s.modal ~= nil
 	if s.modal then self.opText.Text = s.modalText or "" end
@@ -2516,9 +2568,11 @@ function UI:refresh(force)
 	elseif s.modal then
 		self.hints.Text = "<b>LMB</b> Confirm      <b>RMB</b> Cancel      <b>X Y Z</b> Axis      <b>Ctrl</b> Snap      <b>0-9</b> Value"
 	elseif s.editing then
-		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Mesh Context Menu      <b>Tab</b> Object Mode"
+		self.hints.Text = s.robloxNav and "<b>LMB</b> Select      <b>RMB drag</b> Look      <b>RMB + WASD</b> Fly      <b>MMB</b> Pan      <b>Tab</b> Object Mode"
+			or "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Mesh Context Menu      <b>Tab</b> Object Mode"
 	else
-		self.hints.Text = "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Object Context Menu      <b>Shift A</b> Add"
+		self.hints.Text = s.robloxNav and "<b>LMB</b> Select      <b>RMB drag</b> Look      <b>RMB + WASD</b> Fly (Q E up/down)      <b>MMB</b> Pan      <b>F</b> Focus      <b>Shift A</b> Add"
+			or "<b>LMB</b> Select      <b>MMB</b> Rotate View      <b>RMB</b> Object Context Menu      <b>Shift A</b> Add"
 	end
 	self.reportLbl.Text = (self.report ~= "" and (self.report .. "      ") or "") .. "ROBLEND " .. self.version
 end

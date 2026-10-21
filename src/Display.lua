@@ -244,6 +244,8 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 	-- vertex colours (Vertex Paint): one colour id per distinct colour
 	local painted = false
 	for v in pairs(bm.verts) do if v.col then painted = true break end end
+	-- face colours (Palette): a face with f.col is that colour all over (sharp edges between colours)
+	if not painted then for f in pairs(bm.faces) do if f.col then painted = true break end end end
 	local colIds = {}
 	local function colId(c)
 		if not c then return white end
@@ -320,7 +322,12 @@ function Display.build(bm, selColor, skipHidden, uv, partOpts)
 			if uvids and uvids[t[3]] then pcall(function() em:SetFaceUVs(fid, { uvids[t[1]], uvids[t[2]], uvids[t[3]] }) end) end
 			if white then
 				pcall(function()
-					if sel and f.sel then
+					-- (0.33.1) a coloured face shows its true colour even when selected - the yellow outline shows
+					-- it's picked; while colouring (Material tab) no selected face gets the orange fill at all
+					if f.col then
+						local k = colId(f.col)
+						em:SetFaceColors(fid, { k, k, k })
+					elseif sel and f.sel and not Display.colourView then
 						em:SetFaceColors(fid, { sel, sel, sel })
 					elseif painted then
 						em:SetFaceColors(fid, { colId(vs[t[1]].col), colId(vs[t[2]].col), colId(vs[t[3]].col) })
@@ -376,7 +383,11 @@ function Display.updateColors(em, bm)
 	end
 	return (pcall(function()
 		for _, t in ipairs(info.t) do
-			if not (info.sel and t[5].sel) then em:SetFaceColors(t[1], { colId(t[2].col), colId(t[3].col), colId(t[4].col) }) end
+			if not (info.sel and t[5].sel) then
+				local fc = t[5].col
+				if fc then local k = colId(fc) em:SetFaceColors(t[1], { k, k, k })
+				else em:SetFaceColors(t[1], { colId(t[2].col), colId(t[3].col), colId(t[4].col) }) end
+			end
 		end
 	end))
 end

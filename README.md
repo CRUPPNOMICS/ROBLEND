@@ -40,6 +40,10 @@ Click the **ROBLEND** button in the Plugins tab. A Blender-style window opens ov
 | 3D view | ROBLEND's own 3D view: Blender's grey background, the grid and axis lines. |
 | 3D view header | Mode dropdown; View, Select, Add and Object / Mesh / Vertex / Edge / Face menus; X-Ray; Wireframe and Solid. |
 | Tool strip | Select, Move, Rotate, Scale, Add Cube, Extrude, Inset, Loop Cut. Hover a tool for its tooltip. |
+| Roblox camera | The camera button in the 3D view's header (lit blue when on): move the view like Roblox Studio. Hold right mouse + drag = look around, WASD = fly (any mode - they aren't Blender keys while it's on), Q / E down / up, Shift = slower, wheel = zoom, middle mouse = pan, F = focus. Right mouse is only for the camera (no menu). Off = Blender's controls. Also in View > Roblox Camera. |
+| Modes button | Next to the camera button: the Mode menu (Object, Edit, Sculpt, Vertex Paint), same as Q. |
+| Palette | Properties > Material > Palette: pick faces, click a colour (13 colours x 5 shades). Apply to Selected / Part / Build; Lighter / Darker for shading. Saves with the mesh, no image needed. |
+| Trackpad | Two-finger swipe = turn the view, Shift + swipe = pan, pinch = zoom (on trackpads that send gestures). Orbit Mode (left-drag) is there too. |
 | Navigation gizmo | Click an axis ball to snap the view to it, or drag the gizmo to orbit. The buttons under it zoom, pan and frame everything. |
 | Transform gizmo | With Move, Rotate, Scale or Transform picked in the tool strip, coloured arrows, rings and boxes sit on the selection (Object and Edit Mode). Drag an arrow = move along that axis, a ring = turn round it, a box = stretch along it, a little square = flat on that plane, the white ring = free / round the view. Let go = done; type a number, Ctrl to snap, Esc to cancel. View > Transform Gizmo turns it off. |
 | Outliner | Every ROBLEND mesh in the place. Click a row to select it; the eye hides or shows it. |
@@ -336,7 +340,7 @@ The Help menu has three ways to test ROBLEND in your own Studio, each printing i
 | `src/Icon.lua` | The ROBLEND logo (64 x 64 pixels, made from `assets/roblend_icon.png` by `tools/icon.py`) for the window and the toolbar button. |
 | `src/Sculpt.lua` | Sculpt Mode: the brushes and the live stroke / brush ring. |
 | `src/Font.lua` | The block font for Add > Text (ROBLEND's own 5 x 7 letters). |
-| `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. |
+| `src/Paint.lua` | Vertex Paint: brushes, fill, sample, the live stroke. Palette colours + shades (face colours). |
 | `src/ObjectTools.lua` | Object Mode tools: Join, Set Origin, Apply Rotation, Shade, Hide, Clear, Local View, Convert. |
 | `src/Convert.lua` | Turns Parts, Wedges and MeshParts into ROBLEND meshes. |
 | `src/UVTools.lua` | Unwrap (LSCM), Smart UV Project and Pack Islands. |
